@@ -482,6 +482,53 @@ class MainActivity : AppCompatActivity() {
 
     // ── 화면 전환 효과 ─────────────────────────────────────────────────────
     /**
+     * 화면보호기 → 대시보드 (리모컨): 모핑 — 화면보호기가 살짝 작아지며 모서리가 둥글어지고 흐려지며 사라지고,
+     * 뒤의 대시보드는 약간 크게 시작해 제자리로 줄어들며 나타난다. 끝나면 action(화면보호기 닫기).
+     */
+    private var morphing = false
+    private fun morphTransition(action: () -> Unit) {
+        val ss = idleOverlay
+        val main = header.parent as View                 // 상단바 + 사이드바 + 대시보드
+        if (morphing || ss.width <= 0) { if (!morphing) action(); return }
+        morphing = true
+        var radius = 0f
+        ss.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) = o.setRoundRect(0, 0, v.width, v.height, radius)
+        }
+        ss.clipToOutline = true
+        main.scaleX = 1.06f; main.scaleY = 1.06f; main.alpha = 0f
+        val anim = android.animation.ValueAnimator.ofFloat(0f, 1f)
+        anim.duration = 650
+        anim.interpolator = android.view.animation.PathInterpolator(0.3f, 0f, 0.2f, 1f)
+        anim.addUpdateListener {
+            val p = it.animatedValue as Float
+            val sc = 1f - 0.12f * p
+            ss.scaleX = sc; ss.scaleY = sc
+            ss.alpha = 1f - p
+            radius = 48f * resources.displayMetrics.density * p
+            ss.invalidateOutline()
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                val b = 0.1f + 40f * p
+                ss.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(b, b, android.graphics.Shader.TileMode.DECAL))
+            }
+            val m = 1.06f - 0.06f * p
+            main.scaleX = m; main.scaleY = m
+            main.alpha = minOf(1f, p * 1.4f)
+        }
+        anim.addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+                action()
+                ss.scaleX = 1f; ss.scaleY = 1f; ss.alpha = 1f
+                ss.clipToOutline = false
+                if (android.os.Build.VERSION.SDK_INT >= 31) ss.setRenderEffect(null)
+                main.scaleX = 1f; main.scaleY = 1f; main.alpha = 1f
+                morphing = false
+            }
+        })
+        anim.start()
+    }
+
+    /**
      * 화면보호기 → 대시보드: 누른 자리에서 동그라미가 퍼지며 화면을 덮고 → action(화면보호기 닫기) → 동그라미가 사라지며 대시보드가 보인다.
      * 좌표는 창 기준 — 앱 화면을 비율로 줄여 쓰는 경우(keep16by9)도 맞게 환산한다. 음수면 화면 가운데에서.
      */
@@ -572,7 +619,7 @@ class MainActivity : AppCompatActivity() {
         val volume = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
             event.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE
         if (!volume && idleOverlay.visibility == View.VISIBLE) {
-            if (event.action == KeyEvent.ACTION_UP) circleTransition(-1f, -1f) { hideIdle() }   // 리모컨: 화면 가운데에서
+            if (event.action == KeyEvent.ACTION_UP) morphTransition { hideIdle() }   // 리모컨: 모핑으로 대시보드에
             return true
         }
         if (event.action == KeyEvent.ACTION_DOWN) resetIdle()
