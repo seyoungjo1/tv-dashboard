@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 import shutil
 import threading
 import time
@@ -460,14 +461,31 @@ def make_handler(api: Api):
 
         def _send(self, code: int, body: Any, ctype: str = "application/json; charset=utf-8", extra: dict | None = None) -> None:
             data = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode("utf-8")
+            rng = self.headers.get("Range") if code == 200 and isinstance(body, bytes) else None
+            m = re.match(r"bytes=(\d*)-(\d*)$", rng or "")
+            if m and data and (m.group(1) or m.group(2)):          # 동영상 미리보기: 부분 요청(구간 이동)
+                total = len(data)
+                a = int(m.group(1)) if m.group(1) else max(0, total - int(m.group(2)))
+                b = int(m.group(2)) if m.group(1) and m.group(2) else total - 1
+                b = min(b, total - 1)
+                if a > b:
+                    self.send_response(416)
+                    self.send_header("Content-Range", "bytes */%d" % total)
+                    self.end_headers()
+                    return
+                data = data[a:b + 1]
+                code = 206
+                extra = dict(extra or {}, **{"Content-Range": "bytes %d-%d/%d" % (a, b, total)})
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Accept-Ranges", "bytes")
             self.send_header("Cache-Control", "no-store")
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
-            self.wfile.write(data)
+            if self.command != "HEAD":
+                self.wfile.write(data)
 
         def _handle(self, method: str) -> None:
             u = urlsplit(self.path)
@@ -544,6 +562,9 @@ def make_handler(api: Api):
                 echo(traceback.format_exc())
                 code, out = 500, {"error": "%s: %s" % (e.__class__.__name__, e)}
             self._send(code, out)
+
+        def do_HEAD(self) -> None:          # 미리보기: PC 에 받아 둔 파일인지 확인
+            self._handle("GET")
 
         def do_GET(self) -> None:
             self._handle("GET")

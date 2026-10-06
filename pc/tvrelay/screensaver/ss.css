@@ -67,6 +67,9 @@ main { position: absolute; left: 38px; right: 38px; top: 122px; bottom: 82px; di
 #yt { position: absolute; inset: 0; overflow: hidden; }
 #yt .ytbg { position: absolute; inset: -8%; width: 116%; height: 116%; object-fit: cover; filter: blur(40px) brightness(.75); }
 #yt .ythold { position: absolute; }
+#pvv { position: absolute; inset: 0; overflow: hidden; }
+#pvv .pvbg { position: absolute; inset: -8%; width: 116%; height: 116%; object-fit: cover; filter: blur(40px) brightness(.75); }
+#pvv .pvfg { position: absolute; inset: 0; width: 100%; height: 100%; }
 #yt .ythold iframe { width: 100%; height: 100%; border: 0; display: block; pointer-events: none; }
 /* 안내 멘트: 화면 맨 아래 */
 #hint { position: absolute; left: 0; right: 0; bottom: 22px; line-height: 1.2; text-align: center; font-size: 30px; color: #3b4855; font-weight: 700; }

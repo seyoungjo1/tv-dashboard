@@ -78,6 +78,7 @@
   #ssPanel .opt input { margin-right:6px; } #ssPanel .opt label:has(input:checked) { border-color:var(--accent); background:#e8f7fd; }
   #ssVids .v { display:flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; font-size:13px; background:#fff; }
   #ssVids .v .n { width:56px; color:#0b7fae; font-weight:800; } #ssVids .v .f { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #ssVids .v.playing { outline:2px solid var(--accent); }
   #ssVids .v.new { background:#f0fbf4; } #ssVids .v.yt { background:#fff5f5; } #ssVids .v button { padding:3px 8px; }
   #ssVids .v { flex-wrap:wrap; } #ssVids .v .o { display:flex; gap:4px; align-items:center; }
   #ssVids .v select { font-size:12px; padding:3px 4px; border:1px solid var(--line); border-radius:6px; background:#fff; }
@@ -195,7 +196,7 @@
     </div><iframe class="ssscreen hidden" id="ssFrame" title="화면보호기 미리보기"></iframe></div></div>
     <div id="ssPanel" class="hidden">
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px"><b style="flex:1">화면보호기 설정</b><span class="hint" id="ssSt"></span><button type="button" id="ssSave">TV 에 저장</button></div>
-      <div class="hint">미리보기 — 실적·공지는 TV 의 main 폴더 내용, 고친 공지·동영상 목록은 저장 전에도 바로 보입니다 (동영상은 TV 에서만 재생)</div>
+      <div class="hint">미리보기 — 실적·공지는 TV 의 main 폴더 내용, 고친 공지·동영상·표시 방식은 저장 전에도 바로 보입니다. 동영상 ▶ = 미리보기에서 재생 (TV 에만 있는 영상은 받아 와서 재생)</div>
       <div class="ssCols">
         <div>
           <h4>공지사항 <span class="hint" id="ssCount"></span></h4>
@@ -425,6 +426,7 @@
           : `<select data-k="fill" data-i="${i}"><option value="blur"${v.fill !== 'color' ? ' selected' : ''}>남는 곳 블러</option><option value="color"${v.fill === 'color' ? ' selected' : ''}>남는 곳 단색</option></select>` +
             (v.fill === 'color' ? `<input type="color" data-k="color" data-i="${i}" value="${esc(v.color || '#000000')}" title="채울 색">` : '')}
       </span>
+      <button class="secondary" data-vp="${i}" title="미리보기에서 재생${!v.yt && !v.file && !ssHave.has(v.name) ? ' (TV 에서 받아 옴)' : ''}">▶</button>
       <button class="secondary" data-vu="${i}">▲</button><button class="secondary" data-vd="${i}">▼</button><button class="danger" data-vx="${i}">✕</button></div>`).join('')
       || '<div class="hint">동영상이 없습니다.</div>';
     ssPush();
@@ -432,13 +434,52 @@
   $('#ssVids').addEventListener('change', (e) => {
     const k = e.target.dataset.k, i = e.target.dataset.i; if (!k || i === undefined) return;
     ssVids[+i][k] = e.target.value; ssRenderVids();
+    if (+i === ssPlayIdx) ssPlay(+i);                       // 보고 있는 영상이면 바뀐 방식으로 다시 재생
   });
+
+  // ── 미리보기 동영상 재생: 새 파일·유튜브는 바로, TV 의 동영상은 PC 에 받아 둔 것만 (▶ 로 받아 오기) ──
+  const ssUrls = new Map();                                  // 새 파일 → 미리보기 주소
+  let ssSeq = 0, ssPlayIdx = -1, ssHave = new Set();         // ssHave: PC 에 받아 둔 TV 동영상 이름
+  function ssSrc(v) {
+    if (v.yt) { const m = v.yt.match(YT_RE); return m ? { kind: 'yt', id: m[1], vertical: /\/shorts\//.test(v.yt) } : null; }
+    if (v.file) { if (!ssUrls.has(v.file)) ssUrls.set(v.file, URL.createObjectURL(v.file)); return { kind: 'file', url: ssUrls.get(v.file) }; }
+    return ssHave.has(v.name) ? { kind: 'file', url: prevUrl(ssDir + '/' + v.name) } : null;
+  }
+  function ssPlay(from) {
+    const n = ssVids.length, win = $('#ssFrame').contentWindow;
+    if (!win) return;
+    for (let k = 0; k < n; k++) {
+      const i = ((from % n) + n + k) % n, v = ssVids[i], src = ssSrc(v);
+      if (!src) continue;
+      ssPlayIdx = i;
+      win.postMessage({ ss: { play: Object.assign(src, { seq: ++ssSeq, crop: v.fit === 'crop', align: v.align || 'center',
+        fill: v.fill === 'color' ? 'color' : 'blur', color: v.color || '#000000', loop: false }) } }, '*');
+      document.querySelectorAll('#ssVids .v').forEach((r, j) => r.classList.toggle('playing', j === i));
+      return;
+    }
+    ssPlayIdx = -1; win.postMessage({ ss: { stop: true } }, '*');
+  }
+  window.addEventListener('message', (e) => {
+    if (!e.data || e.data.ssEnded === undefined || e.data.ssEnded !== ssSeq) return;
+    setTimeout(() => ssPlay(ssPlayIdx + 1), e.data.ok ? 0 : 1000);   // 다음 영상 (실패면 잠깐 쉬고)
+  });
+  async function ssPreviewOne(i) {
+    const v = ssVids[i]; if (!v) return;
+    if (!ssSrc(v) && v.name) {                               // TV 에만 있는 동영상 → 받아 오기
+      const say = (t) => $('#ssSt').textContent = t;
+      say(`TV 에서 ${v.name} 를 받는 중… (${size(entry(ssDir + '/' + v.name)?.s || 0)})`);
+      if (!await ensure([ssDir + '/' + v.name], () => ssActive, say)) return;
+      ssHave.add(v.name); say(''); ssRenderVids();
+    }
+    ssPlay(i);
+  }
   $('#ssVids').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     const u = b.dataset.vu, d = b.dataset.vd, x = b.dataset.vx;
     if (u !== undefined && +u > 0) [ssVids[+u - 1], ssVids[+u]] = [ssVids[+u], ssVids[+u - 1]];
     if (d !== undefined && +d < ssVids.length - 1) [ssVids[+d + 1], ssVids[+d]] = [ssVids[+d], ssVids[+d + 1]];
     if (x !== undefined) ssVids.splice(+x, 1);
+    if (b.dataset.vp !== undefined) return ssPreviewOne(+b.dataset.vp);
     ssRenderVids();
   });
   $('#ssAddVid').onclick = () => { $('#ssVidInput').value = ''; $('#ssVidInput').click(); };
@@ -462,7 +503,7 @@
     $('#tvTitleBar').textContent = on ? '화면보호기 미리보기' : 'TV 화면 미리보기';
     if (on) openScreensaver(dir); else $('#ssFrame').src = 'about:blank';
   }
-  $('#ssFrame').addEventListener('load', () => setTimeout(ssPush, 300));
+  $('#ssFrame').addEventListener('load', () => setTimeout(() => { ssPush(); if (ssActive) ssPlay(0); }, 400));
   async function openScreensaver(dir) {
     ssDir = dir; ssConf = {};
     const tvVids = () => kids(dir).filter(k => !k.d && VID_EXT.includes(ext(k.p))).map(k => base(k.p)).sort(natCmp);
@@ -508,6 +549,8 @@
       else if (files.includes(src) && !used.has(src)) { used.add(src); list.push(newItem(Object.assign({ name: src }, opt))); }
     }
     files.filter(n => !used.has(n)).forEach(n => list.push(newItem({ name: n })));
+    ssHave = new Set();
+    await Promise.all(files.map(async (n) => { try { const r = await fetch(prevUrl(dir + '/' + n), { method: 'HEAD' }); if (r.ok) ssHave.add(n); } catch (_) {} }));
     ssVids = list; ssRenderVids();
     $('#ssFrame').src = `/ss/index.html?preview=1&folder=${encodeURIComponent(dir)}&title=${encodeURIComponent(tvTitleText())}` +
       `&message=${encodeURIComponent(((m) => !m || m === '오산공장 dashboard 터치시 접속됩니다' ? '' : m)((state?.settings?.idle_message || '').trim()))}&t=${Date.now()}`;

@@ -281,10 +281,40 @@
       if (force || key !== lastKey) { lastKey = key; render(compute({ prod: a[0], sd: a[1], fi: a[2], plan: a[3] })); }
     });
   }
-  // PC 미리보기: 저장하기 전 내용을 바로 반영
+  // ── PC 미리보기: 동영상 파일을 TV 와 같은 방식(크롭/확장 · 블러/단색)으로 재생 ──
+  function pvStop() { var w = $('pvv'); if (w) { w.querySelectorAll('video').forEach(function (v) { try { v.pause(); } catch (e) {} }); w.remove(); } }
+  function pvFile(o) {
+    var box = $('video');
+    var wrap = document.createElement('div');
+    wrap.id = 'pvv';
+    wrap.style.background = !o.crop && o.fill === 'color' ? o.color : '#0d1620';
+    if (!o.crop && o.fill !== 'color') {
+      var bg = document.createElement('video');
+      bg.className = 'pvbg'; bg.src = o.url; bg.muted = true; bg.loop = true; bg.autoplay = true; bg.playsInline = true;
+      wrap.appendChild(bg);
+    }
+    var fg = document.createElement('video');
+    fg.className = 'pvfg'; fg.src = o.url; fg.muted = true; fg.autoplay = true; fg.playsInline = true;
+    fg.style.objectFit = o.crop ? 'cover' : 'contain';
+    var pos = o.align === 'top' ? '0%' : o.align === 'bottom' ? '100%' : '50%';
+    fg.style.objectPosition = o.crop ? pos + ' ' + pos : '50% 50%';
+    fg.onended = function () { parent.postMessage({ ssEnded: o.seq, ok: true }, '*'); };
+    fg.onerror = function () { parent.postMessage({ ssEnded: o.seq, ok: false }, '*'); };
+    wrap.appendChild(fg);
+    box.appendChild(wrap);
+    box.classList.add('playing');
+  }
+  // PC 미리보기: 저장하기 전 내용을 바로 반영 · {play} 영상 재생 · {stop} 멈춤
   addEventListener('message', function (e) {
     if (!e.data || !e.data.ss) return;
-    override = e.data.ss;
+    var d = e.data.ss;
+    if (d.play || d.stop) {
+      pvStop(); window.ssYoutubeStop();
+      if (d.stop) { $('video').classList.remove('playing'); return; }
+      if (d.play.kind === 'yt') window.ssYoutube(d.play); else pvFile(d.play);
+      return;
+    }
+    override = d;
     if (lastA) paint(lastA);
   });
 
@@ -303,10 +333,16 @@
     }
     ytWait.push(cb);
   }
+  function noCaptions(p) {
+    try { p.setOption('captions', 'track', {}); } catch (e) {}
+    try { p.unloadModule('captions'); } catch (e) {}
+    try { p.unloadModule('cc'); } catch (e) {}
+  }
   function ytDone(ok) {
     var o = ytCur; if (!o) return;
     ytCur = null; clearTimeout(ytTimer);
     if (TV) { try { TV.ytDone(o.seq, ok); } catch (e) {} }
+    else if (PREVIEW) parent.postMessage({ ssEnded: o.seq, ok: ok }, '*');     // PC 미리보기: 다음 영상
   }
   window.ssYoutubeStop = function () {
     clearTimeout(ytTimer); ytCur = null;
@@ -345,13 +381,16 @@
     ytTimer = setTimeout(function () { ytDone(false); }, 30000);   // 30초 안에 재생이 시작되지 않으면 건너뜀
     loadYtApi(function () {
       if (ytCur !== o) return;
-      var pv = { autoplay: 1, mute: 1, controls: 0, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3, fs: 0, disablekb: 1, origin: location.origin };
+      // cc_load_policy 0 + 자막 모듈 내리기: 소리 없이 재생하면 유튜브가 자막을 자동으로 켜는 것을 끈다
+      var pv = { autoplay: 1, mute: 1, controls: 0, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3, fs: 0, disablekb: 1,
+                 cc_load_policy: 0, cc_lang_pref: 'none', hl: 'ko', origin: location.origin };
       if (o.loop) { pv.loop = 1; pv.playlist = o.id; }
       ytPlayer = new YT.Player('ytPlayer', {
         width: vw, height: vh, videoId: o.id, playerVars: pv,
         events: {
-          onReady: function (e) { try { e.target.mute(); e.target.playVideo(); } catch (er) {} },
-          onStateChange: function (e) { if (e.data === 1) clearTimeout(ytTimer); if (e.data === 0 && !o.loop) ytDone(true); },
+          onReady: function (e) { try { e.target.mute(); noCaptions(e.target); e.target.playVideo(); } catch (er) {} },
+          onApiChange: function (e) { noCaptions(e.target); },
+          onStateChange: function (e) { if (e.data === 1) { clearTimeout(ytTimer); noCaptions(e.target); } if (e.data === 0 && !o.loop) ytDone(true); },
           onError: function () { ytDone(false); }
         }
       });
