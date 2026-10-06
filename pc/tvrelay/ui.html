@@ -949,11 +949,12 @@
     if (o.mode === 'delete') { $('#xlSend').textContent = `${o.removed}개 지우고 TV 에 올리기`; $('#xlSend').className = 'danger'; }
   }
   async function xlSend() {
-    const o = xl && xl.out; if (!o) return;
+    const o = xl && xl.out; if (!o || xl.sending) return;
     if (o.mode === 'replace' && xl.form.kind !== 'new' && !confirm(`'${base(xl.p)}' 의 기존 내용 전체를 붙여 넣은 ${o.table.length}줄로 바꿉니다. 계속할까요?`)) return;
     if (o.mode === 'delete' && !confirm(`'${base(xl.p)}' 에서 ${o.removed}개를 지웁니다. 계속할까요?`)) return;
     const label = { replace: '덮어쓰기', add: '추가하기', delete: '삭제' }[o.mode];
-    await stageAndSend([[xl.p, new File([o.json], base(xl.p), { type: 'application/json' })]], `엑셀 붙여넣기(${label}): ${xl.p}`);
+    xl.sending = true; $('#xlSend').disabled = true; $('#xlSend').textContent = '보내는 중…';
+    try { await stageAndSend([[xl.p, new File([o.json], base(xl.p), { type: 'application/json' })]], `엑셀 붙여넣기(${label}): ${xl.p}`); } finally { xl.sending = false; }
     xl.form = XLPaste.form(o.json);           // 이어서 붙여 넣으면 방금 올린 내용 기준
     $('#xlText').value = ''; xlRender();
     $('#xlSum').textContent = '보냈습니다. 아래 작업 목록에서 TV 반영을 확인하세요.';
@@ -1071,17 +1072,28 @@
   $('#refreshBtn').onclick = () => { pb.dataset.for = '\u0000'; loadState(); };
 
   // ── 작업 보내기 · 결과 추적 ──
+  // 두 번 누름 막기: 같은 작업을 보내는 중이면 무시 (서버도 같은 내용·같은 작업을 다시 보내지 않는다)
+  const inflight = new Set();
   async function send(ops, desc, force) {
+    const key = JSON.stringify(ops);
+    if (inflight.has(key)) return null;
+    inflight.add(key);
     try {
       const r = await api('POST', '/api/send', { ops, force: !!force });
-      const sk = (r.skipped || []).length;
-      if (!r.id) {   // 모두 TV 와 같은 버전 → 보낼 것이 없음
-        jobs.unshift({ id: 'skip-' + Date.now(), desc, st: 'ok', note: `바뀐 파일이 없습니다 — ${sk}개 모두 TV 와 같은 버전이라 보내지 않았습니다` });
+      const sk = (r.skipped || []).length, qd = (r.queued || []).length;
+      if (r.duplicate) {
+        const j = jobs.find(x => x.id === r.id);
+        if (j) { j.note = '같은 작업을 방금 보냈습니다 — 한 번만 보냅니다 · ' + j.note; renderJobs(); }
+        return r.id;
+      }
+      if (!r.id) {   // 모두 TV 와 같은 버전(또는 이미 보내 둔 내용) → 보낼 것이 없음
+        jobs.unshift({ id: 'skip-' + Date.now(), desc, st: 'ok', note: qd ? `같은 내용을 이미 보냈습니다 — TV 가 받으면 반영됩니다 (다시 보내지 않음)` : `바뀐 파일이 없습니다 — ${sk}개 모두 TV 와 같은 버전이라 보내지 않았습니다` });
         renderJobs(); return null;
       }
-      jobs.unshift({ id: r.id, desc: desc + (sk ? ` (바뀌지 않은 ${sk}개 건너뜀)` : ''), st: 'wait', note: 'TV 가 가져가기를 기다리는 중…' });
+      jobs.unshift({ id: r.id, desc: desc + (sk ? ` (${qd ? `이미 보낸 ${qd}개 · ` : ''}바뀌지 않은 ${sk - qd}개 건너뜀)` : ''), st: 'wait', note: 'TV 가 가져가기를 기다리는 중…' });
       renderJobs(); poll(r.id); return r.id;
     } catch (e) { alert(e.message); }
+    finally { setTimeout(() => inflight.delete(key), 1500); }
   }
   async function poll(id) {
     const j = jobs.find(x => x.id === id);
@@ -1111,13 +1123,18 @@
   $('#jobsClose').onclick = () => $('#jobsBar').classList.add('hidden');
   async function loadLog() { try { $('#log').textContent = (await api('GET', '/api/log')).lines.join('\n'); } catch (_) {} }
 
+  const staging = new Set();
   async function stageAndSend(list, desc) {     // list: [[TV 경로, File]]
     if (!list.length) return;
+    const key = list.map(([p, f]) => p + ':' + f.size + ':' + f.lastModified).join('|');
+    if (staging.has(key)) return;               // 같은 파일을 올리는 중 (두 번 누름 · 두 번 끌어다 놓음)
+    staging.add(key);
     try {
       const ops = [];
       for (const [path, f] of list) { const s = await api('PUT', '/api/stage', f, true); ops.push({ op: 'put', path, stage: s.id }); }
       await send(ops, desc);
     } catch (e) { alert(e.message); }
+    finally { staging.delete(key); }
   }
 
   // ── TV 설정 ──
@@ -1137,8 +1154,11 @@
   // ── APK ──
   $('#apkBtn').onclick = async () => {
     const f = $('#apkInput').files[0]; if (!f) return msg($('#apkMsg'), 'APK 파일을 선택하세요.', 'err');
+    if ($('#apkBtn').disabled) return;
+    $('#apkBtn').disabled = true;                // 두 번 누름 막기
     try { const s = await api('PUT', '/api/stage', f, true); await send([{ op: 'apk', stage: s.id }], 'APK 보내기: ' + f.name); msg($('#apkMsg'), '보냈습니다. TV 가 받으면 TV 화면에 설치 확인 창이 뜹니다.', 'warn'); }
     catch (e) { msg($('#apkMsg'), e.message, 'err'); }
+    finally { setTimeout(() => $('#apkBtn').disabled = false, 3000); }
   };
 
   // ── 프로그램 업데이트 (s4bridge 와 같은 방식) ──

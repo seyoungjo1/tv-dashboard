@@ -157,6 +157,46 @@ class ToolTest(unittest.TestCase):
         self.assertIsNone(r["id"])
         self.assertEqual(r["skipped"], ["a/data.json"])
 
+    def test_send_does_not_repeat_queued(self):
+        """두 번 누름 · TV 가 꺼져 있는 동안 같은 내용 다시 보내기 → 한 번만. 반영되면 다시 보낼 수 있다"""
+        from tvrelay import ui
+
+        class FakeRelay:
+            tv = "osan"
+            def __init__(self):
+                self.sent, self.done = [], {}
+            def submit(self, job):
+                self.sent.append(job); return "17000000000%02d-abcdef" % len(self.sent)
+            def result(self, id_):
+                return self.done.get(id_)
+
+        api = ui.Api(Path(tempfile.mkdtemp()))
+        fr = FakeRelay()
+        api.relay = lambda: fr
+        api.state = lambda max_age=0: None
+        a, b = b'{"v":1}', b'{"v":2}'
+        put = lambda d: api.send({"ops": [{"op": "put", "path": "x/sd.json", "stage": api.put_stage(d)["id"]}]})
+        r1 = put(b)
+        self.assertTrue(r1["id"])
+        r2 = put(b)                                         # 같은 내용 또 → 보내지 않음
+        self.assertIsNone(r2["id"]); self.assertEqual(r2["queued"], ["x/sd.json"])
+        self.assertEqual(len(fr.sent), 1)
+        # TV 에는 아직 옛 내용(a) — 그래도 a 로 되돌리는 건 보내야 한다 (보내 둔 b 가 나중에 덮지 않게)
+        api.tree = {"x/sd.json": {"p": "x/sd.json", "d": False, "s": len(a), "h": hashlib.sha256(a).hexdigest()}}
+        self.assertTrue(put(a)["id"])
+        self.assertEqual(len(fr.sent), 2)
+        # 미리보기 보관함: 보내 둔 내용이 TV 목록보다 새것
+        self.assertTrue(api._cache_ok("x/sd.json", api._meta()))
+        # 결과가 오면 풀린다
+        fr.done[r1["id"]] = {"ok": True, "results": []}
+        api.result(r1["id"])
+        self.assertEqual(api.queued["x/sd.json"]["h"], hashlib.sha256(a).hexdigest())
+        # 같은 삭제를 곧바로 두 번 → 같은 작업 id
+        d1 = api.send({"ops": [{"op": "delete", "path": "x/old.json"}]})
+        d2 = api.send({"ops": [{"op": "delete", "path": "x/old.json"}]})
+        self.assertEqual(d1["id"], d2["id"]); self.assertTrue(d2.get("duplicate"))
+        self.assertEqual(len(fr.sent), 3)
+
 
 class SyncTest(unittest.TestCase):
     def test_bat_is_ascii_and_movable(self):

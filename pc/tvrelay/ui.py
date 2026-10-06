@@ -90,6 +90,11 @@ class Api:
         self.state_cache = root / "out" / "state-cache.json"
         self._relay: Relay | None = None
         self.lock = threading.Lock()
+        # 두 번 누름 · 같은 내용 다시 보내기 막기
+        self.send_lock = threading.Lock()                 # 보내기는 한 번에 하나씩 (동시에 온 두 요청이 서로를 보도록)
+        self.queued_file = root / "out" / "queued.json"
+        self.queued: dict[str, dict[str, Any]] = self._load_queued()   # 경로 → {h, id, at} TV 가 아직 반영 안 한 올리기
+        self.recent: dict[str, tuple[float, str]] = {}    # 같은 작업(삭제·이름 변경 등)을 방금 보냈는가 → (시각, 작업 id)
 
     def relay(self) -> Relay:
         cfg = config.load(self.root)
@@ -184,6 +189,7 @@ class Api:
         except (OSError, ValueError, KeyError, TypeError):
             return {"none": True, "online": False, "cached": True}
         self.tree = {e["p"]: e for e in st.get("tree") or []}
+        self._settle_queued()
         st["cached"] = True
         return st
 
@@ -195,6 +201,7 @@ class Api:
         if st is None:
             return {"none": True, "online": False}
         self.tree = {e["p"]: e for e in st.get("tree") or []}
+        self._settle_queued()
         self._last_state = st
         # TV 에 등록이 확인된 도구는 '등록됨' 으로 (결과를 놓쳤어도 상태로 확인)
         on_tv = {g.get("gid") for g in st.get("grants") or []}
@@ -232,12 +239,42 @@ class Api:
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_bytes(data)
         m = self._meta()
-        m[rel] = {"t": t, "s": len(data), "local": local}
+        m[rel] = {"t": t, "s": len(data), "local": local, "h": versions.sha(data)}
         self._save_meta(m)
+
+    # ── TV 가 아직 받지 않은 올리기 ──
+    QUEUED_MAX_AGE = 3 * 24 * 3600
+
+    def _load_queued(self) -> dict[str, dict[str, Any]]:
+        try:
+            q = json.loads(self.queued_file.read_text(encoding="utf-8"))
+            return q if isinstance(q, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_queued(self) -> None:
+        try:
+            self.queued_file.write_text(json.dumps(self.queued, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _settle_queued(self, job_id: str | None = None) -> None:
+        """TV 가 반영했거나(목록의 버전이 같음) 결과가 왔거나(job_id) 오래된 것은 지운다"""
+        now = time.time()
+        drop = [p for p, q in self.queued.items()
+                if (job_id and q.get("id") == job_id) or now - q.get("at", 0) > self.QUEUED_MAX_AGE
+                or str((self.tree.get(p) or {}).get("h") or "").lower() == q.get("h")]
+        for p in drop:
+            self.queued.pop(p, None)
+        if drop:
+            self._save_queued()
 
     def _cache_ok(self, rel: str, meta: dict[str, Any]) -> bool:
         e = self.tree.get(rel)
         c = meta.get(rel)
+        q = self.queued.get(rel)
+        if q and c and c.get("h") == q.get("h") and self._cache_file(rel).is_file():
+            return True                                    # 방금 올려 둔 내용(TV 가 아직 안 받음)이 가장 새것
         if not e or not c or not self._cache_file(rel).is_file():
             return False
         if c.get("t") is not None and c.get("t") == e.get("t"):
@@ -277,12 +314,25 @@ class Api:
         return versions.unchanged(self.tree, path, data, v)
 
     def send(self, body: dict[str, Any]) -> dict[str, Any]:
+        with self.send_lock:
+            return self._send(body)
+
+    def _send(self, body: dict[str, Any]) -> dict[str, Any]:
+        force = bool(body.get("force"))
+        # 같은 작업(삭제·이름 변경·설정 등)을 20초 안에 또 보냄 = 두 번 누름 → 한 번만
+        others = [op for op in body.get("ops") or [] if op.get("op") not in ("put", "apk")]
+        sig = json.dumps(others, ensure_ascii=False, sort_keys=True) if others and len(others) == len(body.get("ops") or []) else ""
+        now = time.time()
+        self.recent = {k: v for k, v in self.recent.items() if now - v[0] < 20}
+        if sig and not force and sig in self.recent and not any(op.get("op") in ("get", "ping", "list", "reload") for op in others):
+            echo("같은 작업을 방금 보냈습니다 — 한 번만 보냅니다 (%s)" % self.recent[sig][1])
+            return {"id": self.recent[sig][1], "duplicate": True, "skipped": []}
         job = Job()
         used: list[Path] = []
         skipped: list[str] = []
         rec: list[tuple[str, Any]] = []                     # 보낸 뒤 백업(tv-backup)에 반영할 것
-        force = bool(body.get("force"))
         vers = versions.load(self.root)
+        queued_skip: list[str] = []
         if not force and any(op.get("op") == "put" for op in body.get("ops") or []):
             try:
                 self.state(max_age=20)                         # 최신 TV 목록·버전으로 비교 (20초 안에 확인했으면 그대로)
@@ -297,8 +347,14 @@ class Api:
                 f = self.stage / sid
                 data = f.read_bytes()
                 used.append(f)
-                if kind == "put" and not force and self.unchanged(str(op["path"]), data, vers):
-                    skipped.append(str(op["path"]))         # 바뀌지 않은 파일은 보내지 않는다
+                path = str(op.get("path", ""))
+                q = self.queued.get(path) if kind == "put" else None
+                if q and not force and q.get("h") == versions.sha(data):
+                    skipped.append(path)                    # 같은 내용을 이미 보냈고 TV 가 아직 안 받음 (두 번 누름 등)
+                    queued_skip.append(path)
+                    continue
+                if kind == "put" and not force and not q and self.unchanged(path, data, vers):
+                    skipped.append(path)                    # 바뀌지 않은 파일은 보내지 않는다
                     continue
                 if kind == "put":
                     versions.remember(vers, str(op["path"]), data)
@@ -320,8 +376,8 @@ class Api:
             for f in used:
                 f.unlink(missing_ok=True)
             if skipped:
-                echo("바뀐 파일이 없어 보내지 않았습니다 (%d개 그대로)" % len(skipped))
-                return {"id": None, "skipped": skipped}
+                echo("바뀐 파일이 없어 보내지 않았습니다 (%d개 그대로%s)" % (len(skipped), ", %d개는 이미 보내 둠" % len(queued_skip) if queued_skip else ""))
+                return {"id": None, "skipped": skipped, "queued": queued_skip}
             raise ValueError("보낼 작업이 없습니다")
         if skipped:
             echo("바뀌지 않은 %d개는 건너뜀" % len(skipped))
@@ -335,8 +391,14 @@ class Api:
             except OSError:
                 pass
         echo("보냄: %s — TV 가 가져가면 결과가 표시됩니다" % id_)
+        for kind, a in rec:
+            if kind == "put":
+                self.queued[a[0]] = {"h": versions.sha(a[1]), "id": id_, "at": time.time()}
+        self._save_queued()
+        if sig:
+            self.recent[sig] = (time.time(), id_)
         self._record(rec)
-        return {"id": id_, "skipped": skipped}
+        return {"id": id_, "skipped": skipped, "queued": queued_skip}
 
     def _record(self, rec: list[tuple[str, Any]]) -> None:
         """PC 에서 보낸 그대로 백업(tv-backup)에 반영 — 새 TV 를 연결하면 이걸 그대로 올린다"""
@@ -494,6 +556,8 @@ class Api:
         r = self.relay().result(id_)
         if r is None:
             return {"pending": True}
+        if any(q.get("id") == id_ for q in self.queued.values()):
+            self._settle_queued(id_)
         if id_ in self.preview_jobs:
             for item in r.get("results", []):
                 if "data" in item:
@@ -584,6 +648,7 @@ class Api:
             return 200, {"ids": self.relay().pending()}
         if method == "POST" and path == "/api/cancel":
             self.relay().cancel(str(body.get("id", "")))
+            self._settle_queued(str(body.get("id", "")))
             return 200, {"ok": True}
         if method == "POST" and path == "/api/update":
             return 200, self.do_update()

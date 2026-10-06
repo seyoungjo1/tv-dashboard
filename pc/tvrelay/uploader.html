@@ -224,7 +224,16 @@ const CFG = /*__CONFIG__*/null;
 
   // ── 작업 하나 보내고 결과 기다리기: items = [{op:'put', path, data(Uint8Array)} | {op:'get', path}] ──
   const CHUNK = 8 * 1024 * 1024;
-  async function job(items, prog, say) {
+  // 보냈지만 TV 가 아직 반영하지 않은 올리기 ('tvtool.<gid>.pend' = {경로: {h, at, id}}) — TV 가 꺼져 있어도 브라우저가 기억한다.
+  //  · 같은 내용을 또 보내면(두 번 누름 · 다시 시도) 보내지 않는다
+  //  · 엑셀 붙여넣기는 이어서 붙일 때 TV 내용 대신 방금 보낸 내용을 기준으로 계산한다
+  const PEND_MAX = 3 * 24 * 3600 * 1000;
+  const pendGet = () => { const p = ls.get('pend') || {}; for (const k of Object.keys(p)) if (Date.now() - (p[k].at || 0) > PEND_MAX) delete p[k]; return p; };
+  async function job(items, prog, say, onQueued) {
+    const pend = pendGet(), dups = [];
+    for (const it of items) if (it.data) it.sha = await sha256(it.data);
+    items = items.filter(it => { if (it.op === 'put' && pend[it.path] && pend[it.path].h === it.sha) { dups.push(it.path); return false; } return true; });
+    if (!items.length) return { ok: true, dupOnly: true, dups, results: [] };
     const id = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('')}`;
     const kind = `up/${CFG.gid}`;
     const tree = [], ops = [];
@@ -239,13 +248,17 @@ const CFG = /*__CONFIG__*/null;
         chunks.push(name);
         done += Math.min(CHUNK, data.length - i); prog(done / total * 0.9);
       }
-      ops.push({ op: 'put', path: it.path, chunks, size: data.length, sha256: await sha256(data), overwrite: true });
+      ops.push({ op: 'put', path: it.path, chunks, size: data.length, sha256: it.sha, overwrite: true });
     }
     const man = enc.encode(JSON.stringify({ v: 1, id, created: Date.now(), ops }));
     tree.push({ path: 'm', mode: '100644', type: 'blob', sha: await blob(await seal(man, aad(kind, id, 'm'))) });
     const t = await gh('POST', 'git/trees', { tree });
     const c = await gh('POST', 'git/commits', { message: 'up', tree: t.sha, parents: [] });
     await gh('POST', 'git/refs', { ref: `refs/heads/relay/${CFG.tv}/up/${CFG.gid}/${id}`, sha: c.sha });
+    const pd = pendGet();                          // 여기부터는 GitHub 에 맡겨짐 — TV 가 꺼져 있어도 켜지면 반영
+    for (const o of ops) if (o.op === 'put') pd[o.path] = { h: o.sha256, at: Date.now(), id };
+    ls.set('pend', pd);
+    if (onQueued) await onQueued();
     prog(0.92);
     say(items.some(x => x.op === 'put') ? '보냈습니다. TV 가 받아 반영하기를 기다리는 중… (보통 10~20초)' : 'TV 에 지금 파일의 양식을 묻는 중… (보통 10~20초)', 'wait');
     // 결과 기다리기 (relay/<tv>/res/<id>, 이 도구 키로 암호화)
@@ -260,10 +273,16 @@ const CFG = /*__CONFIG__*/null;
       const res = JSON.parse(dec.decode(await open(await gh('GET', 'git/blobs/' + m.sha, null, true), aad('res', id, 'm'))));
       await gh('DELETE', 'git/refs/heads/' + resBranch);
       prog(1);
+      const pd2 = pendGet();
+      for (const k of Object.keys(pd2)) if (pd2[k].id === id) delete pd2[k];
+      ls.set('pend', pd2);
       if (res.files) rememberFiles(res.files);
+      res.dups = dups;
       return res;
     }
-    throw new Error('TV 응답이 없습니다. TV 가 꺼져 있거나 인터넷이 끊겼을 수 있습니다. (보낸 파일은 TV 가 켜지면 반영됩니다)');
+    const e = new Error('TV 응답이 없습니다. TV 가 꺼져 있거나 인터넷이 끊겼을 수 있습니다.\n보낸 내용은 GitHub 에 암호화되어 맡겨져 있어 TV 가 켜지면 반영됩니다. 다시 보내지 않아도 됩니다.');
+    e.queued = true;
+    throw e;
   }
   const listText = (res) => (res.files || []).map(x => `  ${x.p.slice(CFG.folder.length + 1)}  (${size(x.s)})`).join('\n');
 
@@ -276,12 +295,19 @@ const CFG = /*__CONFIG__*/null;
       msg('암호화해서 보내는 중…', 'wait');
       const items = [];
       for (const f of files) items.push({ op: 'put', path: CFG.folder + '/' + f.path, data: new Uint8Array(await f.file.arrayBuffer()) });
-      const res = await job(items, prog, msg);
+      const keepJson = async () => {               // 올린 JSON 은 엑셀 붙여넣기의 기준으로도 받아 둔다
+        for (const it of items) if (/\.json$/i.test(it.path) && it.sha && it.data.length < 2 * 1048576)
+          ls.set('f.' + it.path.slice(CFG.folder.length + 1), { text: dec.decode(it.data), h: it.sha, at: Date.now() });
+        showFiles();
+      };
+      const res = await job(items, prog, msg, keepJson);
+      if (res.dupOnly) { files = []; render(); prog(0); return msg(`같은 내용을 이미 보냈습니다 (${res.dups.length}개) — TV 가 받으면 반영됩니다. 다시 보내지 않았습니다.`, 'wait'); }
       const bad = (res.results || []).filter(x => !x.ok);
       if (res.ok) { const n = files.length; files = []; render(); msg(`완료! ${n}개를 TV 에 반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${listText(res)}`, 'ok'); }
       else msg('일부 올리지 못했습니다:\n' + bad.map(x => `  ${x.path || ''} — ${x.error}`).join('\n'), 'err');
     } catch (e) {
-      msg(/비밀번호|TV 응답/.test(e.message) ? e.message : '올리지 못했습니다: ' + e.message, 'err');
+      if (e.queued) { files = []; render(); }    // GitHub 에 맡겨짐 → 목록을 비워 같은 파일을 또 보내지 않게
+      msg(/비밀번호|TV 응답/.test(e.message) ? e.message : '올리지 못했습니다: ' + e.message, e.queued ? 'wait' : 'err');
     } finally {
       btn.disabled = !files.length; $('#clear').disabled = false;
     }
@@ -315,7 +341,14 @@ const CFG = /*__CONFIG__*/null;
   function rememberFiles(list) {
     listing = list.filter(x => /\.json$/i.test(x.p)).map(x => ({ n: x.p.slice(CFG.folder.length + 1), s: x.s, h: x.h || '' }));
     ls.set('list', listing);
-    for (const n of ls.names()) { const c = ls.get('f.' + n), e = listing.find(x => x.n === n); if (!e || (e.h && c && c.h !== e.h)) ls.del('f.' + n); }   // 바뀌었거나 지워진 파일
+    const pd = pendGet();
+    for (const k of Object.keys(pd)) { const e = listing.find(x => CFG.folder + '/' + x.n === k); if (e && e.h === pd[k].h) delete pd[k]; }   // TV 가 반영함
+    ls.set('pend', pd);
+    for (const n of ls.names()) {                  // 바뀌었거나 지워진 파일 (단, 보내 두고 TV 가 아직 안 받은 내 내용은 그대로)
+      const c = ls.get('f.' + n), e = listing.find(x => x.n === n), mine = pd[CFG.folder + '/' + n];
+      if (mine && c && c.h === mine.h) continue;
+      if (!e || (e.h && c && c.h !== e.h)) ls.del('f.' + n);
+    }
     showFiles();
   }
   function showFiles() {
@@ -328,6 +361,8 @@ const CFG = /*__CONFIG__*/null;
   /** 받아 둔 것이 TV 와 같은 버전인가: true(확인됨) · null(목록을 아직 모름) · false(다름/없음) */
   function cacheFresh(name) {
     const c = ls.get('f.' + name); if (!c) return false;
+    const mine = pendGet()[CFG.folder + '/' + name];
+    if (mine) return mine.h === c.h;                          // 방금 보낸 내용이 최신 (TV 가 아직 안 받았어도)
     if (!listing) return null;
     const e = listing.find(x => x.n === name);
     return !!e && !!e.h && e.h === c.h ? true : (e && !e.h ? null : false);
@@ -440,26 +475,35 @@ const CFG = /*__CONFIG__*/null;
     $('#xlSend').textContent = o.mode === 'delete' ? `${o.removed}개 지우고 TV 로 올리기` : 'TV 로 올리기';
     $('#xlSend').style.background = o.mode === 'delete' ? 'var(--danger)' : '';
   }
+  let xlSending = false;
   $('#xlSend').onclick = async () => {
-    if (!xlOut) return;
+    if (!xlOut || xlSending) return;
+    xlSending = true;
+    try { await xlSendNow(); } finally { xlSending = false; }
+  };
+  async function xlSendNow() {
     if (xlOut.mode === 'replace' && xlForm.kind !== 'new' && !confirm(`'${xlFor}' 의 기존 내용 전체를 붙여 넣은 ${xlOut.table.length}줄로 바꿉니다. 계속할까요?`)) return;
     if (xlOut.mode === 'delete' && !confirm(`'${xlFor}' 에서 ${xlOut.removed}개를 지웁니다. 계속할까요?`)) return;
     const btn = $('#xlSend'); btn.disabled = true;
     try {
       await ensureSecret(xmsg);
       xmsg('암호화해서 보내는 중…', 'wait');
-      const res = await job([{ op: 'put', path: CFG.folder + '/' + xlFor, data: enc.encode(xlOut.json) }], () => {}, xmsg);
+      const sent = xlOut.json, name = xlFor;
+      const queued = async () => {               // GitHub 에 맡겨진 순간부터 이 내용이 기준 (TV 가 꺼져 있어도 이어서 붙일 수 있게)
+        ls.set('f.' + name, { text: sent, h: await shaText(sent), at: Date.now() });
+        xlForm = X.form(sent); xlSrc = 'cache'; $('#xlText').value = ''; renderXl();
+      };
+      const res = await job([{ op: 'put', path: CFG.folder + '/' + name, data: enc.encode(sent) }], () => {}, xmsg, queued);
+      if (res.dupOnly) { await queued(); return xmsg('같은 내용을 이미 보냈습니다 — TV 가 받으면 반영됩니다. 다시 보내지 않았습니다.', 'wait'); }
       const r = (res.results || [])[0] || {};
       if (!res.ok) throw new Error(r.error || '실패');
-      ls.set('f.' + xlFor, { text: xlOut.json, h: await shaText(xlOut.json), at: Date.now() });   // 올린 내용 = TV 의 새 내용
       if (res.files) rememberFiles(res.files);
       xmsg(`완료! '${xlFor}' 을(를) TV 에 반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${listText(res)}`, 'ok');
-      $('#xlText').value = ''; xlForm = X.form(xlOut.json); xlSrc = 'cache'; renderXl();
     } catch (e) {
-      xmsg(/비밀번호|TV 응답/.test(e.message) ? e.message : '올리지 못했습니다: ' + e.message, 'err');
-      btn.disabled = false;
+      xmsg(/비밀번호|TV 응답/.test(e.message) ? e.message : '올리지 못했습니다: ' + e.message, e.queued ? 'wait' : 'err');
+      if (!e.queued) btn.disabled = false;
     }
-  };
+  }
 })();
 </script>
 </body>
