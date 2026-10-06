@@ -82,6 +82,7 @@
   #ssVids .v.new { background:#f0fbf4; } #ssVids .v.yt { background:#fff5f5; } #ssVids .v button { padding:3px 8px; }
   #ssVids .v { flex-wrap:wrap; } #ssVids .v .o { display:flex; gap:4px; align-items:center; }
   #ssVids .v select { font-size:12px; padding:3px 4px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  #ssVids .v input[type=number] { font-size:12px; padding:2px 4px; border:1px solid var(--line); border-radius:6px; }
   #ssVids .v input[type=color] { width:28px; height:24px; padding:0; border:1px solid var(--line); border-radius:6px; }
   .tvi[draggable=true] { cursor:grab; } .tvi.dragover { outline:6px dashed #0bb5e8; outline-offset:-6px; } .tvi.dragging { opacity:.35; }
   .tvinner { position:absolute; left:0; top:0; width:1920px; height:1080px; transform-origin:0 0; display:flex; flex-direction:column; background:#eef1f4; }
@@ -408,7 +409,8 @@
   const ssLines = () => $('#ssNotice').value.split('\n').map(s => s.trim()).filter(Boolean);
   const vidLabel = (v) => v.yt ? v.yt : v.file ? v.file.name : v.name;
   const target = (v, i) => `${i + 1}.${ext(vidLabel(v)) || 'mp4'}`;
-  const optText = (v) => v.fit === 'crop' ? '크롭·' + ({ top: '위', bottom: '아래' }[v.align] || '가운데') : '확장·' + (v.fill === 'color' ? '단색' : '블러');
+  const optText = (v) => v.fit === 'crop' ? '크롭·' + ({ top: '위', bottom: '아래' }[v.align] || '가운데')
+    : v.fit === 'custom' ? `직접 ${v.scale || 100}%` : '확장·' + (v.fill === 'color' ? '단색' : '블러');
   const newItem = (o) => Object.assign({ fit: (ssConf.videoFit === 'crop' ? 'crop' : 'fit'), align: 'center', fill: 'blur', color: '#000000' }, o);
   function ssPush() {          // 미리보기에 저장 전 내용 반영
     $('#ssFrame').contentWindow?.postMessage({ ss: { notices: ssLines(),
@@ -420,8 +422,8 @@
       <span class="n">${v.yt ? '▶ 유튜브' : esc(target(v, i))}</span>
       <span class="f" title="${esc(vidLabel(v))}">${v.file ? '새 파일 · ' : ''}${esc(vidLabel(v))}${v.file ? ' (' + size(v.file.size) + ')' : ''}</span>
       <span class="o">
-        <select data-k="fit" data-i="${i}"><option value="crop"${v.fit === 'crop' ? ' selected' : ''}>크롭</option><option value="fit"${v.fit !== 'crop' ? ' selected' : ''}>확장</option></select>
-        ${v.fit === 'crop'
+        <select data-k="fit" data-i="${i}">${[['crop', '크롭'], ['fit', '확장'], ['custom', '직접 조절']].map(([k, t]) => `<option value="${k}"${(v.fit || 'fit') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>
+        ${v.fit === 'custom' ? customCtl(v, i) : v.fit === 'crop'
           ? `<select data-k="align" data-i="${i}">${[['top', '위쪽 맞춤'], ['center', '가운데 맞춤'], ['bottom', '아래쪽 맞춤']].map(([k, t]) => `<option value="${k}"${(v.align || 'center') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>`
           : `<select data-k="fill" data-i="${i}"><option value="blur"${v.fill !== 'color' ? ' selected' : ''}>남는 곳 블러</option><option value="color"${v.fill === 'color' ? ' selected' : ''}>남는 곳 단색</option></select>` +
             (v.fill === 'color' ? `<input type="color" data-k="color" data-i="${i}" value="${esc(v.color || '#000000')}" title="채울 색">` : '')}
@@ -431,9 +433,56 @@
       || '<div class="hint">동영상이 없습니다.</div>';
     ssPush();
   }
-  $('#ssVids').addEventListener('change', (e) => {
+  // 직접 조절: 100% 기준(크롭/확장) · 크기(%) · 가로 기준+px · 세로 기준+px · 남는 곳(블러/단색)
+  function customCtl(v, i) {
+    const sel = (k, opts, cur) => `<select data-k="${k}" data-i="${i}">${opts.map(([o, t]) => `<option value="${o}"${cur === o ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
+    const num = (k, val, w, t) => `<input type="number" data-k="${k}" data-i="${i}" value="${val}" step="${k === 'scale' ? 5 : 10}" title="${t}" style="width:${w}px">`;
+    return sel('base', [['crop', '크롭=100%'], ['fit', '확장=100%']], v.base || 'crop') + num('scale', v.scale || 100, 58, '크기 %') + '%' +
+      sel('halign', [['left', '왼쪽 기준'], ['center', '가로 가운데'], ['right', '오른쪽 기준']], v.halign || 'center') + num('offsetX', v.offsetX || 0, 62, '가로 px (음수 가능)') + 'px' +
+      sel('valign', [['top', '위쪽 기준'], ['center', '세로 가운데'], ['bottom', '아래쪽 기준']], v.valign || 'center') + num('offsetY', v.offsetY || 0, 62, '세로 px (음수 가능)') + 'px' +
+      sel('fill', [['blur', '남는 곳 블러'], ['color', '남는 곳 단색']], v.fill === 'color' ? 'color' : 'blur') +
+      (v.fill === 'color' ? `<input type="color" data-k="color" data-i="${i}" value="${esc(v.color || '#000000')}" title="채울 색">` : '');
+  }
+  // 영상 비율(가로/세로): 새 파일·받아 둔 영상은 실제 값, 유튜브는 쇼츠 9:16 · 일반 16:9, 모르면 16:9 로 가정
+  let ssBox = [742, 928];                                    // 미리보기가 알려 주는 동영상 칸 크기 (1080p 기준)
+  window.addEventListener('message', (e) => { if (e.data && e.data.ssBox) ssBox = e.data.ssBox; });
+  async function videoRatio(v) {
+    if (v.ar) return { ar: v.ar, exact: true };
+    if (v.yt) return { ar: /\/shorts\//.test(v.yt) ? 9 / 16 : 16 / 9, exact: true };
+    const src = ssSrc(v);
+    if (src && src.kind === 'file') {
+      const ar = await new Promise((res) => { const el = document.createElement('video'); el.preload = 'metadata'; el.muted = true;
+        el.onloadedmetadata = () => res(el.videoWidth && el.videoHeight ? el.videoWidth / el.videoHeight : 0); el.onerror = () => res(0); el.src = src.url; setTimeout(() => res(0), 8000); });
+      if (ar) { v.ar = ar; return { ar, exact: true }; }
+    }
+    return { ar: 16 / 9, exact: false };
+  }
+  // 기준을 바꾸면 화면 속 위치가 그대로이도록 px 를 환산 (예: 아래쪽 기준 0 → 위쪽 기준 -300)
+  async function convertAnchor(v, k, to) {
+    const { ar, exact } = await videoRatio(v);
+    const [bw, bh] = ssBox;
+    const sc = (v.base === 'fit' ? Math.min(bw / ar, bh) : Math.max(bw / ar, bh)) * (v.scale || 100) / 100;
+    const vw = sc * ar, vh = sc;
+    if (k === 'valign') {
+      const o = v.offsetY || 0, from = v.valign || 'center';
+      const y = from === 'top' ? o : from === 'bottom' ? bh - vh - o : (bh - vh) / 2 + o;
+      v.offsetY = Math.round(to === 'top' ? y : to === 'bottom' ? bh - vh - y : y - (bh - vh) / 2);
+      v.valign = to;
+    } else {
+      const o = v.offsetX || 0, from = v.halign || 'center';
+      const x = from === 'left' ? o : from === 'right' ? bw - vw - o : (bw - vw) / 2 + o;
+      v.offsetX = Math.round(to === 'left' ? x : to === 'right' ? bw - vw - x : x - (bw - vw) / 2);
+      v.halign = to;
+    }
+    if (!exact) $('#ssSt').textContent = '영상 비율을 몰라 16:9 로 가정해 환산했습니다 (▶ 로 한 번 재생하면 정확해집니다)';
+  }
+  $('#ssVids').addEventListener('change', async (e) => {
     const k = e.target.dataset.k, i = e.target.dataset.i; if (!k || i === undefined) return;
-    ssVids[+i][k] = e.target.value; ssRenderVids();
+    const v = ssVids[+i];
+    if (k === 'valign' || k === 'halign') await convertAnchor(v, k, e.target.value);
+    else if (['scale', 'offsetX', 'offsetY'].includes(k)) v[k] = Math.round(+e.target.value || (k === 'scale' ? 100 : 0));
+    else v[k] = e.target.value;
+    ssRenderVids();
     if (+i === ssPlayIdx) ssPlay(+i);                       // 보고 있는 영상이면 바뀐 방식으로 다시 재생
   });
 
@@ -453,6 +502,8 @@
       if (!src) continue;
       ssPlayIdx = i;
       win.postMessage({ ss: { play: Object.assign(src, { seq: ++ssSeq, crop: v.fit === 'crop', align: v.align || 'center',
+        custom: v.fit === 'custom', base: v.base || 'crop', scale: v.scale || 100, halign: v.halign || 'center', offsetX: v.offsetX || 0,
+        valign: v.valign || 'center', offsetY: v.offsetY || 0,
         fill: v.fill === 'color' ? 'color' : 'blur', color: v.color || '#000000', loop: false }) } }, '*');
       document.querySelectorAll('#ssVids .v').forEach((r, j) => r.classList.toggle('playing', j === i));
       return;
@@ -543,7 +594,8 @@
     // 재생 목록 (설정.json playlist) — 목록에 없는 TV 의 동영상은 뒤에 이름순으로
     const files = tvVids(), used = new Set(), list = [];
     for (const o of Array.isArray(ssConf.playlist) ? ssConf.playlist : []) {
-      const src = String(o.src || '').trim(), opt = { fit: o.fit === 'crop' ? 'crop' : o.fit === 'fit' ? 'fit' : undefined, align: o.align, fill: o.fill, color: o.color };
+      const src = String(o.src || '').trim(), opt = { fit: ['crop', 'fit', 'custom'].includes(o.fit) ? o.fit : undefined, align: o.align, fill: o.fill, color: o.color,
+        base: o.base, scale: o.scale, halign: o.halign, offsetX: o.offsetX, valign: o.valign, offsetY: o.offsetY };
       Object.keys(opt).forEach(k => opt[k] === undefined && delete opt[k]);
       if (YT_RE.test(src)) list.push(newItem(Object.assign({ yt: src }, opt)));
       else if (files.includes(src) && !used.has(src)) { used.add(src); list.push(newItem(Object.assign({ name: src }, opt))); }
@@ -560,9 +612,11 @@
     const lines = ssLines();
     const conf = Object.assign({}, ssConf);
     delete conf.videoFit;                                     // 예전 전체 설정 → 영상별 설정으로
-    conf.playlist = ssVids.map((v, i) => Object.assign({ src: v.yt || target(v, i), fit: v.fit === 'crop' ? 'crop' : 'fit' },
+    conf.playlist = ssVids.map((v, i) => Object.assign({ src: v.yt || target(v, i), fit: ['crop', 'custom'].includes(v.fit) ? v.fit : 'fit' },
       v.fit === 'crop' ? { align: v.align || 'center' } : { fill: v.fill === 'color' ? 'color' : 'blur' },
-      v.fit !== 'crop' && v.fill === 'color' ? { color: v.color || '#000000' } : {}));
+      v.fit !== 'crop' && v.fill === 'color' ? { color: v.color || '#000000' } : {},
+      v.fit === 'custom' ? { base: v.base || 'crop', scale: v.scale || 100, halign: v.halign || 'center', offsetX: v.offsetX || 0,
+                             valign: v.valign || 'center', offsetY: v.offsetY || 0 } : {}));
     const dir = ssDir, ops = [];
     try {
       $('#ssSave').disabled = true;

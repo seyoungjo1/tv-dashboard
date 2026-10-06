@@ -66,6 +66,7 @@ class Screensaver(
     private var index = 0
     private var errors = 0
     private var radiusPx = 0f
+    private var stagePx = 1f                             // 화면보호기 1080p 기준 1px 이 실제 몇 px 인지 (위아래 이동용)
     private var blurBmp: Bitmap? = null
     var active = false
         private set
@@ -252,6 +253,7 @@ class Screensaver(
         lp.topMargin = (y * k).roundToInt()
         lp.gravity = Gravity.TOP or Gravity.START
         radiusPx = (22 * min(vw / 1920, vh / 1080) * k).toFloat()
+        stagePx = (min(vw / 1920, vh / 1080) * k).toFloat()
         box.layoutParams = lp
         box.visibility = if (items.isEmpty() || current?.youtube != null) View.INVISIBLE else View.VISIBLE
         box.invalidateOutline()
@@ -281,6 +283,9 @@ class Screensaver(
             val o = JSONObject().put("seq", ++ytSeq).put("id", item.youtube).put("vertical", item.vertical)
                 .put("crop", item.crop).put("align", item.align).put("fill", if (item.blur) "blur" else "color")
                 .put("color", String.format("#%06X", item.color and 0xFFFFFF)).put("loop", list.size == 1)
+                .put("custom", item.custom).put("base", if (item.cropBase) "crop" else "fit")
+                .put("scale", item.scale).put("halign", item.hAlign).put("offsetX", item.offsetX)
+                .put("valign", item.vAlign).put("offsetY", item.offsetY)
             web?.evaluateJavascript("window.ssYoutube&&ssYoutube($o)", null)
             return
         }
@@ -353,15 +358,36 @@ class Screensaver(
         val bh = box.height
         val item = current ?: return
         if (vw <= 0 || vh <= 0 || bw <= 0 || bh <= 0) return
-        val s = if (item.crop) max(bw.toDouble() / vw, bh.toDouble() / vh) else min(bw.toDouble() / vw, bh.toDouble() / vh)
+        val cover = max(bw.toDouble() / vw, bh.toDouble() / vh)
+        val contain = min(bw.toDouble() / vw, bh.toDouble() / vh)
+        val s = when {
+            item.custom -> (if (item.cropBase) cover else contain) * item.scale / 100.0   // 직접 조절: 기준 × 크기(%)
+            item.crop -> cover
+            else -> contain
+        }
         val w = (vw * s).roundToInt()
         val h = (vh * s).roundToInt()
+        if (item.custom) {                                 // 직접 조절: 기준선(위·가운데·아래 / 왼·가운데·오른)에서 px 만큼
+            val ox = item.offsetX * stagePx
+            val oy = item.offsetY * stagePx
+            tex.layoutParams = FrameLayout.LayoutParams(w, h, Gravity.TOP or Gravity.START)
+            tex.translationX = when (item.hAlign) { "left" -> ox; "right" -> bw - w - ox; else -> (bw - w) / 2f + ox }
+            tex.translationY = when (item.vAlign) { "top" -> oy; "bottom" -> bh - h - oy; else -> (bh - h) / 2f + oy }
+            ensureBlurBmp(vw, vh)
+            return
+        }
         val gravity = if (!item.crop) Gravity.CENTER else if (h > bh) {
             Gravity.CENTER_HORIZONTAL or when (item.align) { "top" -> Gravity.TOP; "bottom" -> Gravity.BOTTOM; else -> Gravity.CENTER_VERTICAL }
         } else {
             Gravity.CENTER_VERTICAL or when (item.align) { "top" -> Gravity.START; "bottom" -> Gravity.END; else -> Gravity.CENTER_HORIZONTAL }
         }
         tex.layoutParams = FrameLayout.LayoutParams(w, h, gravity)
+        tex.translationX = 0f
+        tex.translationY = 0f
+        ensureBlurBmp(vw, vh)
+    }
+
+    private fun ensureBlurBmp(vw: Int, vh: Int) {
         // 블러용 작은 그림 (영상 비율, 긴 쪽 64px)
         val bwSmall = if (vw >= vh) 64 else max(1, 64 * vw / vh)
         val bhSmall = if (vw >= vh) max(1, 64 * vh / vw) else 64

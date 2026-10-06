@@ -29,6 +29,9 @@
     reportVideo();
   }
   function reportVideo() {
+    if (PREVIEW) {                                   // PC: 동영상 칸 크기(1080p 기준) — 직접 조절의 기준 바꾸기 환산용
+      var v = $('video'); try { parent.postMessage({ ssBox: [v.clientWidth, v.clientHeight] }, '*'); } catch (e) {}
+    }
     if (!TV) return;
     var r = $('video').getBoundingClientRect();
     try { TV.videoRect(r.left, r.top, r.width, r.height, innerWidth, innerHeight); } catch (e) {}
@@ -295,9 +298,27 @@
     }
     var fg = document.createElement('video');
     fg.className = 'pvfg'; fg.src = o.url; fg.muted = true; fg.autoplay = true; fg.playsInline = true;
-    fg.style.objectFit = o.crop ? 'cover' : 'contain';
+    fg.style.objectFit = o.custom ? (o.base === 'fit' ? 'contain' : 'cover') : o.crop ? 'cover' : 'contain';
     var pos = o.align === 'top' ? '0%' : o.align === 'bottom' ? '100%' : '50%';
-    fg.style.objectPosition = o.crop ? pos + ' ' + pos : '50% 50%';
+    // TV 와 같게: 크롭은 넘치는 쪽(세로면 위·아래, 가로면 왼·오른)만 맞춤 위치를 따르고, 크기(%)도 그 점을 기준으로
+    function place() {
+      var tall = fg.videoWidth && fg.videoHeight && (fg.videoWidth / fg.videoHeight) < (box.clientWidth / box.clientHeight);
+      var p = !o.crop || o.custom ? '50% 50%' : tall ? '50% ' + pos : pos + ' 50%';
+      fg.style.objectPosition = p;
+      fg.style.transformOrigin = p;
+    }
+    place(); fg.onloadedmetadata = place;
+    if (o.custom) {                                            // 직접 조절: TV 와 같은 계산으로 크기·위치를 직접 정함
+      fg.style.objectFit = 'fill';
+      var custom = function () {
+        if (!fg.videoWidth) return;
+        var bw = box.clientWidth, bh = box.clientHeight, ar = fg.videoWidth / fg.videoHeight;
+        var sc = (o.base === 'fit' ? Math.min(bw / ar, bh) : Math.max(bw / ar, bh)) * (o.scale || 100) / 100;
+        var vh = sc, vw = sc * ar, c = customPos(o, bw, bh, vw, vh);
+        fg.style.cssText += ';inset:auto;left:' + c[0] + 'px;top:' + c[1] + 'px;width:' + vw + 'px;height:' + vh + 'px';
+      };
+      fg.addEventListener('loadedmetadata', custom);
+    }
     fg.onended = function () { parent.postMessage({ ssEnded: o.seq, ok: true }, '*'); };
     fg.onerror = function () { parent.postMessage({ ssEnded: o.seq, ok: false }, '*'); };
     wrap.appendChild(fg);
@@ -333,6 +354,13 @@
     }
     ytWait.push(cb);
   }
+  /** 직접 조절 위치: 기준선(왼·가운데·오른 / 위·가운데·아래)에서 안쪽으로 px (1080p 기준) */
+  function customPos(o, bw, bh, vw, vh) {
+    var ox = o.offsetX || 0, oy = o.offsetY || 0;
+    var x = o.halign === 'left' ? ox : o.halign === 'right' ? bw - vw - ox : (bw - vw) / 2 + ox;
+    var y = o.valign === 'top' ? oy : o.valign === 'bottom' ? bh - vh - oy : (bh - vh) / 2 + oy;
+    return [x, y];
+  }
   function noCaptions(p) {
     try { p.setOption('captions', 'track', {}); } catch (e) {}
     try { p.unloadModule('captions'); } catch (e) {}
@@ -355,17 +383,20 @@
     ytCur = o;
     var box = $('video'), bw = box.clientWidth, bh = box.clientHeight;
     var ar = o.vertical ? 9 / 16 : 16 / 9;                     // 영상 가로/세로
-    var s = o.crop ? Math.max(bw / ar, bh) : Math.min(bw / ar, bh);
+    var cover = Math.max(bw / ar, bh), contain = Math.min(bw / ar, bh);
+    var s = o.custom ? (o.base === 'fit' ? contain : cover) * (o.scale || 100) / 100   // 직접 조절: 기준 × 크기(%)
+          : o.crop ? cover : contain;
     var vh = Math.round(s), vw = Math.round(s * ar);
     var x = (bw - vw) / 2, y = (bh - vh) / 2;
-    if (o.crop) {                                              // 크롭: 넘치는 쪽을 위·가운데·아래(왼·가운데·오른) 맞춤
+    if (o.crop && !o.custom) {                                 // 크롭: 넘치는 쪽을 위·가운데·아래(왼·가운데·오른) 맞춤
       if (vh > bh) y = o.align === 'top' ? 0 : o.align === 'bottom' ? bh - vh : y;
       else x = o.align === 'top' ? 0 : o.align === 'bottom' ? bw - vw : x;
     }
+    if (o.custom) { var c = customPos(o, bw, bh, vw, vh); x = c[0]; y = c[1]; }   // 직접 조절: 기준선에서 px
     var wrap = document.createElement('div');
     wrap.id = 'yt';
     wrap.style.background = !o.crop && o.fill === 'color' ? o.color : '#0d1620';
-    if (!o.crop && o.fill !== 'color') {                       // 확장 + 블러: 같은 영상의 썸네일을 흐리게 깔기
+    if ((!o.crop || o.custom) && o.fill !== 'color') {         // 확장·직접 조절 + 블러: 같은 영상의 썸네일을 흐리게 깔기
       var bg = document.createElement('img');
       bg.className = 'ytbg'; bg.src = 'https://i.ytimg.com/vi/' + o.id + '/hqdefault.jpg';
       bg.onerror = function () { bg.remove(); };

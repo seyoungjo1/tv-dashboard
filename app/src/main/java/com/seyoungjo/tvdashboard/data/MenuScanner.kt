@@ -20,11 +20,18 @@ data class PlayItem(
     val youtube: String? = null,      // 유튜브 영상 id
     val vertical: Boolean = false,    // 쇼츠(세로 9:16)
     val crop: Boolean = false,        // true = 크롭(긴 쪽을 자름) / false = 확장(작은 쪽을 맞춤, 남는 곳 채움)
+    val custom: Boolean = false,      // 직접 조절: 기준 크기 × 크기(%) + 가로·세로 이동, 넘치면 잘리고 남으면 채움
+    val cropBase: Boolean = true,     // 직접 조절의 100% 기준 — true = 크롭 크기(꽉 채움), false = 확장 크기(전체 보임)
     val align: String = "center",     // 크롭 위치: top · center · bottom (가로가 넘치면 왼쪽 · 가운데 · 오른쪽)
     val blur: Boolean = true,         // 확장일 때 남는 곳: 블러 / 단색
     val color: Int = 0xFF000000.toInt(),
+    val scale: Int = 100,             // 직접 조절 크기(%)
+    val hAlign: String = "center",    // 직접 조절 가로 기준: left · center · right
+    val offsetX: Int = 0,             //   그 기준선에서 안쪽으로 px (1080p 화면 기준, 가운데 기준은 + = 오른쪽)
+    val vAlign: String = "center",    // 직접 조절 세로 기준: top · center · bottom
+    val offsetY: Int = 0,             //   그 기준선에서 안쪽으로 px (가운데 기준은 + = 아래)
 ) {
-    val key: String get() = (file?.let { it.path + ":" + it.lastModified() } ?: "yt:$youtube") + ":$crop:$align:$blur:$color"
+    val key: String get() = (file?.let { it.path + ":" + it.lastModified() } ?: "yt:$youtube") + ":$crop:$custom:$cropBase:$align:$blur:$color:$scale:$hAlign:$offsetX:$vAlign:$offsetY"
 }
 
 data class MenuEntry(
@@ -99,6 +106,8 @@ object MenuScanner {
      * 화면보호기 재생 목록 (main/설정.json 의 "playlist", PC 프로그램에서 정함).
      *  [{ "src": "1.mp4" 또는 유튜브 주소, "fit": "crop"|"fit", "align": "center"|"top"|"bottom",
      *     "fill": "blur"|"color", "color": "#000000" }]
+     *  직접 조절: "fit": "custom", "base": "crop"|"fit"(100% 기준), "scale": 100(%),
+     *            "halign": left|center|right + "offsetX", "valign": top|center|bottom + "offsetY" (px, 1080p 기준, 기준선에서 안쪽으로)
      * 목록에 없는 main 의 동영상은 그 뒤에 이름 오름차순으로 붙는다 (자동 업로드 .bat 으로 올린 것 등).
      */
     fun mainPlaylist(dir: File?): List<PlayItem> {
@@ -112,9 +121,16 @@ object MenuScanner {
         val defCrop = conf.optString("videoFit") == "crop"                       // 예전 설정(전체 크롭/맞춤)
         fun opts(o: org.json.JSONObject?, base: PlayItem): PlayItem = base.copy(
             crop = o?.optString("fit")?.let { if (it.isEmpty()) defCrop else it == "crop" } ?: defCrop,
+            custom = o?.optString("fit") == "custom",
+            cropBase = o?.optString("base") != "fit",
             align = o?.optString("align")?.takeIf { it in setOf("top", "bottom", "center") } ?: "center",
             blur = o?.optString("fill") != "color",
             color = o?.optString("color")?.let { parseColor(it) } ?: 0xFF000000.toInt(),
+            scale = (o?.optInt("scale", 100) ?: 100).coerceIn(20, 400),
+            hAlign = o?.optString("halign")?.takeIf { it in setOf("left", "right", "center") } ?: "center",
+            vAlign = o?.optString("valign")?.takeIf { it in setOf("top", "bottom", "center") } ?: "center",
+            offsetX = (o?.optInt("offsetX", 0) ?: 0).coerceIn(-4000, 4000),
+            offsetY = (o?.optInt("offsetY", 0) ?: 0).coerceIn(-4000, 4000),
         )
         val out = ArrayList<PlayItem>()
         val used = HashSet<String>()
