@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 사이드바에 붙은 탭 손잡이: 사이드바와 같은 색, 오른쪽 모서리만 둥글게 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape><solid android:color="@color/sidebar_focus" />
+            <corners android:topRightRadius="12dp" android:bottomRightRadius="12dp" /></shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape><solid android:color="@color/sidebar_focus" />
+            <corners android:topRightRadius="12dp" android:bottomRightRadius="12dp" /></shape>
+    </item>
+    <item>
+        <shape><solid android:color="@color/sidebar" />
+            <corners android:topRightRadius="12dp" android:bottomRightRadius="12dp" /></shape>
+    </item>
+</selector>

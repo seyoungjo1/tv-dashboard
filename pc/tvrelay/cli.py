@@ -17,6 +17,34 @@ from . import __version__, config, update
 from .relay import Job, Relay, read_local
 
 ROOT = Path(__file__).resolve().parent.parent
+RESTART_CODE = 75          # 화면(자식)이 이 코드로 끝나면 감시자가 새 코드로 다시 띄운다 — [프로그램 업데이트] 단추
+
+
+def cmd_ui(port: int, open_browser: bool, child: bool) -> int:
+    """화면을 띄운다. 이 명령은 감시자다 — 실제 화면은 자식 프로세스(`ui --child`)로 띄우고, 자식이 RESTART_CODE 로 끝나면
+    (화면의 [프로그램 업데이트] 뒤) 같은 검은 창에서 새 코드로 다시 띄운다. 업데이트할 때마다 검은 창을 끄고 켤 필요가 없다."""
+    import os
+    import subprocess
+
+    from .ui import PORT_FILE, serve
+
+    if child:
+        return serve(ROOT, port, open_browser)
+    env = dict(os.environ, TVRELAY_SUPERVISED="1")
+    while True:
+        argv = [sys.executable, "-m", "tvrelay", "ui", "--child", "--port", str(port)] + ([] if open_browser else ["--no-browser"])
+        try:
+            rc = subprocess.call(argv, cwd=str(ROOT), env=env)
+        except KeyboardInterrupt:
+            return 0
+        if rc != RESTART_CODE:
+            return rc
+        try:                                  # 같은 주소로 — 브라우저가 새로고침만 하면 되게
+            port = int((ROOT / PORT_FILE).read_text(encoding="utf-8").strip() or port)
+        except (OSError, ValueError):
+            pass
+        open_browser = False
+        print("\n새 버전으로 화면을 다시 띄웁니다 (같은 주소 127.0.0.1:%d) — 브라우저는 저절로 새로고침됩니다.\n" % port, flush=True)
 
 
 def _relay() -> Relay:
@@ -79,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("ui", help="화면 열기")
     s.add_argument("--port", type=int, default=8790)
     s.add_argument("--no-browser", action="store_true")
+    s.add_argument("--child", action="store_true", help=argparse.SUPPRESS)       # 감시자가 띄우는 실제 화면
     s = sub.add_parser("update", help="프로그램 업데이트")
     s.add_argument("--check", action="store_true")
     s = sub.add_parser("setup", help="처음 설정 (키 자동 생성)")
@@ -97,8 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         _ensure_deps()
 
     if a.cmd in (None, "ui"):
-        from .ui import serve
-        return serve(ROOT, getattr(a, "port", 8790), not getattr(a, "no_browser", False))
+        return cmd_ui(getattr(a, "port", 8790), not getattr(a, "no_browser", False), getattr(a, "child", False))
     if a.cmd == "update":
         return update.run(check_only=a.check, root=ROOT)
     if a.cmd == "setup":

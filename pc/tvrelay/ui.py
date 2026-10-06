@@ -34,12 +34,32 @@ from . import __version__, config, update
 from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
+RESTART_CODE = 75                  # cli.RESTART_CODE 와 같은 값 — 감시자가 이 코드를 보면 새 코드로 다시 띄운다
+PORT_FILE = "out/ui-port.txt"      # 화면이 실제로 연 포트 — 다시 띄울 때 같은 주소로
+SERVER: list[Any] = [None]
+RESTART = threading.Event()
+STARTED_WITH = [""]
+RESTART_MSG = "프로그램이 v%s 로 업데이트됐습니다. 화면을 다시 시작해야 새 버전이 돕니다."
 # Windows 레지스트리에 따라 .js 가 text/plain 이 되는 일이 있어 자주 쓰는 형식은 고정
 MIME = {"html": "text/html", "htm": "text/html", "js": "text/javascript", "mjs": "text/javascript", "css": "text/css",
         "json": "application/json", "svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
         "gif": "image/gif", "webp": "image/webp", "mp4": "video/mp4", "webm": "video/webm", "txt": "text/plain", "csv": "text/csv",
         "woff2": "font/woff2", "woff": "font/woff", "ttf": "font/ttf"}
 LOG: list[str] = []
+
+
+def supervised() -> bool:
+    import os
+    return os.environ.get("TVRELAY_SUPERVISED") == "1"
+
+
+def request_restart(delay: float = 0.4) -> bool:
+    """응답을 보낸 뒤 서버를 멈춘다 → serve() 가 RESTART_CODE 로 끝난다 → 감시자가 새 코드로 다시 띄운다. 감시자가 없으면 False."""
+    if not supervised() or SERVER[0] is None:
+        return False
+    RESTART.set()
+    threading.Timer(delay, SERVER[0].shutdown).start()
+    return True
 
 
 def echo(msg: str) -> None:
@@ -78,7 +98,8 @@ class Api:
             err = ""
         except config.ConfigError as e:
             cfg, err = None, str(e)
-        return {"version": __version__, "configured": cfg is not None, "error": err,
+        return {"version": __version__, "disk_version": update.local_version(self.root) or __version__,
+                "supervised": supervised(), "configured": cfg is not None, "error": err,
                 "repo": cfg.repo if cfg else config.DEFAULT_REPO, "tv": cfg.tv if cfg else config.DEFAULT_TV,
                 "cfgPath": str(config.path(self.root)), "root": str(self.root)}
 
@@ -229,13 +250,41 @@ class Api:
         return r
 
     def do_update(self) -> dict[str, Any]:
+        """[업데이트]: 배포본을 받아 바꾸고, 바뀌었으면 화면을 새 코드로 다시 띄운다 (감시자가)."""
+        if not self.lock.acquire(blocking=False):
+            return {"ok": False, "error": "작업이 돌고 있어 지금은 업데이트하지 않습니다 — 끝난 뒤 다시 누르세요."}
         lines: list[str] = []
-        code = update.run(root=self.root, echo=lambda m: (lines.append(m), echo(m)))
-        return {"code": code, "lines": lines, "version": update.local_version(self.root),
-                "restart": update.local_version(self.root) != __version__}
+        try:
+            before = update.local_version(self.root)
+            rc = update.run(root=self.root, echo=lambda m: (lines.append(str(m)), echo(str(m))))
+            after = update.local_version(self.root)
+        except Exception as e:
+            return {"ok": False, "error": "업데이트 실패: %s: %s" % (e.__class__.__name__, e), "lines": lines}
+        finally:
+            self.lock.release()
+        changed = after != before or any(l.startswith("바뀐 파일") and not l.startswith("바뀐 파일 0개") for l in lines)
+        res: dict[str, Any] = {"ok": rc == 0, "before": before, "after": after, "changed": changed, "lines": lines[-30:],
+                               "running": __version__}
+        if rc != 0:
+            res["error"] = lines[-1] if lines else "업데이트가 끝나지 않았습니다"
+            return res
+        if changed or after != __version__:
+            res["restarting"] = request_restart()
+            if not res["restarting"]:
+                res["note"] = ("새 버전(v%s)을 받았습니다 — 이 화면은 옛 방식으로 켜져 있어 스스로 다시 시작하지 못합니다. "
+                               "검은 창을 닫고 tvrun.bat 을 한 번만 다시 실행하세요 (다음부터는 저절로)." % after)
+        return res
+
+    def restart(self) -> dict[str, Any]:
+        ok = request_restart()
+        return {"ok": ok, "restarting": ok, "error": "" if ok else "이 화면은 옛 방식으로 켜져 있습니다 — 검은 창을 닫고 tvrun.bat 을 다시 실행하세요."}
 
     def dispatch(self, method: str, path: str, q: dict[str, list[str]], body: Any, raw: bytes) -> tuple[int, Any]:
         one = lambda k: (q.get(k) or [""])[0]
+        if path not in ("/api/info", "/api/log", "/api/update", "/api/restart"):
+            now = update.local_version(self.root)
+            if STARTED_WITH[0] and now and now != STARTED_WITH[0]:
+                return 409, {"ok": False, "restart": True, "error": RESTART_MSG % now, "supervised": supervised()}
         if method == "GET" and path == "/api/info":
             return 200, self.info()
         if method == "POST" and path == "/api/setup":
@@ -255,6 +304,8 @@ class Api:
             return 200, {"ok": True}
         if method == "POST" and path == "/api/update":
             return 200, self.do_update()
+        if method == "POST" and path == "/api/restart":
+            return 200, self.restart()
         if method == "POST" and path == "/api/pair":
             cfg = config.load(self.root)
             if cfg is None:
@@ -353,6 +404,7 @@ def make_handler(api: Api):
 
 
 def serve(root: Path, port: int = 8790, open_browser: bool = True) -> int:
+    STARTED_WITH[0] = update.local_version(root)
     api = Api(root)
     shutil.rmtree(api.stage, ignore_errors=True)
     api.stage.mkdir(parents=True, exist_ok=True)
@@ -367,12 +419,29 @@ def serve(root: Path, port: int = 8790, open_browser: bool = True) -> int:
     if srv is None:
         echo("화면을 열 포트를 찾지 못했습니다.")
         return 1
+    SERVER[0] = srv
+    RESTART.clear()
+    try:
+        (root / PORT_FILE).parent.mkdir(parents=True, exist_ok=True)
+        (root / PORT_FILE).write_text(str(port), encoding="utf-8")
+    except OSError:
+        pass
     url = "http://127.0.0.1:%d/" % port
-    echo("TV 원격 관리 화면: %s  (이 검은 창을 닫으면 화면도 꺼집니다)" % url)
+    print("\n" + "=" * 60)
+    print("  TV 원격 관리 화면을 브라우저에 엽니다:  %s" % url)
+    print("  브라우저가 저절로 안 뜨면 위 주소를 주소창에 넣으세요.")
+    print("  이 검은 창은 화면의 엔진입니다 — 닫으면 화면이 꺼집니다. (끝낼 때 Ctrl+C)")
+    print("=" * 60, flush=True)
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        srv.server_close()
+        SERVER[0] = None
+    if RESTART.is_set():
+        print("\n화면을 새 버전으로 다시 시작합니다…", flush=True)
+        return RESTART_CODE
     return 0

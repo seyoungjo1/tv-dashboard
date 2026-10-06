@@ -411,6 +411,7 @@ class MainActivity : AppCompatActivity() {
     private fun setSidebar(open: Boolean, save: Boolean = true) {
         sidebarOpen = open
         if (!fullscreen) menuPanel.visibility = if (open) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.sidebarToggle).text = if (open) "◁" else "▷"
         if (save) AppSettings.prefs.edit().putBoolean("sidebar_open", open).apply()
         if (open && !fullscreen) focusSelectedTile()
     }

@@ -17,21 +17,8 @@
             android:background="@color/header"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="10dp"
+            android:paddingStart="18dp"
             android:paddingEnd="24dp">
-
-            <!-- 왼쪽 사이드바 숨기기/열기 -->
-            <ImageButton
-                android:id="@+id/sidebarToggle"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginEnd="10dp"
-                android:background="@drawable/round_button_bg"
-                android:contentDescription="@string/toggle_sidebar"
-                android:focusable="true"
-                android:padding="11dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_menu" />
 
             <ImageView
                 android:id="@+id/headerLogo"
@@ -117,6 +104,27 @@
                         android:textSize="14sp" />
                 </LinearLayout>
             </LinearLayout>
+
+            <!-- 사이드바 오른쪽 아래에 붙은 숨기기/열기 손잡이 (◁ / ▷) -->
+            <FrameLayout
+                android:layout_width="@dimen/sidebar_handle_width"
+                android:layout_height="match_parent">
+
+                <TextView
+                    android:id="@+id/sidebarToggle"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/sidebar_handle_height"
+                    android:layout_gravity="bottom"
+                    android:layout_marginBottom="28dp"
+                    android:background="@drawable/sidebar_handle_bg"
+                    android:clickable="true"
+                    android:contentDescription="@string/toggle_sidebar"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:text="◁"
+                    android:textColor="@color/sidebar_text"
+                    android:textSize="18sp" />
+            </FrameLayout>
 
             <!-- 오른쪽: 대시보드(index.html) -->
             <FrameLayout

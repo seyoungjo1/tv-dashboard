@@ -66,13 +66,14 @@
   .tvbox { position:relative; width:100%; aspect-ratio:16/9; background:#000; border:10px solid #111; border-radius:12px; overflow:hidden; box-shadow:0 6px 24px rgba(0,0,0,.25); }
   .tvinner { position:absolute; left:0; top:0; width:1920px; height:1080px; transform-origin:0 0; display:flex; flex-direction:column; background:#eef1f4; }
   .tvh { height:96px; flex:none; background:#1e2125; display:flex; align-items:center; padding:0 36px 0 18px; color:#fff; }
-  .tvh .mn { width:72px; height:72px; border-radius:50%; background:rgba(0,0,0,.5); color:#fff; font-size:38px; display:flex; align-items:center; justify-content:center; margin-right:16px; cursor:pointer; }
   .tvh img { height:72px; }
   .tvh .t { flex:1; margin-left:24px; font-size:42px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .tvh .c { font-size:30px; color:#c9d1d9; }
   .tvm { flex:1; display:flex; min-height:0; }
   .tvs { width:186px; flex:none; background:#2b2f34; display:flex; flex-direction:column; overflow:hidden; }
   .tvs.hide { display:none; }
+  .tvhd { width:33px; flex:none; position:relative; }
+  .tvhd div { position:absolute; left:0; right:0; bottom:42px; height:144px; background:#2b2f34; border-radius:0 18px 18px 0; color:#d5dae0; font-size:27px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
   .tvi { display:flex; flex-direction:column; align-items:center; padding:18px 9px; color:#d5dae0; font-size:22px; cursor:pointer; }
   .tvi .b { width:96px; height:96px; border-radius:21px; background:#3f454d; display:flex; align-items:center; justify-content:center; color:#fff; font-size:44px; font-weight:800; overflow:hidden; }
   .tvi .b img { width:100%; height:100%; object-fit:contain; padding:18px; box-sizing:border-box; }
@@ -155,8 +156,8 @@
       <button class="secondary" id="tvReload" title="미리보기 다시 받기">⟳</button>
     </div>
     <div class="tvwrap"><div class="tvbox" id="tvbox"><div class="tvinner" id="tvinner">
-      <div class="tvh"><div class="mn" id="tvMenuBtn">☰</div><img id="tvLogo" src="/static/logo.png" alt=""><div class="t" id="tvTitle"></div><div class="c" id="tvClock"></div></div>
-      <div class="tvm"><div class="tvs" id="tvSide"></div><div class="tvc" id="tvContent"></div></div>
+      <div class="tvh"><img id="tvLogo" src="/static/logo.png" alt=""><div class="t" id="tvTitle"></div><div class="c" id="tvClock"></div></div>
+      <div class="tvm"><div class="tvs" id="tvSide"></div><div class="tvhd"><div id="tvMenuBtn">◁</div></div><div class="tvc" id="tvContent"></div></div>
     </div></div></div>
   </section>
 </div>
@@ -229,6 +230,10 @@
     if (body !== undefined) { if (raw) opt.body = body; else { opt.body = JSON.stringify(body); opt.headers['Content-Type'] = 'application/json'; } }
     const r = await fetch(url, opt);
     const d = await r.json().catch(() => ({}));
+    if (d.restart) {   // 디스크의 프로그램이 새 버전으로 바뀌었다 → 화면을 다시 시작해야 한다
+      halt(d.error, d.supervised ? { label: '지금 다시 시작', onclick: restartNow } : null);
+      throw new Error(d.error);
+    }
     if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
     return d;
   }
@@ -247,6 +252,8 @@
   async function start() {
     info = await api('GET', '/api/info');
     $('#verPill').textContent = 'PC 프로그램 v' + info.version;
+    if (info.disk_version && info.disk_version !== info.version)
+      halt(`프로그램이 v${info.disk_version} 로 업데이트됐습니다. 화면을 다시 시작해야 새 버전이 돕니다.`, info.supervised ? { label: '지금 다시 시작', onclick: restartNow } : null);
     $('#sRepo').value = info.repo; $('#sTv').value = info.tv;
     $('#connInfo').innerHTML = `중계 레포 <b>${esc(info.repo)}</b> · TV 이름 <b>${esc(info.tv)}</b><br>설정 파일: <code>${esc(info.cfgPath)}</code> (암호키·토큰이 들어 있으니 공유하지 마세요)`;
     $('#pairCard').classList.toggle('hidden', !info.configured);
@@ -450,7 +457,7 @@
       : `<div class="empty">「${esc(cur.title)}」<br><br>이 폴더에 index.html 이 없습니다</div>`;
   }
   $('#tvSide').addEventListener('click', (e) => { const t = e.target.closest('[data-tvf]'); if (!t) return; tvFolder = t.dataset.tvf; select(tvFolder); });
-  $('#tvMenuBtn').onclick = () => { tvSideOpen = !tvSideOpen; $('#tvSide').classList.toggle('hide', !tvSideOpen); };
+  $('#tvMenuBtn').onclick = () => { tvSideOpen = !tvSideOpen; $('#tvSide').classList.toggle('hide', !tvSideOpen); $('#tvMenuBtn').textContent = tvSideOpen ? '◁' : '▷'; };
   $('#tvReload').onclick = () => renderTv(true);
   $('#toggleTv').onclick = () => { $('#tvpane').classList.toggle('collapsed'); try { localStorage.setItem('tvHidden', $('#tvpane').classList.contains('collapsed') ? '1' : ''); } catch (_) {} };
   try { if (localStorage.getItem('tvHidden')) $('#tvpane').classList.add('collapsed'); } catch (_) {}
@@ -542,10 +549,37 @@
     catch (e) { msg($('#apkMsg'), e.message, 'err'); }
   };
 
-  // ── 프로그램 업데이트 ──
+  // ── 프로그램 업데이트 (s4bridge 와 같은 방식) ──
+  // [프로그램 업데이트] → 새 파일 받기 → 감시자가 화면을 새 코드로 다시 띄움 → 이 페이지는 저절로 새로고침
+  function halt(text, btn) {
+    let el = $('#haltBox');
+    if (!el) { el = document.createElement('div'); el.id = 'haltBox'; el.style.cssText = 'position:fixed;inset:0;background:rgba(15,20,26,.75);display:flex;align-items:center;justify-content:center;z-index:99'; document.body.appendChild(el); }
+    el.innerHTML = `<div class="card" style="max-width:520px;white-space:pre-wrap">${esc(text)}</div>`;
+    if (btn) { const b = document.createElement('button'); b.textContent = btn.label; b.style.marginTop = '14px'; b.onclick = btn.onclick; el.firstChild.appendChild(document.createElement('br')); el.firstChild.appendChild(b); }
+  }
+  async function waitRestart(target) {
+    const t0 = Date.now();
+    await new Promise(ok => setTimeout(ok, 1200));
+    while (Date.now() - t0 < 90000) {
+      try { const r = await fetch('/api/info'); if (r.ok) { const s = await r.json(); if (!target || s.version === target) { location.reload(); return; } } } catch (_) {}
+      await new Promise(ok => setTimeout(ok, 800));
+    }
+    halt('90초가 지나도 화면이 다시 뜨지 않았습니다 — 검은 창을 보세요. 오류가 있으면 검은 창을 닫고 tvrun.bat 을 다시 실행하세요.');
+  }
+  async function restartNow() {
+    const r = await fetch('/api/restart', { method: 'POST' }).then(x => x.json()).catch(() => ({}));
+    if (r.restarting) { halt('화면을 새 버전으로 다시 시작하는 중입니다… 잠시 뒤 저절로 새로고침됩니다.'); waitRestart(''); }
+    else halt(r.error || '다시 시작하지 못했습니다 — 검은 창을 닫고 tvrun.bat 을 다시 실행하세요.');
+  }
   $('#updBtn').onclick = async () => {
-    try { const r = await api('POST', '/api/update'); alert(r.lines.join('\n') + (r.restart ? '\n\n검은 창을 닫고 tvrun.bat 을 다시 실행하면 새 버전이 적용됩니다.' : '')); }
-    catch (e) { alert(e.message); }
+    const b = $('#updBtn'); b.disabled = true; b.textContent = '확인 중…';
+    try {
+      const r = await fetch('/api/update', { method: 'POST' }).then(x => x.json());
+      if (r.restarting) { halt(`v${r.before} → v${r.after} 로 업데이트했습니다.\n화면을 새 버전으로 다시 시작하는 중입니다 — 잠시 뒤 이 페이지가 저절로 새로고침됩니다.\n(검은 창은 끄지 마세요)`); waitRestart(r.after); return; }
+      if (!r.ok) alert((r.error || '업데이트 실패') + '\n\n' + (r.lines || []).join('\n'));
+      else alert((r.lines || []).join('\n') + (r.note ? '\n\n' + r.note : ''));
+    } catch (e) { alert(e.message); }
+    finally { b.disabled = false; b.textContent = '프로그램 업데이트'; }
   };
 
   start().catch(e => alert(e.message));

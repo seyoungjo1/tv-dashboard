@@ -3,4 +3,6 @@
     <dimen name="header_height">64dp</dimen>
     <dimen name="sidebar_width">124dp</dimen>
     <dimen name="menu_icon">64dp</dimen>
+    <dimen name="sidebar_handle_width">22dp</dimen>
+    <dimen name="sidebar_handle_height">96dp</dimen>
 </resources>
