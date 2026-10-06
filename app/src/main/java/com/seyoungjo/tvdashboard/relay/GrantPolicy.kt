@@ -10,6 +10,7 @@ import java.io.File
  *  · 허용 확장자만 (기본 png · js · json · html)
  *  · 같은 이름은 덮어쓰기. 용량은 도구(HTML)가 한 번에 30MB 로 제한한다.
  *  · 공지사항 도구(main 전용)처럼 files 가 정해진 도구는 그 파일만, read 가 켜진 도구만 get(읽기) 가능
+ *  · 폴더 업로드 도구는 그 폴더의 .json 만 get(읽기) 가능 — 엑셀 붙여넣기가 기존 양식을 보고 맞춰 넣도록
  */
 object GrantPolicy {
     class Denied(message: String) : Exception(message)
@@ -38,10 +39,10 @@ object GrantPolicy {
     }
 
     /** 이 도구로 할 수 있는 작업인지 */
-    fun checkOp(g: Grant, op: String) {
+    fun checkOp(g: Grant, op: String, rel: String = "") {
         when (op) {
             "put" -> {}
-            "get" -> if (!g.read) throw Denied("이 도구로는 파일 올리기만 할 수 있습니다.")
+            "get" -> if (!g.read && !rel.lowercase().endsWith(".json")) throw Denied("이 도구로는 파일 올리기와 JSON 읽기만 할 수 있습니다.")
             else -> throw Denied(if (g.read) "이 도구로는 읽기·저장만 할 수 있습니다." else "이 도구로는 파일 올리기만 할 수 있습니다.")
         }
     }

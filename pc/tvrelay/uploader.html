@@ -34,6 +34,19 @@
   .hidden { display:none; }
   .pw { border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:15px; font-family:inherit; width:190px; }
   .pw.bad { border-color:var(--danger); }
+  h2 { margin:0 0 6px; font-size:17px; font-weight:800; }
+  .in { border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:15px; font-family:inherit; }
+  textarea.in { width:100%; min-height:130px; margin-top:10px; font-size:13px; font-family:Consolas,"D2Coding",monospace; white-space:pre; }
+  .form { margin-top:10px; padding:10px 12px; background:#f5f7fa; border-radius:8px; font-size:13px; color:var(--dim); white-space:pre-wrap; }
+  .pv { max-height:320px; overflow:auto; margin-top:10px; border:1px solid var(--line); border-radius:8px; }
+  .pv table { margin:0; font-size:13px; } .pv th { position:sticky; top:0; background:#f0f3f7; padding:6px; text-align:left; white-space:nowrap; }
+  .pv td { padding:5px 6px; white-space:nowrap; } .pv td.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .seg button { border-radius:0; background:#fff; color:var(--text); padding:9px 18px; font-size:14px; }
+  .seg button + button { border-left:1px solid var(--line); }
+  .seg button.on { background:var(--accent); color:#fff; }
+  .seg button.on.del { background:var(--danger); }
+  .modehint { font-size:13px; color:var(--dim); }
 </style>
 </head>
 <body>
@@ -42,7 +55,12 @@
   <div class="sub" id="sub"></div>
 </header>
 <main>
+  <div class="card row" style="margin-top:0">
+    <span>업로드 비밀번호</span>
+    <input type="password" class="pw" id="pw" placeholder="관리자에게 받은 비밀번호" autocomplete="current-password" style="flex:1">
+  </div>
   <div class="card">
+    <h2>파일 올리기</h2>
     <div class="drop" id="drop">
       <b>여기에 파일을 끌어다 놓거나 눌러서 고르세요</b><br><br>
       <span id="rule"></span>
@@ -53,10 +71,26 @@
       <div class="bar"><div id="prog"></div></div>
       <span class="hint" id="total"></span>
       <button class="secondary" id="clear">비우기</button>
-      <input type="password" class="pw" id="pw" placeholder="업로드 비밀번호" autocomplete="current-password">
       <button id="send" disabled>TV 로 올리기</button>
     </div>
     <div id="msg"></div>
+  </div>
+  <div class="card" id="xlCard">
+    <h2>엑셀 붙여넣기로 JSON 올리기</h2>
+    <div class="hint">JSON 파일을 고르고 [양식 불러오기] → 엑셀에서 표를 복사해 아래에 붙여 넣으면, 지금 파일의 양식에 맞춰 바꿔서 올립니다.
+      첫 줄이 머리글(열 이름)이면 이름으로, 머리글이 없으면 <b>칸 순서대로</b> 들어갑니다.</div>
+    <div class="row">
+      <input class="in" id="xlName" list="xlFiles" placeholder="파일 이름 (예: sd.json)" style="flex:1;min-width:200px">
+      <datalist id="xlFiles"></datalist>
+      <button class="secondary" id="xlLoad">양식 불러오기</button>
+      <button class="secondary hidden" id="xlReload" title="이 PC 에 받아 둔 것 대신 TV 에서 지금 내용을 다시 받습니다">TV 에서 다시 받기</button>
+    </div>
+    <div class="form hidden" id="xlForm"></div>
+    <textarea class="in" id="xlText" placeholder="엑셀에서 표를 선택해 복사(Ctrl+C)한 뒤 여기를 누르고 붙여 넣기(Ctrl+V)" spellcheck="false"></textarea>
+    <div class="row" style="justify-content:flex-start" id="xlModes"></div>
+    <div id="xlPrev"></div>
+    <div class="row"><span class="hint" id="xlSum"></span><button id="xlSend" disabled>TV 로 올리기</button></div>
+    <div id="xlMsg"></div>
   </div>
   <div class="card hint">
     · 같은 이름의 파일은 새 파일로 바뀝니다(덮어쓰기). 다른 폴더나 다른 형식은 올라가지 않습니다.<br>
@@ -64,6 +98,10 @@
     · 올릴 때 관리자에게 받은 <b>업로드 비밀번호</b>를 입력하세요. 열쇠는 비밀번호로 잠겨 있어 비밀번호 없이는 올릴 수 없습니다.
   </div>
 </main>
+<script>
+// 엑셀 붙여넣기 해석기 (관리자 PC 프로그램이 static/xlpaste.js 를 구울 때 넣는다)
+/*__XLPASTE__*/
+</script>
 <script>
 const CFG = /*__CONFIG__*/null;
 (() => {
@@ -174,66 +212,252 @@ const CFG = /*__CONFIG__*/null;
   }
   const blob = async (u8) => (await gh('POST', 'git/blobs', { content: toB64(u8), encoding: 'base64' })).sha;
 
-  // ── 올리기 ──
+  // ── 비밀번호 → 열쇠 (한 번 풀면 이 창을 닫을 때까지) ──
+  async function ensureSecret(say) {
+    if (SECRET) return;
+    const pw = $('#pw').value;
+    if (!pw) { $('#pw').classList.add('bad'); $('#pw').focus(); throw new Error('업로드 비밀번호를 입력하세요. (맨 위 칸)'); }
+    say('비밀번호 확인 중…', 'wait');
+    try { SECRET = await unlock(pw); } catch (e) { $('#pw').classList.add('bad'); $('#pw').select(); throw e; }
+    $('#pw').classList.remove('bad'); $('#pw').value = ''; $('#pw').placeholder = '비밀번호 확인됨 ✓'; $('#pw').disabled = true;
+  }
+
+  // ── 작업 하나 보내고 결과 기다리기: items = [{op:'put', path, data(Uint8Array)} | {op:'get', path}] ──
   const CHUNK = 8 * 1024 * 1024;
+  async function job(items, prog, say) {
+    const id = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('')}`;
+    const kind = `up/${CFG.gid}`;
+    const tree = [], ops = [];
+    let n = 0, done = 0;
+    const total = items.reduce((s, f) => s + (f.data ? f.data.length : 0), 0) || 1;
+    for (const it of items) {
+      if (it.op === 'get') { ops.push({ op: 'get', path: it.path }); continue; }
+      const data = it.data, chunks = [];
+      for (let i = 0; i < data.length; i += CHUNK) {
+        const name = 'd' + (n++);
+        tree.push({ path: name, mode: '100644', type: 'blob', sha: await blob(await seal(data.subarray(i, i + CHUNK), aad(kind, id, name))) });
+        chunks.push(name);
+        done += Math.min(CHUNK, data.length - i); prog(done / total * 0.9);
+      }
+      ops.push({ op: 'put', path: it.path, chunks, size: data.length, sha256: await sha256(data), overwrite: true });
+    }
+    const man = enc.encode(JSON.stringify({ v: 1, id, created: Date.now(), ops }));
+    tree.push({ path: 'm', mode: '100644', type: 'blob', sha: await blob(await seal(man, aad(kind, id, 'm'))) });
+    const t = await gh('POST', 'git/trees', { tree });
+    const c = await gh('POST', 'git/commits', { message: 'up', tree: t.sha, parents: [] });
+    await gh('POST', 'git/refs', { ref: `refs/heads/relay/${CFG.tv}/up/${CFG.gid}/${id}`, sha: c.sha });
+    prog(0.92);
+    say(items.some(x => x.op === 'put') ? '보냈습니다. TV 가 받아 반영하기를 기다리는 중… (보통 10~20초)' : 'TV 에 지금 파일의 양식을 묻는 중… (보통 10~20초)', 'wait');
+    // 결과 기다리기 (relay/<tv>/res/<id>, 이 도구 키로 암호화)
+    const resBranch = `relay/${CFG.tv}/res/${id}`;
+    for (let i = 0; i < 80; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const ref = await gh('GET', 'git/ref/heads/' + resBranch);
+      if (!ref) continue;
+      const commit = await gh('GET', 'git/commits/' + ref.object.sha);
+      const tr = await gh('GET', 'git/trees/' + commit.tree.sha);
+      const m = tr.tree.find(x => x.path === 'm');
+      const res = JSON.parse(dec.decode(await open(await gh('GET', 'git/blobs/' + m.sha, null, true), aad('res', id, 'm'))));
+      await gh('DELETE', 'git/refs/heads/' + resBranch);
+      prog(1);
+      if (res.files) rememberFiles(res.files);
+      return res;
+    }
+    throw new Error('TV 응답이 없습니다. TV 가 꺼져 있거나 인터넷이 끊겼을 수 있습니다. (보낸 파일은 TV 가 켜지면 반영됩니다)');
+  }
+  const listText = (res) => (res.files || []).map(x => `  ${x.p.slice(CFG.folder.length + 1)}  (${size(x.s)})`).join('\n');
+
+  // ── 파일 올리기 ──
   $('#send').onclick = async () => {
     const btn = $('#send'); btn.disabled = true; $('#clear').disabled = true;
     const prog = (p) => $('#prog').style.width = Math.round(p * 100) + '%';
     try {
-      if (!SECRET) {
-        const pw = $('#pw').value;
-        if (!pw) { $('#pw').classList.add('bad'); $('#pw').focus(); throw new Error('업로드 비밀번호를 입력하세요.'); }
-        msg('비밀번호 확인 중…', 'wait');
-        try { SECRET = await unlock(pw); } catch (e) { $('#pw').classList.add('bad'); $('#pw').select(); throw e; }
-        $('#pw').classList.remove('bad'); $('#pw').value = ''; $('#pw').placeholder = '비밀번호 확인됨 ✓'; $('#pw').disabled = true;
-      }
-      const id = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('')}`;
-      const kind = `up/${CFG.gid}`;
-      const tree = [], ops = [];
-      let n = 0, done = 0;
-      const total = files.reduce((s, f) => s + f.file.size, 0) || 1;
+      await ensureSecret(msg);
       msg('암호화해서 보내는 중…', 'wait');
-      for (const f of files) {
-        const data = new Uint8Array(await f.file.arrayBuffer());
-        const chunks = [];
-        for (let i = 0; i < data.length; i += CHUNK) {
-          const name = 'd' + (n++);
-          tree.push({ path: name, mode: '100644', type: 'blob', sha: await blob(await seal(data.subarray(i, i + CHUNK), aad(kind, id, name))) });
-          chunks.push(name);
-          done += Math.min(CHUNK, data.length - i); prog(done / total * 0.9);
-        }
-        ops.push({ op: 'put', path: CFG.folder + '/' + f.path, chunks, size: data.length, sha256: await sha256(data), overwrite: true });
-      }
-      const man = enc.encode(JSON.stringify({ v: 1, id, created: Date.now(), ops }));
-      tree.push({ path: 'm', mode: '100644', type: 'blob', sha: await blob(await seal(man, aad(kind, id, 'm'))) });
-      const t = await gh('POST', 'git/trees', { tree });
-      const c = await gh('POST', 'git/commits', { message: 'up', tree: t.sha, parents: [] });
-      await gh('POST', 'git/refs', { ref: `refs/heads/relay/${CFG.tv}/up/${CFG.gid}/${id}`, sha: c.sha });
-      prog(0.92);
-      msg('보냈습니다. TV 가 받아 반영하기를 기다리는 중… (보통 10~20초)', 'wait');
-      // 결과 기다리기 (relay/<tv>/res/<id>, 이 도구 키로 암호화)
-      const resBranch = `relay/${CFG.tv}/res/${id}`;
-      for (let i = 0; i < 80; i++) {
-        await new Promise(r => setTimeout(r, 3000));
-        const ref = await gh('GET', 'git/ref/heads/' + resBranch);
-        if (!ref) continue;
-        const commit = await gh('GET', 'git/commits/' + ref.object.sha);
-        const tr = await gh('GET', 'git/trees/' + commit.tree.sha);
-        const m = tr.tree.find(x => x.path === 'm');
-        const res = JSON.parse(dec.decode(await open(await gh('GET', 'git/blobs/' + m.sha, null, true), aad('res', id, 'm'))));
-        await gh('DELETE', 'git/refs/heads/' + resBranch);
-        prog(1);
-        const bad = (res.results || []).filter(x => !x.ok);
-        const list = (res.files || []).map(x => `  ${x.p.slice(CFG.folder.length + 1)}  (${size(x.s)})`).join('\n');
-        if (res.ok) { const n = files.length; files = []; render(); msg(`완료! ${n}개를 TV 에 반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${list}`, 'ok'); }
-        else msg('일부 올리지 못했습니다:\n' + bad.map(x => `  ${x.path || ''} — ${x.error}`).join('\n'), 'err');
-        return;
-      }
-      msg('TV 응답이 없습니다. TV 가 꺼져 있거나 인터넷이 끊겼을 수 있습니다. (보낸 파일은 TV 가 켜지면 반영됩니다)', 'err');
+      const items = [];
+      for (const f of files) items.push({ op: 'put', path: CFG.folder + '/' + f.path, data: new Uint8Array(await f.file.arrayBuffer()) });
+      const res = await job(items, prog, msg);
+      const bad = (res.results || []).filter(x => !x.ok);
+      if (res.ok) { const n = files.length; files = []; render(); msg(`완료! ${n}개를 TV 에 반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${listText(res)}`, 'ok'); }
+      else msg('일부 올리지 못했습니다:\n' + bad.map(x => `  ${x.path || ''} — ${x.error}`).join('\n'), 'err');
     } catch (e) {
-      msg(/비밀번호/.test(e.message) ? e.message : '올리지 못했습니다: ' + e.message, 'err');
+      msg(/비밀번호|TV 응답/.test(e.message) ? e.message : '올리지 못했습니다: ' + e.message, 'err');
     } finally {
       btn.disabled = !files.length; $('#clear').disabled = false;
+    }
+  };
+
+  // ── 엑셀 붙여넣기 → JSON ──
+  const X = window.XLPaste;
+  const xmsg = (t, k) => $('#xlMsg').innerHTML = t ? `<div class="msg ${k}">${esc(t)}</div>` : '';
+  // 이 PC(브라우저)에 받아 둔 JSON — 'tvtool.<gid>.list' = TV 폴더 목록(버전 h 포함), 'tvtool.<gid>.f.<이름>' = {text, h, at}
+  // TV 가 알려 준 버전(h)과 같으면 TV 에 묻지 않고 바로 쓴다. 다르면(누가 바꿨으면) 버리고 다시 받는다.
+  const LSP = 'tvtool.' + CFG.gid + '.';
+  const ls = {
+    get(k) { try { return JSON.parse(localStorage.getItem(LSP + k) || 'null'); } catch (_) { return null; } },
+    set(k, v) {
+      const val = JSON.stringify(v);
+      for (let tries = 0; tries < 20; tries++) {
+        try { localStorage.setItem(LSP + k, val); return true; } catch (_) {
+          // 저장 공간이 꽉 참: 이 도구가 받아 둔 것 중 가장 오래된 것부터 지운다
+          let old = null, oldAt = Infinity;
+          try { for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (key.startsWith(LSP + 'f.') && key !== LSP + k) { const at = (JSON.parse(localStorage.getItem(key)) || {}).at || 0; if (at < oldAt) { oldAt = at; old = key; } } } } catch (_) {}
+          if (!old) return false;
+          try { localStorage.removeItem(old); } catch (_) { return false; }
+        }
+      }
+      return false;
+    },
+    del(k) { try { localStorage.removeItem(LSP + k); } catch (_) {} },
+    names() { const out = []; try { for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (key.startsWith(LSP + 'f.')) out.push(key.slice(LSP.length + 2)); } } catch (_) {} return out; },
+  };
+  let listing = ls.get('list');      // [{n, s, h}] 마지막으로 TV 가 알려 준 폴더의 JSON 목록
+  function rememberFiles(list) {
+    listing = list.filter(x => /\.json$/i.test(x.p)).map(x => ({ n: x.p.slice(CFG.folder.length + 1), s: x.s, h: x.h || '' }));
+    ls.set('list', listing);
+    for (const n of ls.names()) { const c = ls.get('f.' + n), e = listing.find(x => x.n === n); if (!e || (e.h && c && c.h !== e.h)) ls.del('f.' + n); }   // 바뀌었거나 지워진 파일
+    showFiles();
+  }
+  function showFiles() {
+    const names = (listing || []).map(x => x.n);
+    for (const n of ls.names()) if (!names.includes(n)) names.push(n);
+    $('#xlFiles').innerHTML = names.map(n => `<option value="${esc(n)}">${ls.get('f.' + n) ? '받아 둠' : ''}</option>`).join('');
+  }
+  showFiles();
+  const shaText = async (t) => sha256(enc.encode(t));
+  /** 받아 둔 것이 TV 와 같은 버전인가: true(확인됨) · null(목록을 아직 모름) · false(다름/없음) */
+  function cacheFresh(name) {
+    const c = ls.get('f.' + name); if (!c) return false;
+    if (!listing) return null;
+    const e = listing.find(x => x.n === name);
+    return !!e && !!e.h && e.h === c.h ? true : (e && !e.h ? null : false);
+  }
+  const when = (t) => new Date(t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  let xlForm = null, xlFor = '', xlOut = null, xlSrc = '';
+  const xlPath = () => { let n = $('#xlName').value.trim().replace(/\\/g, '/').replace(/^\/+/, ''); if (n && !/\.json$/i.test(n)) n += '.json'; return n; };
+  function useForm(name, text, src) {
+    const f = X.form(text);
+    if (f.error) throw new Error(`'${name}' — ${f.error}`);
+    xlForm = f; xlFor = name; xlSrc = src;
+    $('#xlReload').classList.toggle('hidden', !text && src !== 'tv');
+    renderXl();
+  }
+  /** TV 에서 받기 — 고른 파일과 함께, 받아 둔 것이 없거나 오래된 다른 JSON 도 한 번에 받아 둔다 (작업 하나 = 10~20초) */
+  function staleNames(skip) {
+    const want = [];
+    let budget = 3 * 1048576;
+    for (const e of listing || []) {
+      if (e.n === skip || want.length >= 12 || e.s > 1.5 * 1048576 || e.s > budget || cacheFresh(e.n) === true) continue;
+      want.push(e.n); budget -= e.s;
+    }
+    return want;
+  }
+  async function fetchFromTv(name, quiet) {
+    if (!quiet) await ensureSecret(xmsg);
+    const knew = !!listing;
+    const want = name ? [name, ...staleNames(name)] : staleNames('');
+    if (!want.length) return null;
+    const res = await job(want.map(n => ({ op: 'get', path: CFG.folder + '/' + n })), () => {}, quiet ? () => {} : xmsg);
+    let mine = null;
+    for (const r of res.results || []) {
+      if (r.op !== 'get') continue;
+      const n = String(r.path || '').slice(CFG.folder.length + 1);
+      if (r.ok && r.exists) {
+        const e = (listing || []).find(x => x.n === n);
+        ls.set('f.' + n, { text: r.text, h: (e && e.h) || await shaText(r.text), at: Date.now() });
+      }
+      if (n === name) mine = r;
+    }
+    showFiles();
+    // 처음엔 폴더 목록을 몰라 고른 파일만 받았다 → 이제 아는 목록으로 나머지 JSON 도 조용히 받아 둔다
+    if (!quiet && !knew && staleNames(name).length) fetchFromTv('', true).catch(() => {});
+    if (!name) return null;
+    if (!mine || !mine.ok) throw new Error((mine && mine.error) || '읽지 못했습니다');
+    return mine;
+  }
+  async function loadForm(force) {
+    const name = xlPath();
+    if (!name) { $('#xlName').focus(); return xmsg('올릴 JSON 파일 이름을 적거나 고르세요.', 'err'); }
+    const fresh = cacheFresh(name);
+    if (!force && fresh !== false) {                          // 받아 둔 것 사용 (TV 에 묻지 않음)
+      const c = ls.get('f.' + name);
+      try { useForm(name, c.text, 'cache'); } catch (e) { return xmsg(e.message, 'err'); }
+      return xmsg(fresh ? '' : `이 PC 에 받아 둔 양식을 씁니다 (${when(c.at)} 받음). 다를 수 있으면 [TV 에서 다시 받기].`, fresh ? '' : 'wait');
+    }
+    $('#xlLoad').disabled = $('#xlReload').disabled = true;
+    try {
+      const r = await fetchFromTv(name);
+      useForm(name, r.exists ? r.text : '', 'tv');
+      xmsg(r.exists ? '' : `'${name}' 은(는) 아직 없는 파일입니다. 붙여 넣은 표로 새로 만듭니다.`, r.exists ? '' : 'wait');
+      $('#xlText').focus();
+    } catch (e) { xlForm = null; renderXl(); xmsg(/비밀번호|TV 응답/.test(e.message) ? e.message : '양식을 불러오지 못했습니다: ' + e.message, 'err'); }
+    finally { $('#xlLoad').disabled = $('#xlReload').disabled = false; }
+  }
+  $('#xlLoad').onclick = () => loadForm(false);
+  $('#xlReload').onclick = () => loadForm(true);
+  $('#xlName').oninput = () => {
+    if (xlForm && xlPath() !== xlFor) { xlForm = null; xmsg(''); renderXl(); }
+    if (!xlForm && xlPath() && cacheFresh(xlPath()) === true) loadForm(false);   // 받아 둔 최신 양식은 바로 보여 준다
+  };
+  $('#xlText').oninput = () => renderXl();
+  let xlMode = 'replace';
+  $('#xlModes').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { xlMode = b.dataset.m; renderXl(); } };
+  function renderXl() {
+    const f = xlForm;
+    $('#xlForm').classList.toggle('hidden', !f);
+    if (f) $('#xlForm').textContent = `양식 — ${xlFor}${xlSrc === 'cache' ? '  (이 PC 에 받아 둔 것)' : ''}\n${X.describe(f)}`;
+    const isMap = f && f.kind === 'map', isNew = f && f.kind === 'new';
+    // 덮어쓰기 · 추가하기 · 삭제 토글 (파일을 새로 고르면 키-값 모음은 추가하기, 표는 덮어쓰기로 시작)
+    const sig = f ? xlFor + '|' + f.kind : '';
+    if ($('#xlModes').dataset.sig !== sig) { $('#xlModes').dataset.sig = sig; xlMode = isMap ? 'add' : 'replace'; }
+    if (isNew) xlMode = 'replace';
+    const HINT = {
+      replace: '붙여 넣은 표로 파일 전체를 바꿉니다 (기존 내용은 없어짐)',
+      add: isMap ? '붙여 넣은 줄을 더합니다 — 같은 키(날짜·구분 등)는 새 값으로 바뀌고, 나머지는 그대로' : '붙여 넣은 줄을 기존 표 아래에 이어 붙입니다',
+      delete: isMap ? '붙여 넣은 키(날짜·구분 등)를 지웁니다 — 값 칸은 없어도 됩니다' : '붙여 넣은 줄과 같은 줄을 지웁니다 — 머리글을 넣으면 그 칸만 비교',
+    };
+    $('#xlModes').innerHTML = !f ? '' : isNew ? '<span class="modehint">새 파일 — 붙여 넣은 표로 만듭니다</span>'
+      : `<div class="seg">${[['replace', '덮어쓰기'], ['add', '추가하기'], ['delete', '삭제']].map(([k, t]) =>
+          `<button type="button" data-m="${k}" class="${xlMode === k ? 'on' : ''} ${k === 'delete' ? 'del' : ''}">${t}</button>`).join('')}</div>
+         <span class="modehint">${esc(HINT[xlMode])}</span>`;
+    const mode = xlMode;
+    const text = $('#xlText').value;
+    xlOut = null; $('#xlSend').disabled = true; $('#xlSum').textContent = ''; $('#xlPrev').innerHTML = '';
+    if (!f || !text.trim()) return;
+    const rows = X.parse(text);
+    const o = X.build(f, rows, { mode });
+    if (o.error) { $('#xlSum').innerHTML = `<span class="bad">${esc(o.error)}</span>`; return; }
+    xlOut = o;
+    const head = o.cols.map((c, k) => `<th>${esc(c.name)}<br><span class="hint">${o.mapping[k] >= 0 ? (o.mapping[k] + 1) + '번째 칸' : '(비움)'}</span></th>`).join('');
+    const show = o.table.slice(0, 50).map(r => '<tr>' + r.map((v, k) => `<td class="${o.cols[k].type === 'num' ? 'n' : ''}">${v === null ? '<span class="hint">·</span>' : esc(typeof v === 'number' ? v.toLocaleString('ko-KR', { maximumFractionDigits: 6 }) : v)}</td>`).join('') + '</tr>').join('');
+    $('#xlPrev').innerHTML = `<div class="pv"><table><tr>${head}</tr>${show}</table></div>` +
+      (o.table.length > 50 ? `<div class="hint">… ${o.table.length - 50}줄 더</div>` : '') +
+      (o.warnings.length ? `<div class="msg wait">확인하세요:\n${esc(o.warnings.join('\n'))}</div>` : '');
+    $('#xlSum').textContent = `붙여 넣은 ${o.table.length}줄${o.headerUsed ? ' (첫 줄은 머리글로 보고 뺐습니다)' : ' (머리글 없음 — 칸 순서대로)'}` +
+      (o.mode === 'delete' ? ` · 지움 ${o.removed}${o.missing ? ` · 없는 것 ${o.missing}` : ''}` : o.kind === 'map' ? ` · 새로 ${o.added} · 바뀜 ${o.changed}` : ` · 더함 ${o.added}`) +
+      ` → 올린 뒤 전체 ${o.count}${o.kind === 'map' ? '개' : '줄'} · ${size(new TextEncoder().encode(o.json).length)}`;
+    $('#xlSend').disabled = !o.table.length || (o.mode === 'delete' && !o.removed);
+    $('#xlSend').textContent = o.mode === 'delete' ? `${o.removed}개 지우고 TV 로 올리기` : 'TV 로 올리기';
+    $('#xlSend').style.background = o.mode === 'delete' ? 'var(--danger)' : '';
+  }
+  $('#xlSend').onclick = async () => {
+    if (!xlOut) return;
+    if (xlOut.mode === 'replace' && xlForm.kind !== 'new' && !confirm(`'${xlFor}' 의 기존 내용 전체를 붙여 넣은 ${xlOut.table.length}줄로 바꿉니다. 계속할까요?`)) return;
+    if (xlOut.mode === 'delete' && !confirm(`'${xlFor}' 에서 ${xlOut.removed}개를 지웁니다. 계속할까요?`)) return;
+    const btn = $('#xlSend'); btn.disabled = true;
+    try {
+      await ensureSecret(xmsg);
+      xmsg('암호화해서 보내는 중…', 'wait');
+      const res = await job([{ op: 'put', path: CFG.folder + '/' + xlFor, data: enc.encode(xlOut.json) }], () => {}, xmsg);
+      const r = (res.results || [])[0] || {};
+      if (!res.ok) throw new Error(r.error || '실패');
+      ls.set('f.' + xlFor, { text: xlOut.json, h: await shaText(xlOut.json), at: Date.now() });   // 올린 내용 = TV 의 새 내용
+      if (res.files) rememberFiles(res.files);
+      xmsg(`완료! '${xlFor}' 을(를) TV 에 반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${listText(res)}`, 'ok');
+      $('#xlText').value = ''; xlForm = X.form(xlOut.json); xlSrc = 'cache'; renderXl();
+    } catch (e) {
+      xmsg(/비밀번호|TV 응답/.test(e.message) ? e.message : '올리지 못했습니다: ' + e.message, 'err');
+      btn.disabled = false;
     }
   };
 })();

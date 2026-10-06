@@ -24,6 +24,7 @@ object RelayWorker {
     private const val HEARTBEAT_MS = 5 * 60_000L
     private const val CLEANUP_MS = 10 * 60_000L
     private const val RESULT_MAX_AGE_MS = 60 * 60_000L
+    private const val GET_MAX = 8L * 1024 * 1024         // 직원 도구 읽기(공지 · JSON 양식) 최대 크기
 
     @Volatile var status: String = "꺼짐"
         private set
@@ -164,17 +165,18 @@ object RelayWorker {
             val puts = ArrayList<Pair<String, Long>>()
             for (i in 0 until list.length()) {
                 val op = list.getJSONObject(i)
-                GrantPolicy.checkOp(grant, op.optString("op"))
-                puts.add(GrantPolicy.checkPath(grant, op.getString("path")) to op.optLong("size", 0))
+                val rel = GrantPolicy.checkPath(grant, op.getString("path"))
+                GrantPolicy.checkOp(grant, op.optString("op"), rel)
+                puts.add(rel to op.optLong("size", 0))
             }
             for (i in 0 until list.length()) {
                 val op = list.getJSONObject(i)
                 val kind = op.optString("op")
                 val r = JSONObject().put("op", kind).put("path", op.optString("path"))
                 try {
-                    if (kind == "get") {                   // 공지사항 도구: 작은 글 파일을 결과에 그대로 담는다
+                    if (kind == "get") {                   // 공지사항 · JSON 양식 읽기: 글 파일을 결과에 그대로 담는다
                         val f = ops.fileOrNull(puts[i].first)
-                        if (f != null && f.length() > 256 * 1024) throw FileOps.OpError(413, "파일이 너무 큽니다.")
+                        if (f != null && f.length() > GET_MAX) throw FileOps.OpError(413, "파일이 너무 큽니다 (${GET_MAX / 1048576}MB 까지 읽을 수 있습니다).")
                         r.put("text", f?.readText(Charsets.UTF_8) ?: "").put("exists", f != null)
                     } else {
                         runOp(ctx, c, ops, job, files, op.put("path", puts[i].first).put("overwrite", true), r, ArrayList())

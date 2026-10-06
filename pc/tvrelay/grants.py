@@ -7,6 +7,7 @@
   · 업로드 비밀번호: 내려받을 때 정한 비밀번호로 폴더 열쇠·토큰을 잠가서(PBKDF2 → AES-256-GCM) 넣는다.
     HTML 파일만 가져가서는 아무것도 할 수 없고, 비밀번호가 맞아야 열쇠가 풀린다.
   · 공지사항 편집 도구(main 전용): 키 'main#공지' — main/공지.txt 하나만 읽기(get)·저장(put) 가능
+  · 폴더 도구는 엑셀 붙여넣기용으로 그 폴더의 .json 을 읽을(get) 수 있다 (양식 확인 · 브라우저에 받아 둠)
 보관: 이 폴더의 grants.json (키가 들어 있으므로 레포에 올리지 않는다).
 """
 from __future__ import annotations
@@ -115,4 +116,7 @@ def bake(cfg: RelayConfig, g: dict[str, Any], password: str, tool_token: str = "
     js = json.dumps(conf, ensure_ascii=False).replace("</", "<\\/")
     if "/*__CONFIG__*/null" not in tpl:
         raise ValueError("uploader.html 템플릿이 올바르지 않습니다")
+    if "/*__XLPASTE__*/" in tpl:            # 엑셀 붙여넣기 해석기 (관리자 화면과 같은 파일)
+        xl = (HERE / "static" / "xlpaste.js").read_text(encoding="utf-8").replace("</", "<\\/")
+        tpl = tpl.replace("/*__XLPASTE__*/", xl)
     return tpl.replace("/*__CONFIG__*/null", js)

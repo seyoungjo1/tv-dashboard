@@ -101,6 +101,8 @@ class ToolTest(unittest.TestCase):
         cfg = config.setup("github_pat_main", "o/relay", "osan", tmp)
         g = grants.new_grant("원가")
         html = grants.bake(cfg, g, "pw1234")
+        self.assertIn("XLPaste", html)                      # 엑셀 붙여넣기 해석기가 들어감
+        self.assertNotIn("/*__XLPASTE__*/", html)
         self.assertNotIn("/*__CONFIG__*/null", html)
         self.assertNotIn(g["key"], html)                   # 폴더 열쇠·토큰도 비밀번호로 잠겨 있다
         self.assertNotIn("github_pat_main", html)

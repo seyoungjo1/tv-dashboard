@@ -122,6 +122,19 @@
   #ssVids .v { display:flex; align-items:center; gap:6px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; font-size:13px; }
   #ssVids .v .n { width:56px; color:#0b7fae; font-weight:800; } #ssVids .v .f { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #ssVids .v.new { background:#f0fbf4; } #ssVids .v button { padding:4px 8px; }
+  /* 엑셀 붙여넣기 → JSON */
+  .xl { padding:14px; }
+  .xl .form { padding:10px 12px; background:#f5f7fa; border-radius:8px; font-size:13px; color:var(--dim); white-space:pre-wrap; }
+  .xl textarea { width:100%; box-sizing:border-box; min-height:140px; margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; font-family:Consolas,"D2Coding",monospace; white-space:pre; }
+  .xl .pv { max-height:340px; overflow:auto; margin-top:10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .xl .pv table { border-collapse:collapse; width:100%; font-size:13px; } .xl .pv th { position:sticky; top:0; background:#f0f3f7; padding:6px; text-align:left; white-space:nowrap; }
+  .xl .pv td { padding:5px 6px; border-bottom:1px solid #f0f2f5; white-space:nowrap; } .xl .pv td.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .xl .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+  .seg button { border-radius:0; background:#fff; color:var(--text); padding:8px 16px; }
+  .seg button + button { border-left:1px solid var(--line); }
+  .seg button.on { background:var(--accent); color:#fff; } .seg button.on.del { background:var(--danger); }
+  .xl .warn { margin-top:10px; padding:10px 12px; border-radius:8px; background:#fff4dc; color:#7a5300; white-space:pre-wrap; font-size:13px; }
 </style>
 </head>
 <body>
@@ -292,6 +305,7 @@
 </form></div>
 <div id="jobsBar" class="hidden"><div class="jh"><span>진행 중인 작업</span><button class="icon" id="jobsClose" style="font-size:14px">✕</button></div><div id="jobsMini"></div></div>
 
+<script src="/static/xlpaste.js"></script>
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
@@ -852,7 +866,8 @@
                (grantMap[sel] ? `<button class="secondary" data-gt="renew" data-f="${esc(sel)}">새로 발급</button> ` : '') +
                `<a class="btn secondary" href="/api/syncbat?folder=${encodeURIComponent(sel)}" download title="PC 의 아무 폴더에 넣고 실행하면 그 폴더의 파일을 이 TV 폴더로 올립니다 (바뀐 파일만)">자동 업로드 .bat 받기</a> ` : '') +
         `<button class="secondary" data-a="sample">예제 대시보드 만들기</button> <button class="secondary" data-a="reload">TV 새로고침</button>` + (sel ? ` <button class="secondary" data-a="rename">이름 변경</button> <button class="danger" data-a="delete">삭제</button>` : '')
-      : `<button class="secondary" data-a="download">다운로드</button> <button class="secondary" data-a="replace">교체</button> <button class="secondary" data-a="rename">이름 변경</button> <button class="danger" data-a="delete">삭제</button>`;
+      : (ext(e.p) === 'json' ? `<button data-a="xl" title="엑셀에서 복사한 표를 붙여 넣어 이 JSON 을 덮어쓰기·추가하기·삭제">엑셀 붙여넣기</button> ` : '') +
+        `<button class="secondary" data-a="download">다운로드</button> <button class="secondary" data-a="replace">교체</button> <button class="secondary" data-a="rename">이름 변경</button> <button class="danger" data-a="delete">삭제</button>`;
     if (!fresh && pb.dataset.for === sel) return;      // 목록만 갱신될 때는 미리보기를 다시 받지 않는다
     pb.dataset.for = sel;
     const seq = ++previewSeq;
@@ -874,6 +889,75 @@
     }
   }
   pb.addEventListener('click', (e) => { const t = e.target.closest('[data-go]'); if (t) select(t.dataset.go); });
+
+  // ── 엑셀 붙여넣기 → JSON (직원용 업로드 HTML 과 같은 해석기 static/xlpaste.js) ──
+  // 기존 파일은 PC 에 받아 둔 것(미리보기 캐시)을 쓰고, TV 와 버전이 다를 때만 다시 받는다. 같은 폴더의 다른 JSON 도 함께 받아 둔다.
+  let xl = null;     // {p, form, mode, out}
+  async function xlOpen(p) {
+    const seq = ++previewSeq;
+    pb.dataset.for = p;
+    const others = kids(parent(p)).filter(k => !k.d && ext(k.p) === 'json' && k.p !== p && k.s < 3 * 1048576).map(k => k.p);
+    pb.innerHTML = '<div class="loading">기존 양식을 읽는 중…</div>';
+    if (!await ensure([p, ...others], () => seq === previewSeq, (t) => pb.innerHTML = `<div class="loading">${esc(t)}</div>`)) return;
+    let text = '';
+    try { text = await (await fetch(prevUrl(p) + '?t=' + Date.now())).text(); } catch (_) {}
+    const form = XLPaste.form(text);
+    if (form.error) { pb.innerHTML = `<div class="loading">${esc(form.error)}</div>`; return; }
+    xl = { p, form, mode: form.kind === 'map' ? 'add' : 'replace', out: null };
+    pb.innerHTML = `<div class="xl">
+      <div class="form" id="xlForm"></div>
+      <textarea id="xlText" placeholder="엑셀에서 표를 선택해 복사(Ctrl+C)한 뒤 여기를 누르고 붙여 넣기(Ctrl+V)&#10;첫 줄이 머리글(열 이름)이면 이름으로, 머리글이 없으면 칸 순서대로 들어갑니다" spellcheck="false"></textarea>
+      <div class="row" id="xlModes"></div>
+      <div id="xlPrev"></div>
+      <div class="row"><span class="hint" id="xlSum" style="flex:1"></span><button class="secondary" id="xlCancel">닫기</button><button id="xlSend" disabled>TV 에 올리기</button></div>
+    </div>`;
+    $('#xlText').oninput = xlRender;
+    $('#xlModes').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { xl.mode = b.dataset.m; xlRender(); } };
+    $('#xlCancel').onclick = () => { xl = null; pb.dataset.for = '\u0000'; renderPane(true); };
+    $('#xlSend').onclick = xlSend;
+    xlRender();
+    $('#xlText').focus();
+  }
+  function xlRender() {
+    const f = xl.form, isMap = f.kind === 'map', isNew = f.kind === 'new';
+    if (isNew) xl.mode = 'replace';
+    $('#xlForm').textContent = `양식 — ${base(xl.p)}\n${XLPaste.describe(f)}`;
+    const HINT = {
+      replace: '붙여 넣은 표로 파일 전체를 바꿉니다 (기존 내용은 없어짐)',
+      add: isMap ? '붙여 넣은 줄을 더합니다 — 같은 키(날짜·구분 등)는 새 값으로 바뀌고, 나머지는 그대로' : '붙여 넣은 줄을 기존 표 아래에 이어 붙입니다',
+      delete: isMap ? '붙여 넣은 키(날짜·구분 등)를 지웁니다 — 값 칸은 없어도 됩니다' : '붙여 넣은 줄과 같은 줄을 지웁니다 — 머리글을 넣으면 그 칸만 비교',
+    };
+    $('#xlModes').innerHTML = isNew ? '<span class="hint">비어 있는 파일 — 붙여 넣은 표로 만듭니다</span>'
+      : `<div class="seg">${[['replace', '덮어쓰기'], ['add', '추가하기'], ['delete', '삭제']].map(([k, t]) =>
+          `<button type="button" data-m="${k}" class="${xl.mode === k ? 'on' : ''} ${k === 'delete' ? 'del' : ''}">${t}</button>`).join('')}</div><span class="hint">${esc(HINT[xl.mode])}</span>`;
+    const text = $('#xlText').value;
+    xl.out = null; $('#xlSend').disabled = true; $('#xlSum').textContent = ''; $('#xlPrev').innerHTML = '';
+    $('#xlSend').textContent = 'TV 에 올리기'; $('#xlSend').className = '';
+    if (!text.trim()) return;
+    const o = XLPaste.build(f, XLPaste.parse(text), { mode: xl.mode });
+    if (o.error) { $('#xlSum').innerHTML = `<span style="color:var(--danger)">${esc(o.error)}</span>`; return; }
+    xl.out = o;
+    const head = o.cols.map((c, k) => `<th>${esc(c.name)}<br><span class="hint">${o.mapping[k] >= 0 ? (o.mapping[k] + 1) + '번째 칸' : '(비움)'}</span></th>`).join('');
+    const rows = o.table.slice(0, 80).map(r => '<tr>' + r.map((v, k) => `<td class="${o.cols[k].type === 'num' ? 'n' : ''}">${v === null ? '<span class="hint">·</span>' : esc(typeof v === 'number' ? v.toLocaleString('ko-KR', { maximumFractionDigits: 6 }) : v)}</td>`).join('') + '</tr>').join('');
+    $('#xlPrev').innerHTML = `<div class="pv"><table><tr>${head}</tr>${rows}</table></div>` +
+      (o.table.length > 80 ? `<div class="hint">… ${o.table.length - 80}줄 더</div>` : '') +
+      (o.warnings.length ? `<div class="warn">확인하세요:\n${esc(o.warnings.join('\n'))}</div>` : '');
+    $('#xlSum').textContent = `붙여 넣은 ${o.table.length}줄${o.headerUsed ? ' (첫 줄은 머리글로 보고 뺐습니다)' : ' (머리글 없음 — 칸 순서대로)'}` +
+      (o.mode === 'delete' ? ` · 지움 ${o.removed}${o.missing ? ` · 없는 것 ${o.missing}` : ''}` : o.kind === 'map' ? ` · 새로 ${o.added} · 바뀜 ${o.changed}` : ` · 더함 ${o.added}`) +
+      ` → 올린 뒤 전체 ${o.count}${o.kind === 'map' ? '개' : '줄'} · ${size(new TextEncoder().encode(o.json).length)}`;
+    $('#xlSend').disabled = !o.table.length || (o.mode === 'delete' && !o.removed);
+    if (o.mode === 'delete') { $('#xlSend').textContent = `${o.removed}개 지우고 TV 에 올리기`; $('#xlSend').className = 'danger'; }
+  }
+  async function xlSend() {
+    const o = xl && xl.out; if (!o) return;
+    if (o.mode === 'replace' && xl.form.kind !== 'new' && !confirm(`'${base(xl.p)}' 의 기존 내용 전체를 붙여 넣은 ${o.table.length}줄로 바꿉니다. 계속할까요?`)) return;
+    if (o.mode === 'delete' && !confirm(`'${base(xl.p)}' 에서 ${o.removed}개를 지웁니다. 계속할까요?`)) return;
+    const label = { replace: '덮어쓰기', add: '추가하기', delete: '삭제' }[o.mode];
+    await stageAndSend([[xl.p, new File([o.json], base(xl.p), { type: 'application/json' })]], `엑셀 붙여넣기(${label}): ${xl.p}`);
+    xl.form = XLPaste.form(o.json);           // 이어서 붙여 넣으면 방금 올린 내용 기준
+    $('#xlText').value = ''; xlRender();
+    $('#xlSum').textContent = '보냈습니다. 아래 작업 목록에서 TV 반영을 확인하세요.';
+  }
 
   /** 미리보기 파일이 PC 에 없으면 TV 에서 받아 온다 (TV 확인 주기만큼 걸림). alive() 가 false 가 되면 그만 기다린다 */
   async function ensure(paths, alive, say) {
@@ -969,6 +1053,7 @@
     const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
     const p = sel;
     if (a === 'download') return send([{ op: 'get', path: p }], '다운로드: ' + p);
+    if (a === 'xl') return xlOpen(p);
     if (a === 'replace') { replaceTarget = p; $('#replaceInput').value = ''; return $('#replaceInput').click(); }
     if (a === 'reload') return send([{ op: 'reload' }], 'TV 화면 새로고침');
     if (a === 'sample') { const n = prompt('만들 폴더 이름', '생산팀'); if (n) send([{ op: 'sample', path: join(p, n.trim()) }], '예제 대시보드: ' + n); return; }

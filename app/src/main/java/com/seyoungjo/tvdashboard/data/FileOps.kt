@@ -188,9 +188,15 @@ class FileOps(private val ctx: Context) {
         val d = g.resolve(requirePath(path))
         val out = JSONArray()
         if (!d.isDirectory) return out
+        var hashed = false
         d.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.sortedBy { it.path }.forEach {
-            out.put(JSONObject().put("p", g.relativize(it)).put("s", it.length()).put("t", it.lastModified()))
+            val o = JSONObject().put("p", g.relativize(it)).put("s", it.length()).put("t", it.lastModified())
+            if (it.extension.equals("json", true)) {          // 직원 도구가 브라우저에 받아 둔 JSON 이 최신인지 비교하는 버전
+                HashCache.get(ctx, it)?.let { h -> o.put("h", h); hashed = true }
+            }
+            out.put(o)
         }
+        if (hashed) HashCache.flush(ctx)
         return out
     }
 
