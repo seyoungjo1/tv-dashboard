@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, config, update
+from . import __version__, config, grants, update
 from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
@@ -81,6 +81,8 @@ class Api:
         self.preview_done: set[str] = set()
         self.pending_paths: dict[str, str] = {}           # 받는 중인 경로 → 작업 id (같은 파일을 두 번 받지 않게)
         self.tree: dict[str, dict[str, Any]] = {}
+        self.grant_jobs: dict[str, str] = {}               # 도구 등록 작업 id → 폴더
+        self._last_state: dict[str, Any] | None = None
         self._relay: Relay | None = None
         self.lock = threading.Lock()
 
@@ -104,16 +106,84 @@ class Api:
                 "cfgPath": str(config.path(self.root)), "root": str(self.root)}
 
     def setup(self, body: dict[str, Any]) -> dict[str, Any]:
-        cfg = config.setup(str(body.get("token", "")), str(body.get("repo", "")), str(body.get("tv", "")), self.root)
+        tool = body.get("toolToken")
+        cfg = config.setup(str(body.get("token", "")), str(body.get("repo", "")), str(body.get("tv", "")), self.root,
+                           tool_token=None if tool is None else str(tool))
         Relay(cfg).gh.repo_info()        # 레포·토큰 확인
         self._relay = None
         return self.info()
+
+    # ── 직원 업로드 도구 (폴더 전용 HTML) ──
+    def grant_list(self) -> dict[str, Any]:
+        local = grants.load(self.root)
+        tv = {g.get("gid"): g for g in (self._last_state or {}).get("grants") or []}
+        items = []
+        for folder, g in sorted(local.items()):
+            t = tv.get(g["gid"]) or {}
+            items.append({"folder": folder, "gid": g["gid"], "status": g.get("status"), "created": g.get("created"),
+                          "onTv": bool(t), "used": t.get("used")})
+        return {"items": items}
+
+    def grant(self, body: dict[str, Any]) -> dict[str, Any]:
+        """폴더 전용 업로드 도구 등록(처음) 또는 새로 발급(renew). 이미 등록돼 있으면 바로 받을 수 있다."""
+        folder = str(body.get("folder", "")).strip().strip("/")
+        if not folder:
+            raise ValueError("폴더를 고르세요")
+        renew = bool(body.get("renew"))
+        with self.lock:
+            data = grants.load(self.root)
+            old = data.get(folder)
+            if old and old.get("status") == "active" and not renew:
+                return {"ready": True, "folder": folder}
+            g = grants.new_grant(folder)
+            job = Job()
+            if old:
+                job.op("revoke", gid=old["gid"])
+            job.ops.append(grants.grant_op(g))
+            id_ = self.relay().submit(job)
+            g["job"] = id_
+            data[folder] = g
+            grants.save(self.root, data)
+            self.grant_jobs[id_] = folder
+        echo("업로드 도구 %s: '%s' — TV 확인을 기다립니다 (%s)" % ("새로 발급" if old else "등록", folder, id_))
+        return {"id": id_, "folder": folder}
+
+    def revoke(self, body: dict[str, Any]) -> dict[str, Any]:
+        folder = str(body.get("folder", "")).strip().strip("/")
+        with self.lock:
+            data = grants.load(self.root)
+            g = data.pop(folder, None)
+            if not g:
+                raise ValueError("발급된 도구가 없습니다: %s" % folder)
+            id_ = self.relay().submit(Job().op("revoke", gid=g["gid"]))
+            grants.save(self.root, data)
+        echo("업로드 도구 폐기: '%s' (%s)" % (folder, id_))
+        return {"id": id_}
+
+    def tool_html(self, folder: str) -> tuple[str, bytes]:
+        g = grants.load(self.root).get(folder.strip().strip("/"))
+        if not g or g.get("status") != "active":
+            raise ValueError("아직 TV 에 등록되지 않은 도구입니다. [업로드 도구 받기]를 먼저 누르세요.")
+        cfg = config.load(self.root)
+        html = grants.bake(cfg, g, cfg.tool_token)
+        return "%s_업로드.html" % g["name"], html.encode("utf-8")
 
     def state(self) -> dict[str, Any]:
         st = self.relay().state()
         if st is None:
             return {"none": True, "online": False}
         self.tree = {e["p"]: e for e in st.get("tree") or []}
+        self._last_state = st
+        # TV 에 등록이 확인된 도구는 '등록됨' 으로 (결과를 놓쳤어도 상태로 확인)
+        on_tv = {g.get("gid") for g in st.get("grants") or []}
+        data = grants.load(self.root)
+        changed = False
+        for g in data.values():
+            if g.get("status") != "active" and g["gid"] in on_tv:
+                g["status"] = "active"
+                changed = True
+        if changed:
+            grants.save(self.root, data)
         return st
 
     # ── 미리보기 캐시 (out/preview/<경로>) ──
@@ -235,6 +305,17 @@ class Api:
                         self.pending_paths.pop(p, None)
                 self.preview_done.add(id_)
             return r
+        if id_ in self.grant_jobs:                         # 업로드 도구 등록 결과
+            folder = self.grant_jobs.pop(id_)
+            ok = any(x.get("op") == "grant" and x.get("ok") for x in r.get("results", []))
+            with self.lock:
+                data = grants.load(self.root)
+                g = data.get(folder)
+                if g and g.get("job") == id_:
+                    g["status"] = "active" if ok else "failed"
+                    grants.save(self.root, data)
+            r["grantFolder"] = folder
+            r["grantOk"] = ok
         for item in r.get("results", []):
             if "data" in item:
                 name = Path(str(item.get("name") or item.get("path") or "file")).name or "file"
@@ -318,6 +399,12 @@ class Api:
             return 200, {"done": bool(cfg) and pair_done(cfg, one("branch"))}
         if method == "POST" and path == "/api/preview":
             return 200, self.request_preview(body)
+        if method == "GET" and path == "/api/grants":
+            return 200, self.grant_list()
+        if method == "POST" and path == "/api/grant":
+            return 200, self.grant(body)
+        if method == "POST" and path == "/api/revoke":
+            return 200, self.revoke(body)
         if method == "GET" and path == "/api/log":
             return 200, {"lines": LOG[-100:]}
         return 404, {"error": "없는 주소: %s %s" % (method, path)}
@@ -367,6 +454,13 @@ def make_handler(api: Api):
                 if ctype.startswith("text/") or ctype in ("application/json", "application/javascript"):
                     ctype += "; charset=utf-8"
                 return self._send(200, f.read_bytes(), ctype)
+            if method == "GET" and u.path == "/api/tool":     # 폴더 전용 업로드 HTML 내려받기
+                try:
+                    name, data = api.tool_html((parse_qs(u.query).get("folder") or [""])[0])
+                except (ValueError, config.ConfigError) as e:
+                    return self._send(400, {"error": str(e)})
+                return self._send(200, data, "text/html; charset=utf-8",
+                                  {"Content-Disposition": "attachment; filename*=UTF-8''" + quote(name)})
             if method == "GET" and u.path == "/api/download":
                 name = Path((parse_qs(u.query).get("f") or [""])[0]).name
                 f = api.downloads / name

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>업로드</title>
+<!-- 대상 오산공장 Dashboard — 폴더 전용 업로드 도구 (관리자 PC 프로그램이 만든 파일입니다. 내용을 고치지 마세요) -->
+<style>
+  :root { --bg:#eef1f4; --line:#dde3ea; --text:#2b3440; --dim:#6b7785; --accent:#0bb5e8; --danger:#e5534b; --ok:#19b394; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"Pretendard","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif; font-weight:600; }
+  header { background:#1e2125; color:#fff; padding:14px 22px; }
+  header h1 { margin:0; font-size:20px; font-weight:800; }
+  header .sub { color:#c9d1d9; font-size:13px; margin-top:4px; }
+  main { max-width:760px; margin:24px auto; padding:0 16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  .drop { border:3px dashed var(--line); border-radius:12px; padding:34px 16px; text-align:center; color:var(--dim); cursor:pointer; }
+  .drop.over { border-color:var(--accent); background:#e8f7fd; color:var(--text); }
+  .drop b { color:var(--text); font-size:17px; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:14px; }
+  td { padding:7px 4px; border-bottom:1px solid #f0f2f5; }
+  td.r { text-align:right; color:var(--dim); white-space:nowrap; }
+  .bad { color:var(--danger); }
+  .okc { color:var(--ok); }
+  button { border:0; border-radius:8px; padding:11px 22px; background:var(--accent); color:#fff; font-size:15px; font-weight:800; cursor:pointer; font-family:inherit; }
+  button.secondary { background:#e6ebf1; color:var(--text); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:14px; flex-wrap:wrap; }
+  .bar { height:8px; background:#e6ebf1; border-radius:4px; overflow:hidden; flex:1; min-width:160px; }
+  .bar div { height:100%; background:var(--accent); width:0; transition:width .2s; }
+  .msg { padding:12px 14px; border-radius:8px; margin-top:12px; white-space:pre-wrap; font-size:14px; }
+  .msg.err { background:#fde8e8; color:#8c1d1d; } .msg.ok { background:#e5f6ec; color:#14663d; } .msg.wait { background:#fff4dc; color:#7a5300; }
+  .hint { color:var(--dim); font-size:13px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="h1">업로드</h1>
+  <div class="sub" id="sub"></div>
+</header>
+<main>
+  <div class="card">
+    <div class="drop" id="drop">
+      <b>여기에 파일을 끌어다 놓거나 눌러서 고르세요</b><br><br>
+      <span id="rule"></span>
+    </div>
+    <input type="file" id="pick" multiple class="hidden">
+    <table id="list"></table>
+    <div class="row">
+      <div class="bar"><div id="prog"></div></div>
+      <span class="hint" id="total"></span>
+      <button class="secondary" id="clear">비우기</button>
+      <button id="send" disabled>TV 로 올리기</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+  <div class="card hint">
+    · 같은 이름의 파일은 새 파일로 바뀝니다(덮어쓰기). 다른 폴더나 다른 형식은 올라가지 않습니다.<br>
+    · TV 가 10~20초 안에 받아 반영합니다. 결과가 이 화면에 표시될 때까지 창을 닫지 마세요.<br>
+    · 이 파일에는 이 폴더 전용 열쇠가 들어 있습니다. 다른 사람에게 함부로 보내지 마세요.
+  </div>
+</main>
+<script>
+const CFG = /*__CONFIG__*/null;
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const size = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+  const msg = (t, k) => $('#msg').innerHTML = t ? `<div class="msg ${k}">${esc(t)}</div>` : '';
+  if (!CFG) { document.body.innerHTML = '<p style="padding:30px">관리자 PC 프로그램의 [업로드 도구 받기]로 만든 파일이 아닙니다.</p>'; return; }
+  document.title = CFG.title + ' 업로드';
+  $('#h1').textContent = `${CFG.title} 폴더 업로드`;
+  $('#sub').textContent = `대상 오산공장 Dashboard · TV '${CFG.tv}' · 자료/${CFG.folder}`;
+  $('#rule').textContent = `올릴 수 있는 형식: ${CFG.types.map(t => '.' + t).join(' ')}  ·  한 번에 ${size(CFG.maxUpload)}까지`;
+  if (!window.crypto || !crypto.subtle) { msg('이 브라우저에서는 사용할 수 없습니다. Edge 또는 Chrome 으로 여세요.', 'err'); return; }
+
+  // ── 파일 고르기 ──
+  let files = [];   // {path(폴더 기준 상대 경로), file}
+  const ext = (n) => (n.split('.').pop() || '').toLowerCase();
+  function add(list) {
+    for (const { rel, file } of list) {
+      if (file.name.startsWith('.')) continue;
+      const path = rel.replace(/\\/g, '/').replace(/^\/+/, '');
+      files = files.filter(f => f.path !== path);
+      files.push({ path, file });
+    }
+    render();
+  }
+  function render() {
+    const total = files.reduce((s, f) => s + f.file.size, 0);
+    $('#list').innerHTML = files.map((f, i) => {
+      const bad = !CFG.types.includes(ext(f.path)) ? '올릴 수 없는 형식' : '';
+      return `<tr><td>${esc(f.path)}</td><td class="r ${bad ? 'bad' : ''}">${bad || size(f.file.size)}</td><td class="r"><a href="#" data-x="${i}">빼기</a></td></tr>`;
+    }).join('');
+    const over = total > CFG.maxUpload, badType = files.some(f => !CFG.types.includes(ext(f.path)));
+    $('#total').innerHTML = files.length ? `${files.length}개 · <span class="${over ? 'bad' : ''}">${size(total)}</span> / ${size(CFG.maxUpload)}` : '';
+    $('#send').disabled = !files.length || over || badType;
+    if (over) msg(`한 번에 ${size(CFG.maxUpload)}까지 올릴 수 있습니다. 나눠서 올리세요.`, 'err');
+    else if (badType) msg('올릴 수 없는 형식의 파일이 있습니다. 빼고 올리세요.', 'err');
+    else msg('');
+  }
+  $('#list').onclick = (e) => { const i = e.target.dataset.x; if (i !== undefined) { e.preventDefault(); files.splice(+i, 1); render(); } };
+  $('#clear').onclick = () => { files = []; render(); };
+  const drop = $('#drop');
+  drop.onclick = () => { $('#pick').value = ''; $('#pick').click(); };
+  $('#pick').onchange = (e) => add([...e.target.files].map(f => ({ rel: f.name, file: f })));
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = async (e) => {
+    e.preventDefault(); drop.classList.remove('over');
+    const out = [];
+    const ents = [...(e.dataTransfer.items || [])].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    const readAll = (r) => new Promise(res => { const all = []; const next = () => r.readEntries(b => { if (!b.length) res(all); else { all.push(...b); next(); } }); next(); });
+    const walk = async (ent, pre) => {
+      if (ent.isFile) out.push({ rel: pre + ent.name, file: await new Promise(r => ent.file(r)) });
+      else if (ent.isDirectory) for (const c of await readAll(ent.createReader())) await walk(c, pre + ent.name + '/');
+    };
+    if (ents.length) for (const en of ents) await walk(en, ''); else for (const f of e.dataTransfer.files) out.push({ rel: f.name, file: f });
+    add(out);
+  };
+
+  // ── 암호화 (TV 앱과 같은 형식: "TVR1" + nonce12 + AES-256-GCM + tag16) ──
+  const b64urlToBytes = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+  const toB64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  let keyP = null;
+  const key = () => keyP || (keyP = crypto.subtle.importKey('raw', b64urlToBytes(CFG.key), 'AES-GCM', false, ['encrypt', 'decrypt']));
+  const aad = (kind, id, name) => enc.encode(`${CFG.tv}/${kind}/${id}/${name}`);
+  async function seal(plain, ad) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: ad, tagLength: 128 }, await key(), plain));
+    const out = new Uint8Array(4 + 12 + ct.length);
+    out.set(enc.encode('TVR1')); out.set(iv, 4); out.set(ct, 16);
+    return out;
+  }
+  async function open(sealed, ad) {
+    if (sealed.length < 32 || dec.decode(sealed.subarray(0, 4)) !== 'TVR1') throw new Error('암호화 형식이 아닙니다');
+    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: sealed.subarray(4, 16), additionalData: ad, tagLength: 128 }, await key(), sealed.subarray(16)));
+  }
+  const sha256 = async (u8) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', u8))].map(b => b.toString(16).padStart(2, '0')).join('');
+
+  // ── GitHub (우체통 역할만) ──
+  async function gh(method, path, body, raw) {
+    const r = await fetch(`${CFG.api}/repos/${CFG.repo}/${path}`, {
+      method, headers: { 'Authorization': 'Bearer ' + CFG.token, 'Accept': raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json',
+                         'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
+    if (r.status === 404 && method === 'GET') return null;
+    if (!r.ok && !(method === 'DELETE' && r.status === 422)) {
+      let m = ''; try { m = (await r.json()).message; } catch (_) {}
+      throw new Error(r.status === 401 ? '열쇠(토큰)가 만료되었거나 폐기되었습니다. 관리자에게 새 도구를 받으세요.' : `GitHub 오류 ${r.status} ${m}`);
+    }
+    return raw ? new Uint8Array(await r.arrayBuffer()) : (r.status === 204 ? null : r.json());
+  }
+  const blob = async (u8) => (await gh('POST', 'git/blobs', { content: toB64(u8), encoding: 'base64' })).sha;
+
+  // ── 올리기 ──
+  const CHUNK = 8 * 1024 * 1024;
+  $('#send').onclick = async () => {
+    const btn = $('#send'); btn.disabled = true; $('#clear').disabled = true;
+    const prog = (p) => $('#prog').style.width = Math.round(p * 100) + '%';
+    try {
+      const id = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('')}`;
+      const kind = `up/${CFG.gid}`;
+      const tree = [], ops = [];
+      let n = 0, done = 0;
+      const total = files.reduce((s, f) => s + f.file.size, 0) || 1;
+      msg('암호화해서 보내는 중…', 'wait');
+      for (const f of files) {
+        const data = new Uint8Array(await f.file.arrayBuffer());
+        const chunks = [];
+        for (let i = 0; i < data.length; i += CHUNK) {
+          const name = 'd' + (n++);
+          tree.push({ path: name, mode: '100644', type: 'blob', sha: await blob(await seal(data.subarray(i, i + CHUNK), aad(kind, id, name))) });
+          chunks.push(name);
+          done += Math.min(CHUNK, data.length - i); prog(done / total * 0.9);
+        }
+        ops.push({ op: 'put', path: CFG.folder + '/' + f.path, chunks, size: data.length, sha256: await sha256(data), overwrite: true });
+      }
+      const man = enc.encode(JSON.stringify({ v: 1, id, created: Date.now(), ops }));
+      tree.push({ path: 'm', mode: '100644', type: 'blob', sha: await blob(await seal(man, aad(kind, id, 'm'))) });
+      const t = await gh('POST', 'git/trees', { tree });
+      const c = await gh('POST', 'git/commits', { message: 'up', tree: t.sha, parents: [] });
+      await gh('POST', 'git/refs', { ref: `refs/heads/relay/${CFG.tv}/up/${CFG.gid}/${id}`, sha: c.sha });
+      prog(0.92);
+      msg('보냈습니다. TV 가 받아 반영하기를 기다리는 중… (보통 10~20초)', 'wait');
+      // 결과 기다리기 (relay/<tv>/res/<id>, 이 도구 키로 암호화)
+      const resBranch = `relay/${CFG.tv}/res/${id}`;
+      for (let i = 0; i < 80; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const ref = await gh('GET', 'git/ref/heads/' + resBranch);
+        if (!ref) continue;
+        const commit = await gh('GET', 'git/commits/' + ref.object.sha);
+        const tr = await gh('GET', 'git/trees/' + commit.tree.sha);
+        const m = tr.tree.find(x => x.path === 'm');
+        const res = JSON.parse(dec.decode(await open(await gh('GET', 'git/blobs/' + m.sha, null, true), aad('res', id, 'm'))));
+        await gh('DELETE', 'git/refs/heads/' + resBranch);
+        prog(1);
+        const bad = (res.results || []).filter(x => !x.ok);
+        const list = (res.files || []).map(x => `  ${x.p.slice(CFG.folder.length + 1)}  (${size(x.s)})`).join('\n');
+        if (res.ok) { const n = files.length; files = []; render(); msg(`완료! ${n}개를 TV 에 반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${list}`, 'ok'); }
+        else msg('일부 올리지 못했습니다:\n' + bad.map(x => `  ${x.path || ''} — ${x.error}`).join('\n'), 'err');
+        return;
+      }
+      msg('TV 응답이 없습니다. TV 가 꺼져 있거나 인터넷이 끊겼을 수 있습니다. (보낸 파일은 TV 가 켜지면 반영됩니다)', 'err');
+    } catch (e) {
+      msg('올리지 못했습니다: ' + e.message, 'err');
+    } finally {
+      btn.disabled = !files.length; $('#clear').disabled = false;
+    }
+  };
+})();
+</script>
+</body>
+</html>

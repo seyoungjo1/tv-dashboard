@@ -32,9 +32,13 @@ class RelayConfig:
     tv: str
     key: str
     token: str
+    tool_token: str = ""        # (선택) 직원 업로드 도구에 넣을 별도 토큰 — 비우면 token 을 쓴다
 
-    def to_json(self) -> dict:
-        return {"v": 1, "repo": self.repo, "tv": self.tv, "key": self.key, "token": self.token}
+    def to_json(self, for_tv: bool = False) -> dict:
+        d = {"v": 1, "repo": self.repo, "tv": self.tv, "key": self.key, "token": self.token}
+        if not for_tv and self.tool_token:
+            d["toolToken"] = self.tool_token
+        return d
 
 
 def path(root: Path | None = None) -> Path:
@@ -47,7 +51,8 @@ def load(root: Path | None = None) -> RelayConfig | None:
         return None
     try:
         d = json.loads(p.read_text(encoding="utf-8-sig"))
-        cfg = RelayConfig(d.get("repo") or DEFAULT_REPO, d.get("tv") or DEFAULT_TV, d.get("key", ""), d.get("token", ""))
+        cfg = RelayConfig(d.get("repo") or DEFAULT_REPO, d.get("tv") or DEFAULT_TV, d.get("key", ""), d.get("token", ""),
+                          d.get("toolToken", ""))
     except (OSError, ValueError) as e:
         raise ConfigError("%s 를 읽을 수 없습니다: %s" % (FILE_NAME, e)) from None
     validate(cfg)
@@ -64,8 +69,9 @@ def validate(cfg: RelayConfig) -> None:
         raise ConfigError("GitHub 토큰이 비어 있습니다")
 
 
-def setup(token: str, repo: str = "", tv: str = "", root: Path | None = None) -> RelayConfig:
-    """처음 설정 — 키는 자동 생성. 이미 있으면 키는 그대로 두고 토큰·레포·이름만 바꾼다 (TV 와 키가 어긋나지 않게)."""
+def setup(token: str, repo: str = "", tv: str = "", root: Path | None = None, tool_token: str | None = None) -> RelayConfig:
+    """처음 설정 — 키는 자동 생성. 이미 있으면 키는 그대로 두고 토큰·레포·이름만 바꾼다 (TV 와 키가 어긋나지 않게).
+    tool_token: None = 그대로, "" = 지우기, 값 = 직원 업로드 도구용 별도 토큰"""
     old = None
     try:
         old = load(root)
@@ -76,6 +82,7 @@ def setup(token: str, repo: str = "", tv: str = "", root: Path | None = None) ->
         tv=(tv or (old.tv if old else DEFAULT_TV)).strip(),
         key=old.key if old else new_key(),
         token=token.strip() or (old.token if old else ""),
+        tool_token=(old.tool_token if old else "") if tool_token is None else tool_token.strip(),
     )
     validate(cfg)
     p = path(root)

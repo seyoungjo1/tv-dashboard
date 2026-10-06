@@ -34,9 +34,21 @@ class FakeGitHub:
             def log_message(self, *a):
                 pass
 
+            def _cors(self):
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, X-GitHub-Api-Version")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS")
+
+            def do_OPTIONS(self):
+                self.send_response(204)
+                self._cors()
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
             def _send(self, code, body=None, raw=False, etag=None):
                 data = b"" if body is None else (body if raw else json.dumps(body).encode())
                 self.send_response(code)
+                self._cors()
                 if etag:
                     self.send_header("ETag", etag)
                 self.send_header("Content-Length", str(len(data)))

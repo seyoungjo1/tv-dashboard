@@ -94,6 +94,24 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(self.fake.refs, {})                       # 브랜치가 하나도 남지 않음
 
 
+class ToolTest(unittest.TestCase):
+    def test_bake_has_folder_key_not_master_key(self):
+        from tvrelay import grants
+        tmp = Path(tempfile.mkdtemp())
+        cfg = config.setup("github_pat_main", "o/relay", "osan", tmp)
+        g = grants.new_grant("원가")
+        html = grants.bake(cfg, g)
+        self.assertNotIn("/*__CONFIG__*/null", html)
+        self.assertIn(g["key"], html)
+        self.assertIn('"folder": "원가"', html)
+        self.assertNotIn(cfg.key, html)                    # 관리자 키는 절대 들어가지 않는다
+        self.assertIn('"maxUpload": %d' % (30 * 1024 * 1024), html)
+        self.assertEqual(grants.grant_op(g)["types"], ["png", "js", "json", "html", "htm"])
+        cfg2 = config.setup("", "", "", tmp, tool_token="github_pat_tool")
+        self.assertIn("github_pat_tool", grants.bake(cfg2, g, cfg2.tool_token))
+        self.assertNotIn("toolToken", json.dumps(cfg2.to_json(for_tv=True)))
+
+
 class PairTest(unittest.TestCase):
     def test_pair_roundtrip(self):
         fake = FakeGitHub()

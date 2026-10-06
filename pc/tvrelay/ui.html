@@ -205,6 +205,15 @@
 <div id="connPage" class="page hidden">
   <div class="card"><div id="connInfo" class="hint"></div>
     <div style="margin-top:12px;display:flex;gap:8px"><button id="toSetupBtn" class="secondary">토큰·레포 바꾸기 / 다른 TV 연결</button></div></div>
+  <div class="card">
+    <h3 style="margin-top:0">직원용 업로드 도구 (폴더 전용 HTML)</h3>
+    <p class="hint">파일 탐색기에서 폴더를 고르고 [업로드 도구 받기]를 누르면 그 폴더에만 올릴 수 있는 HTML 이 만들어집니다.
+      Python 없이 Edge·Chrome 에서 열어 png·js·json·html 을 한 번에 30MB 까지 올릴 수 있습니다(같은 이름은 덮어쓰기).
+      유출·퇴사 시에는 [새로 발급]을 누르면 옛 HTML 은 더 이상 동작하지 않습니다.</p>
+    <div id="grantList" class="hint">발급된 도구가 없습니다.</div>
+    <label>(선택) 업로드 도구 전용 GitHub 토큰 — 비우면 위의 토큰을 씁니다. 따로 두면 도구만 따로 막을 수 있습니다</label>
+    <div style="display:flex;gap:8px"><input type="password" id="toolToken" placeholder="github_pat_… (tv-dashboard-relay · Contents 읽기·쓰기)"><button class="secondary" id="toolTokenBtn">저장</button></div>
+  </div>
 </div>
 
 <div id="jobsBar" class="hidden"><div class="jh"><span>진행 중인 작업</span><button class="icon" id="jobsClose" style="font-size:14px">✕</button></div><div id="jobsMini"></div></div>
@@ -298,10 +307,61 @@
         const ago = state.age_sec < 60 ? state.age_sec + '초' : Math.round(state.age_sec / 60) + '분';
         pill.textContent = (state.online ? 'TV 온라인' : 'TV 오프라인') + ` · ${ago} 전 · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}`;
       }
+      await loadGrants();
       renderTree(); fillSettings();
       if (tab === 'explorer') { renderPane(false); renderTv(false); }
     } catch (e) { $('#tvPill').className = 'pill off'; $('#tvPill').textContent = e.message; }
   }
+
+  // ── 직원용 업로드 도구 (폴더 전용 HTML) ──
+  let grantMap = {};
+  async function loadGrants() {
+    try {
+      const r = await api('GET', '/api/grants');
+      grantMap = Object.fromEntries(r.items.map(g => [g.folder, g]));
+      $('#grantList').innerHTML = r.items.length ? '<table style="width:100%">' + r.items.map(g =>
+        `<tr><td>🔑 <b>${esc(g.folder)}</b></td><td>${g.status === 'active' ? '<span style="color:var(--ok)">사용 중</span>' : g.status === 'pending' ? 'TV 확인 대기' : '<span style="color:var(--danger)">실패</span>'}</td>
+         <td style="text-align:right;white-space:nowrap"><button class="secondary" data-gt="get" data-f="${esc(g.folder)}">다시 받기</button>
+         <button class="secondary" data-gt="renew" data-f="${esc(g.folder)}">새로 발급</button>
+         <button class="danger" data-gt="revoke" data-f="${esc(g.folder)}">폐기</button></td></tr>`).join('') + '</table>' : '발급된 도구가 없습니다.';
+    } catch (_) {}
+  }
+  function downloadTool(folder) {
+    const a = document.createElement('a'); a.href = '/api/tool?folder=' + encodeURIComponent(folder); a.download = '';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  async function getTool(folder, renew) {
+    try {
+      if (renew && !confirm(`'${folder}' 업로드 도구를 새로 발급할까요?\n지금 나눠 준 HTML 은 더 이상 동작하지 않습니다.`)) return;
+      const r = await api('POST', '/api/grant', { folder, renew: !!renew });
+      if (r.ready) { downloadTool(folder); return; }
+      jobs.unshift({ id: r.id, desc: `업로드 도구 ${renew ? '새로 발급' : '등록'}: ${folder}`, st: 'wait', note: 'TV 가 등록하기를 기다리는 중… (보통 10~20초)' });
+      renderJobs();
+      for (let i = 0; i < 100; i++) {
+        await new Promise(res => setTimeout(res, 3000));
+        const x = await api('GET', '/api/result?id=' + encodeURIComponent(r.id));
+        if (x.pending) continue;
+        const j = jobs.find(q => q.id === r.id);
+        j.st = x.grantOk ? 'ok' : 'bad'; j.note = x.grantOk ? '등록 완료 — HTML 을 내려받았습니다' : '등록 실패: ' + ((x.results || []).find(q => !q.ok)?.error || '');
+        renderJobs(); await loadGrants(); renderTree();
+        if (x.grantOk) downloadTool(folder);
+        return;
+      }
+    } catch (e) { alert(e.message); }
+  }
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-gt]'); if (!b) return;
+    const f = b.dataset.f;
+    if (b.dataset.gt === 'get') getTool(f, false);
+    if (b.dataset.gt === 'renew') getTool(f, true);
+    if (b.dataset.gt === 'revoke' && confirm(`'${f}' 업로드 도구를 폐기할까요? 나눠 준 HTML 이 더 이상 동작하지 않습니다.`)) {
+      try { await api('POST', '/api/revoke', { folder: f }); await loadGrants(); renderTree(); } catch (err) { alert(err.message); }
+    }
+  });
+  $('#toolTokenBtn').onclick = async () => {
+    try { await api('POST', '/api/setup', { token: '', repo: '', tv: '', toolToken: $('#toolToken').value }); $('#toolToken').value = ''; alert('저장했습니다. 이제부터 받는 업로드 도구에 이 토큰이 들어갑니다. (이미 나눠 준 도구는 [새로 발급]해야 바뀝니다)'); }
+    catch (e) { alert(e.message); }
+  };
   setInterval(() => { if (info?.configured && !document.hidden) loadState(); }, 20000);
 
   // ── 왼쪽: 폴더 트리 (끌어다 놓기 대상) ──
@@ -315,7 +375,7 @@
         const pad = 8 + depth * 16;
         if (e.d) {
           const o = open.has(e.p);
-          out.push(`<div class="node ${sel === e.p ? 'sel' : ''}" data-p="${esc(e.p)}" data-dir="1" style="padding-left:${pad}px"><span class="tw" data-tw="1">${o ? '▾' : '▸'}</span>📁 <span class="nm">${esc(base(e.p))}</span></div>`);
+          out.push(`<div class="node ${sel === e.p ? 'sel' : ''}" data-p="${esc(e.p)}" data-dir="1" style="padding-left:${pad}px"><span class="tw" data-tw="1">${o ? '▾' : '▸'}</span>📁 <span class="nm">${esc(base(e.p))}</span>${grantMap[e.p]?.status === 'active' ? '<span class="sz" title="직원용 업로드 도구 발급됨">🔑</span>' : ''}</div>`);
           if (o) walk(e.p, depth + 1);
         } else {
           out.push(`<div class="node ${sel === e.p ? 'sel' : ''}" data-p="${esc(e.p)}" style="padding-left:${pad + 14}px">${icon(e.p)} <span class="nm">${esc(base(e.p))}</span><span class="sz">${size(e.s)}</span></div>`);
@@ -381,7 +441,9 @@
     if (!e) { $('#pInfo').textContent = '(TV 목록에 없음)'; $('#pActions').innerHTML = ''; pb.innerHTML = '<div class="loading">TV 목록에 없는 항목입니다. ⟳ 로 새로고침하세요.</div>'; return; }
     $('#pInfo').textContent = e.d ? `폴더 · 항목 ${kids(e.p).length}개` : `${size(e.s)} · ${new Date(e.t).toLocaleString('ko-KR')}`;
     $('#pActions').innerHTML = e.d
-      ? `<button class="secondary" data-a="sample">예제 대시보드 만들기</button> <button class="secondary" data-a="reload">TV 새로고침</button>` + (sel ? ` <button class="secondary" data-a="rename">이름 변경</button> <button class="danger" data-a="delete">삭제</button>` : '')
+      ? (sel ? `<button data-gt="get" data-f="${esc(sel)}" title="이 폴더에만 올릴 수 있는 직원용 HTML">업로드 도구 받기</button> ` +
+               (grantMap[sel] ? `<button class="secondary" data-gt="renew" data-f="${esc(sel)}">새로 발급</button> ` : '') : '') +
+        `<button class="secondary" data-a="sample">예제 대시보드 만들기</button> <button class="secondary" data-a="reload">TV 새로고침</button>` + (sel ? ` <button class="secondary" data-a="rename">이름 변경</button> <button class="danger" data-a="delete">삭제</button>` : '')
       : `<button class="secondary" data-a="download">다운로드</button> <button class="secondary" data-a="replace">교체</button> <button class="secondary" data-a="rename">이름 변경</button> <button class="danger" data-a="delete">삭제</button>`;
     if (!fresh && pb.dataset.for === sel) return;      // 목록만 갱신될 때는 미리보기를 다시 받지 않는다
     pb.dataset.for = sel;

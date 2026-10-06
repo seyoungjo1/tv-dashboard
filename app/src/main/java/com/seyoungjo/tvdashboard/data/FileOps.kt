@@ -158,6 +158,31 @@ class FileOps(private val ctx: Context) {
         return out
     }
 
+    /** 폴더 총용량(하위 폴더 포함, 없으면 0) */
+    fun folderUsage(path: String): Long {
+        val d = guard().resolve(requirePath(path))
+        if (!d.isDirectory) return 0
+        return d.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.sumOf { it.length() }
+    }
+
+    /** 파일 크기 (없으면 0) */
+    fun sizeOf(path: String): Long {
+        val f = guard().resolve(requirePath(path))
+        return if (f.isFile) f.length() else 0
+    }
+
+    /** 폴더 안 파일 목록 [{p, s, t}] (직원 도구 결과용) */
+    fun filesIn(path: String): JSONArray {
+        val g = guard()
+        val d = g.resolve(requirePath(path))
+        val out = JSONArray()
+        if (!d.isDirectory) return out
+        d.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.sortedBy { it.path }.forEach {
+            out.put(JSONObject().put("p", g.relativize(it)).put("s", it.length()).put("t", it.lastModified()))
+        }
+        return out
+    }
+
     /** 예제 대시보드(앱에 포함된 assets/sample)를 새 폴더에 복사 */
     fun sample(path: String?): String {
         val rel = requirePath(path)

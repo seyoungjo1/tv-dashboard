@@ -98,6 +98,7 @@ object RelayWorker {
         val c = clientFor()
         val ops = FileOps(ctx)
         for (job in c.pendingJobs()) process(ctx, c, ops, job)
+        for (up in c.pendingUploads()) processUpload(ctx, c, ops, up)
         val now = System.currentTimeMillis()
         if (stateDirty || now - lastStateAt > HEARTBEAT_MS) publishState(c, ops)
         if (now - lastCleanup > CLEANUP_MS) {
@@ -115,12 +116,84 @@ object RelayWorker {
             .put("menu", ops.menu())
             .put("settings", AppSettings.remoteJson())
             .put("tree", ops.tree())
+            .put("grants", grantsJson(ops))
         val sig = body.toString()
         val now = System.currentTimeMillis()
         if (sig == lastState && now - lastStateAt < HEARTBEAT_MS) return
         c.publishState(JSONObject(sig).put("v", 1).put("time", now).put("interval", RelaySettings.intervalSec))
         lastState = sig
         lastStateAt = now
+    }
+
+    /** 관리자 화면용 업로드 도구 목록 (키는 넣지 않는다) */
+    private fun grantsJson(ops: FileOps): JSONArray {
+        val arr = JSONArray()
+        for (g in GrantStore.all().values) {
+            val used = try { ops.folderUsage(g.folder) } catch (e: Exception) { 0L }
+            arr.put(JSONObject().put("gid", g.gid).put("folder", g.folder).put("name", g.name)
+                .put("maxBytes", g.maxBytes).put("used", used).put("types", JSONArray(g.types.sorted())))
+        }
+        return arr
+    }
+
+    /**
+     * 직원 업로드 도구에서 온 작업. 경로·형식 규칙(GrantPolicy)을 **전부 먼저** 검사하고, 하나라도 어긋나면 아무것도 쓰지 않는다.
+     * 용량 제한은 도구(HTML)가 한 번에 30MB 로 막는다. 같은 이름 파일은 덮어쓴다.
+     * 결과는 그 도구의 키로 암호화해서 돌려준다 (도구 화면이 읽는다).
+     */
+    private fun processUpload(ctx: Context, c: RelayClient, ops: FileOps, up: RelayClient.Job) {
+        val grant = GrantStore.get(up.gid ?: "")
+        if (grant == null) {                               // 폐기됐거나 모르는 도구 — 풀 수도 없으므로 지운다
+            Log.w(TAG, "drop upload ${up.id}: unknown gid ${up.gid}")
+            c.deleteJob(up)
+            return
+        }
+        val key = RelayCrypto(grant.key)
+        val job = up.copy(key = key)
+        val (manifest, files) = try {
+            c.open(job)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "drop upload ${up.id}: ${e.message}")
+            c.deleteJob(up)
+            return
+        }
+        val list = manifest.optJSONArray("ops") ?: JSONArray()
+        val results = JSONArray()
+        var allOk = true
+        try {
+            val puts = ArrayList<Pair<String, Long>>()
+            for (i in 0 until list.length()) {
+                val op = list.getJSONObject(i)
+                if (op.optString("op") != "put") throw GrantPolicy.Denied("이 도구로는 파일 올리기만 할 수 있습니다.")
+                puts.add(GrantPolicy.checkPath(grant, op.getString("path")) to op.optLong("size", 0))
+            }
+            for (i in 0 until list.length()) {
+                val op = list.getJSONObject(i)
+                val r = JSONObject().put("op", "put").put("path", op.optString("path"))
+                try {
+                    runOp(ctx, c, ops, job, files, op.put("path", puts[i].first).put("overwrite", true), r, ArrayList())
+                    r.put("ok", true)
+                } catch (e: FileOps.OpError) {
+                    allOk = false; r.put("ok", false).put("error", e.message)
+                } catch (e: GitHubApi.ApiError) {
+                    throw e
+                } catch (e: Exception) {
+                    allOk = false; r.put("ok", false).put("error", e.message ?: e.javaClass.simpleName)
+                }
+                results.put(r)
+            }
+        } catch (e: GrantPolicy.Denied) {
+            allOk = false
+            results.put(JSONObject().put("op", "put").put("ok", false).put("error", e.message))
+        }
+        val result = JSONObject().put("v", 1).put("id", job.id).put("ok", allOk).put("results", results)
+            .put("folder", grant.folder).put("maxBytes", grant.maxBytes)
+            .put("used", ops.folderUsage(grant.folder)).put("files", ops.filesIn(grant.folder))
+            .put("time", System.currentTimeMillis())
+        c.writeResult(job.id, result, key = key)
+        c.deleteJob(up)
+        stateDirty = true
+        Log.i(TAG, "upload ${job.id} via ${grant.folder} ok=$allOk")
     }
 
     private fun process(ctx: Context, c: RelayClient, ops: FileOps, job: RelayClient.Job) {
@@ -196,6 +269,12 @@ object RelayWorker {
                 r.put("settings", AppSettings.remoteJson())
             }
             "reload" -> ChangeBus.post(AppEvent.Reload)
+            "grant" -> {                                    // 직원 업로드 도구 등록 (관리자 PC 에서만)
+                val g = GrantStore.put(op)
+                ops.mkdir(g.folder)
+                r.put("gid", g.gid).put("folder", g.folder).put("maxBytes", g.maxBytes)
+            }
+            "revoke" -> GrantStore.remove(op.getString("gid"))
             "ping" -> r.put("status", ops.status())
             "list" -> r.put("tree", ops.tree())
             "get" -> {

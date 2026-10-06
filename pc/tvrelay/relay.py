@@ -157,7 +157,7 @@ def pair(cfg: RelayConfig, code: str, gh: GitHub | None = None) -> str:
     gh = gh or GitHub(cfg.repo, cfg.token, base=os.environ.get("TVRELAY_GITHUB_API") or API)
     pid, key = pair_secrets(code)
     box = Box(base64.urlsafe_b64encode(key).decode().rstrip("="))
-    sealed = box.seal(json.dumps(cfg.to_json(), ensure_ascii=False).encode("utf-8"), ("pair/%s/m" % pid).encode())
+    sealed = box.seal(json.dumps(cfg.to_json(for_tv=True), ensure_ascii=False).encode("utf-8"), ("pair/%s/m" % pid).encode())
     branch = "relay/pair/" + pid
     gh.delete_branch(branch)
     gh.create_branch(branch, gh.create_orphan_commit({"m": sealed}, "pair"))

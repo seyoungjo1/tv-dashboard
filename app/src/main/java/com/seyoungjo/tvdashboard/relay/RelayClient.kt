@@ -14,6 +14,7 @@ import java.security.MessageDigest
  *   relay/<tv>/job/<id>   PC → TV  작업      m = 암호화된 작업 목록, d0,d1… = 암호화된 파일 조각
  *   relay/<tv>/res/<id>   TV → PC  결과      m = 암호화된 결과,   d0…   = (내려받기 요청 시) 파일 조각
  *   relay/<tv>/state      TV → PC  상태      m = 암호화된 상태(파일 목록·설정·버전·시각)
+ *   relay/<tv>/up/<gid>/<id>  직원 업로드 도구 → TV  (그 폴더 전용 키로 암호화, 결과도 같은 키로 res/<id>)
  * TV 는 작업을 반영한 뒤 job 브랜치를 지우고, PC 는 결과를 읽은 뒤 res 브랜치를 지운다 → 레포에는 아무것도 남지 않는다.
  * id = "<epoch ms>-<임의>" (시간순 정렬·오래된 결과 정리용).
  */
@@ -22,9 +23,16 @@ class RelayClient(
     private val crypto: RelayCrypto,
     val tv: String,
 ) {
-    data class Job(val id: String, val branch: String, val commit: String)
+    /** kind = "job" (관리자) 또는 "up/<gid>" (직원 업로드 도구). key = 그 작업을 푸는 키 (null 이면 관리자 키) */
+    data class Job(
+        val id: String, val branch: String, val commit: String,
+        val kind: String = "job", val gid: String? = null, val key: RelayCrypto? = null,
+    )
 
     private var jobsEtag: String? = null
+    private var upsEtag: String? = null
+
+    private fun cryptoOf(job: Job) = job.key ?: crypto
 
     private fun prefix(kind: String) = "relay/$tv/$kind/"
 
@@ -37,11 +45,22 @@ class RelayClient(
             .sortedBy { it.id }
     }
 
+    /** 직원 업로드 도구에서 온 작업 (relay/<tv>/up/<gid>/<id>). key 는 아직 비어 있다 — gid 로 찾아 채운다 */
+    fun pendingUploads(): List<Job> {
+        val r = api.matchingRefs(prefix("up"), upsEtag) ?: return emptyList()
+        upsEtag = r.second
+        return r.first.mapNotNull { (branch, sha) ->
+            val parts = branch.removePrefix(prefix("up")).split('/')
+            if (parts.size != 2 || !ID.matches(parts[1])) null
+            else Job(parts[1], branch, sha, kind = "up/${parts[0]}", gid = parts[0])
+        }.sortedBy { it.id }
+    }
+
     /** 작업 하나 열기: (작업 목록, 조각 이름 → blob SHA) */
     fun open(job: Job): Pair<JSONObject, Map<String, String>> {
         val files = api.commitFiles(job.commit)
         val m = files["m"] ?: throw SecurityException("작업에 목록(m)이 없습니다.")
-        val plain = crypto.open(api.blob(m), RelayCrypto.aad(tv, "job", job.id, "m"))
+        val plain = cryptoOf(job).open(api.blob(m), RelayCrypto.aad(tv, job.kind, job.id, "m"))
         return JSONObject(plain.toString(Charsets.UTF_8)) to files
     }
 
@@ -52,7 +71,7 @@ class RelayClient(
         for (i in 0 until names.length()) {
             val name = names.getString(i)
             val sha = files[name] ?: throw SecurityException("작업에 조각 $name 이 없습니다.")
-            val plain = crypto.open(api.blob(sha), RelayCrypto.aad(tv, "job", job.id, name))
+            val plain = cryptoOf(job).open(api.blob(sha), RelayCrypto.aad(tv, job.kind, job.id, name))
             out.write(plain)
             md.update(plain)
             total += plain.size
@@ -63,7 +82,10 @@ class RelayClient(
     fun deleteJob(job: Job) = api.deleteBranch(job.branch)
 
     /** 결과 올리기. attachments: 결과에 붙일 파일(내려받기 요청) — 조각 이름은 결과 JSON 의 chunks 에 들어간다 */
-    fun writeResult(id: String, result: JSONObject, attachments: List<Pair<JSONObject, File>> = emptyList()) {
+    fun writeResult(
+        id: String, result: JSONObject, attachments: List<Pair<JSONObject, File>> = emptyList(), key: RelayCrypto? = null,
+    ) {
+        val crypto = key ?: this.crypto
         val files = LinkedHashMap<String, ByteArray>()
         var n = 0
         for ((entry, file) in attachments) {
@@ -98,7 +120,7 @@ class RelayClient(
 
     /** PC 가 가져가지 않은 오래된 결과·작업 정리 */
     fun cleanup(maxAgeMs: Long, now: Long = System.currentTimeMillis()) {
-        for (kind in listOf("res", "job")) {
+        for (kind in listOf("res", "job", "up")) {
             val refs = api.matchingRefs(prefix(kind), null)?.first ?: continue
             for ((branch, _) in refs) {
                 val id = branch.substringAfterLast('/')
