@@ -217,6 +217,7 @@ class FileOps(private val ctx: Context) {
 
     /** 업로드된 APK(임시 파일)를 검증해 설치 대기 상태로 둔다 → TV 화면에 설치 확인 창 */
     fun acceptApk(tmp: File): UpdateManager.ApkMeta {
+        if (!BuildConfig.SELF_UPDATE) throw OpError(403, "Google Play 버전은 Play 스토어에서 업데이트됩니다.")
         val meta = try {
             UpdateManager.inspectApk(ctx, tmp)
         } catch (e: UpdateManager.UpdateException) {

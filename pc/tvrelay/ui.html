@@ -79,6 +79,7 @@
   #ssVids .v { display:flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; font-size:13px; background:#fff; }
   #ssVids .v .n { width:56px; color:#0b7fae; font-weight:800; } #ssVids .v .f { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #ssVids .v.new { background:#f0fbf4; } #ssVids .v button { padding:3px 8px; }
+  .tvi[draggable=true] { cursor:grab; } .tvi.dragover { outline:6px dashed #0bb5e8; outline-offset:-6px; } .tvi.dragging { opacity:.35; }
   .tvinner { position:absolute; left:0; top:0; width:1920px; height:1080px; transform-origin:0 0; display:flex; flex-direction:column; background:#eef1f4; }
   .tvh { height:96px; flex:none; background:#1e2125; display:flex; align-items:center; padding:0 36px 0 18px; color:#fff; }
   .tvh img { height:72px; }
@@ -178,6 +179,7 @@
     <div class="phead">
       <span class="path" id="tvTitleBar">TV 화면 미리보기</span>
       <span class="hint" id="tvInfo"></span>
+      <span id="tvOrderBar" class="hidden"><button id="tvOrderSave" title="TV 메뉴 순서를 이대로 저장 (자료/메뉴순서.txt)">순서 저장</button> <button class="secondary" id="tvOrderCancel">취소</button></span>
       <button class="secondary" id="tvReload" title="미리보기 다시 받기">⟳</button>
     </div>
     <div class="tvwrap"><div class="tvbox" id="tvbox"><div class="tvinner" id="tvinner">
@@ -359,6 +361,7 @@
       if (!cached) stateAt = Date.now();
       else if (st.none) { state = st; return; }
       state = st;
+      if (orderDraft && !cached && (st.menu?.items || []).map(i => i.folder).join('|') === orderDraft.join('|')) orderDraft = null;   // TV 가 반영함
       const pill = $('#tvPill');
       if (state.none) { pill.className = 'pill off'; pill.textContent = 'TV 미연결 — 연결 코드를 입력하세요'; }
       else {
@@ -676,7 +679,14 @@
 
   // ── 오른쪽: TV 화면 미리보기 (상단 로고·제목·시계 + 왼쪽 아이콘 메뉴 + 대시보드) ──
   let tvFolder = null, tvSeq = 0, tvSideOpen = true;
-  const menuItems = () => state?.menu?.items || [];
+  // 왼쪽 아이콘 순서: TV 미리보기에서 끌어서 바꾸고 [순서 저장] → 자료/메뉴순서.txt (TV 가 이 순서로 메뉴를 만든다)
+  let orderDraft = null;                                  // 끌어서 바꾼, 아직 저장 안 한 순서 [폴더…]
+  const menuItems = () => {
+    const items = state?.menu?.items || [];
+    if (!orderDraft) return items;
+    const pos = (f) => { const i = orderDraft.indexOf(f); return i < 0 ? 1e9 : i; };
+    return [...items].sort((a, b) => pos(a.folder) - pos(b.folder));
+  };
   const tvInner = $('#tvinner'), tvBox = $('#tvbox');
   new ResizeObserver(() => { tvInner.style.transform = `scale(${tvBox.clientWidth / 1920})`; }).observe(tvBox);
   const tick = () => { const d = new Date(), z = (n) => String(n).padStart(2, '0'); $('#tvClock').textContent = `${d.getFullYear()}.${z(d.getMonth() + 1)}.${z(d.getDate())} (${'일월화수목금토'[d.getDay()]})  ${z(d.getHours())}:${z(d.getMinutes())}`; };
@@ -687,7 +697,7 @@
     if (!items.find(i => i.folder === tvFolder)) tvFolder = items[0]?.folder ?? null;
     $('#tvTitle').textContent = state?.settings?.header_title || '대상 오산공장 Dashboard';
     const content = $('#tvContent');
-    const side = (iconsReady) => items.map((it, n) => `<div class="tvi ${it.folder === tvFolder ? 'sel' : ''}" data-tvf="${esc(it.folder)}"><div class="b">${it.image && iconsReady ? `<img src="${prevUrl(it.image)}">` : esc((it.title || '?').slice(0, 1))}</div><span>${esc(it.title)}</span></div>`).join('') + '<div class="tvset">⚙<br>설정</div>';
+    const side = (iconsReady) => items.map((it, n) => `<div class="tvi ${it.folder === tvFolder ? 'sel' : ''}" draggable="true" title="끌어서 순서 바꾸기" data-tvf="${esc(it.folder)}"><div class="b">${it.image && iconsReady ? `<img src="${prevUrl(it.image)}">` : esc((it.title || '?').slice(0, 1))}</div><span>${esc(it.title)}</span></div>`).join('') + '<div class="tvset">⚙<br>설정</div>';
     $('#tvSide').innerHTML = side(false);
     $('#tvInfo').textContent = tvFolder ? `메뉴 ${items.length}개 · ${tvFolder}` : '';
     if (!fresh && content.dataset.for === tvFolder) { $('#tvSide').innerHTML = side(true); return; }
@@ -706,6 +716,29 @@
       : `<div class="empty">「${esc(cur.title)}」<br><br>이 폴더에 index.html 이 없습니다</div>`;
   }
   $('#tvSide').addEventListener('click', (e) => { const t = e.target.closest('[data-tvf]'); if (!t) return; tvFolder = t.dataset.tvf; select(tvFolder); });
+  let dragF = null;
+  $('#tvSide').addEventListener('dragstart', (e) => { const t = e.target.closest('[data-tvf]'); if (!t) return; dragF = t.dataset.tvf; t.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragF); });
+  $('#tvSide').addEventListener('dragend', () => { dragF = null; document.querySelectorAll('.tvi.dragging,.tvi.dragover').forEach(x => x.classList.remove('dragging', 'dragover')); });
+  $('#tvSide').addEventListener('dragover', (e) => {
+    const t = e.target.closest('[data-tvf]'); if (!t || !dragF) return;
+    e.preventDefault(); document.querySelectorAll('.tvi.dragover').forEach(x => x.classList.remove('dragover')); t.classList.add('dragover');
+  });
+  $('#tvSide').addEventListener('drop', (e) => {
+    const t = e.target.closest('[data-tvf]'); if (!t || !dragF || t.dataset.tvf === dragF) return;
+    e.preventDefault();
+    const list = menuItems().map(i => i.folder).filter(f => f !== dragF);
+    const r = t.getBoundingClientRect(), after = e.clientY > r.top + r.height / 2;
+    list.splice(list.indexOf(t.dataset.tvf) + (after ? 1 : 0), 0, dragF);
+    orderDraft = list;
+    $('#tvOrderBar').classList.remove('hidden');
+    renderTv(false);
+  });
+  $('#tvOrderCancel').onclick = () => { orderDraft = null; $('#tvOrderBar').classList.add('hidden'); renderTv(false); };
+  $('#tvOrderSave').onclick = async () => {
+    const lines = menuItems().map(i => i.folder);
+    await stageAndSend([['메뉴순서.txt', new File([lines.join('\n') + '\n'], '메뉴순서.txt', { type: 'text/plain' })]], '메뉴 순서 저장: ' + lines.map(f => f.replace(/^\d+\s*[_.\-)\s]\s*/, '')).join(' → '));
+    $('#tvOrderBar').classList.add('hidden');      // TV 가 반영하면 상태의 메뉴 순서가 이 순서가 된다
+  };
   $('#tvMenuBtn').onclick = () => { tvSideOpen = !tvSideOpen; $('#tvSide').classList.toggle('hide', !tvSideOpen); $('#tvMenuBtn').textContent = tvSideOpen ? '◁' : '▷'; };
   $('#tvReload').onclick = () => renderTv(true);
   $('#toggleTv').onclick = () => { $('#tvpane').classList.toggle('collapsed'); try { localStorage.setItem('tvHidden', $('#tvpane').classList.contains('collapsed') ? '1' : ''); } catch (_) {} };

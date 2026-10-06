@@ -7,7 +7,8 @@ import java.io.File
  *  1) 자료 폴더 바로 아래의 하위 폴더 1개 = 버튼 1개
  *     ('.' 또는 '_' 로 시작하는 폴더는 숨김)
  *  2) 버튼 이름 = 폴더명. 앞의 정렬용 번호("01_", "2-", "03. ")는 표시에서 제거
- *  3) 정렬 = 폴더명 기준 자연 정렬(숫자는 숫자 크기로)
+ *  3) 정렬 = 자료 폴더의 '메뉴순서.txt'(한 줄에 폴더 이름 하나, PC 프로그램에서 끌어서 정함)에 적힌 순서가 먼저,
+ *     나머지는 폴더명 기준 자연 정렬(숫자는 숫자 크기로)
  *  4) 아이콘 = 폴더 안 'icon.png' (icon.jpg / icon.jpeg / icon.webp 도 허용)
  *     예전 이름 '대표이미지.png' 도 인식. 없으면 이름 첫 글자 색상 타일
  *  5) 버튼 선택 시 폴더의 index.html (없으면 index.htm) 표시
@@ -26,6 +27,7 @@ object MenuScanner {
     val ICON_EXT = setOf("png", "jpg", "jpeg", "webp")
     val ICON_NAMES = listOf("icon", "대표이미지")
     const val MAIN_FOLDER = "main"
+    const val ORDER_FILE = "메뉴순서.txt"
     private val ORDER_PREFIX = Regex("""^\d+\s*[_.\-)\s]\s*""")
 
     fun displayName(folder: String): String {
@@ -35,7 +37,12 @@ object MenuScanner {
 
     fun scan(root: File): List<MenuEntry> {
         val dirs = root.listFiles()?.filter { it.isDirectory && !PathGuard.isHidden(it.name) && !isMain(it.name) } ?: return emptyList()
-        return dirs.sortedWith { a, b -> naturalCompare(a.name, b.name) }.map { dir ->
+        val order = readOrder(root)
+        return dirs.sortedWith { a, b ->
+            val ia = order[a.name] ?: Int.MAX_VALUE
+            val ib = order[b.name] ?: Int.MAX_VALUE
+            if (ia != ib) ia.compareTo(ib) else naturalCompare(a.name, b.name)
+        }.map { dir ->
             val files = dir.listFiles()?.filter { it.isFile && !it.name.startsWith(".") } ?: emptyList()
             val index = listOf("index.html", "index.htm").firstOrNull { n -> files.any { it.name.equals(n, true) } }
                 ?.let { n -> files.first { it.name.equals(n, true) }.name }
@@ -56,6 +63,16 @@ object MenuScanner {
     }
 
     fun isMain(name: String) = name.equals(MAIN_FOLDER, ignoreCase = true)
+
+    /** 메뉴순서.txt → 폴더 이름 → 순번 (없거나 못 읽으면 빈 값) */
+    fun readOrder(root: File): Map<String, Int> = try {
+        val f = File(root, ORDER_FILE)
+        if (!f.isFile || f.length() > 64 * 1024) emptyMap()
+        else f.readText(Charsets.UTF_8).removePrefix("\uFEFF").lines().map { it.trim() }.filter { it.isNotEmpty() }
+            .withIndex().associate { (i, n) -> n to i }
+    } catch (e: Exception) {
+        emptyMap()
+    }
 
     /** 화면보호기 폴더 (자료/main) — 없으면 null */
     fun mainDir(root: File): File? = root.listFiles()?.firstOrNull { it.isDirectory && isMain(it.name) }

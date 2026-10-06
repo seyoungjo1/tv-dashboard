@@ -32,6 +32,17 @@ class MenuScannerTest {
         assertEquals(listOf("대기화면.mp4"), MenuScanner.idleVideos(root).map { it.name })
     }
 
+    @Test fun customOrderAndMainFolder() {
+        file("a팀/index.html"); file("b팀/index.html"); file("c팀/index.html"); file("d팀/index.html")
+        file("main/sd.json"); file("main/2.mp4"); file("main/10.mp4"); file("main/1.mp4"); file("main/설정.json", "{\"videoFit\":\"crop\"}")
+        file(MenuScanner.ORDER_FILE, "\uFEFFc팀\n\n없는팀\na팀\n")
+        val m = MenuScanner.scan(root)
+        assertEquals(listOf("c팀", "a팀", "b팀", "d팀"), m.map { it.folder })     // 적힌 순서 먼저, 나머지는 이름순 · main 은 메뉴 아님
+        val main = MenuScanner.mainDir(root)
+        assertEquals(listOf("1.mp4", "2.mp4", "10.mp4"), MenuScanner.mainVideos(main).map { it.name })
+        assertTrue(MenuScanner.mainCrop(main))
+    }
+
     @Test fun signatureChangesWhenFilesChange() {
         val idx = file("A/index.html")
         val s1 = MenuScanner.signature(MenuScanner.scan(root))

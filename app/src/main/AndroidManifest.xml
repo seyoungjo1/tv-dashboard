@@ -35,7 +35,7 @@
         android:supportsRtl="false"
         android:theme="@style/Theme.TvDashboard"
         android:usesCleartextTraffic="true"
-        tools:targetApi="34">
+        tools:targetApi="36">
 
         <activity
             android:name=".ui.MainActivity"

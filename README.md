@@ -87,7 +87,8 @@ TV를 **자료 저장소 + 화면 표시기**로 사용하는 Android 앱입니�
 |---|---|
 | 버튼 | 자료 폴더 **바로 아래 폴더 1개 = 버튼 1개** |
 | 버튼 이름 | 폴더명. 앞의 정렬 번호는 숨김 (`01_생산팀` → `생산팀`, `2. 지원팀` → `지원팀`) |
-| 순서 | 폴더명 자연 정렬 (`2_` < `10_`) → 번호를 붙여 순서 지정 |
+| 순서 | PC 프로그램의 TV 미리보기에서 **아이콘을 끌어 순서를 바꾸고 [순서 저장]** → 자료 폴더의 `메뉴순서.txt`(한 줄에 폴더 이름 하나). 적히지 않은 폴더는 그 뒤에 폴더명 자연 정렬 (`2_` < `10_`) |
+| main 폴더 | 메뉴가 아니라 **화면보호기** (12-1 참고) |
 | 아이콘 | 폴더 안 **`icon.png`** — **흰색 아이콘 + 투명 배경** PNG(정사각형, 256px 권장). 색·틀 없이 검은 사이드바 위에 그대로 표시, 선택 항목은 왼쪽 흰 막대. icon.jpg/webp 도 가능. 없으면 이름 첫 글자 |
 | 표시 파일 | 폴더의 `index.html` (없으면 `index.htm`). 없으면 안내 문구 표시 |
 | 숨김 | `.` 또는 `_` 로 시작하는 폴더는 메뉴에 나오지 않음 |
@@ -284,6 +285,23 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 또는 GitHub → Actions → **Android APK** → **Run workflow** → version `1.0.1`, publish ✔
+
+릴리스마다 두 가지가 함께 만들어집니다.
+
+| 결과물 | 용도 |
+|---|---|
+| `tv-dashboard-vX.apk` (direct) | 지금처럼 APK 를 직접 설치. 앱 안에서 스스로 업데이트, 공용 폴더 선택 가능 |
+| `tv-dashboard-vX-play.aab` (play) | **Google Play** 배포용. Play 정책상 제한 권한(자체 APK 설치 · 모든 파일 접근)을 빼고, 업데이트는 Play 스토어가 맡음 |
+
+- **Google Play 사전 검사** (Actions 가 자동): targetSdk(36) · versionCode · 제한 권한 없음 · 서명 · 디버그 아님 · 포그라운드 서비스 설명 · lint 오류 요약. 하나라도 어긋나면 릴리스가 멈춥니다.
+- **Play 자동 업로드**: Secrets 에 `PLAY_SERVICE_ACCOUNT_JSON` 이 있으면 Play Console 의 트랙(기본 **내부 테스트**, 실행 화면에서 선택)에 자동으로 올라갑니다.
+  처음 한 번 준비:
+  1. Play Console 에서 앱 만들기 (패키지 `com.seyoungjo.tvdashboard`) → 릴리스의 `…-play.aab` 를 **직접 한 번** 내부 테스트에 올림 (Play API 는 첫 업로드를 못 함)
+     - 앱 서명: **"내 앱 서명 키 사용"** 을 골라 지금 쓰는 `release.jks` 를 등록하면, 직접 설치한 APK 와 Play 버전이 서로 덮어쓰기 설치됩니다
+     - 앱 콘텐츠 → 포그라운드 서비스 권한 신고: '특수 용도 — 매장 디스플레이용 로컬 파일 관리 서버'
+  2. Google Cloud 에서 서비스 계정 + JSON 키 만들기 → Play Console › 사용자 및 권한 에서 그 계정을 초대(앱 출시 권한)
+  3. GitHub › Settings › Secrets › Actions 에 `PLAY_SERVICE_ACCOUNT_JSON` = JSON 내용 전체
+- Play 로 설치한 TV 는 Play Protect 확인이 끝난 앱으로 설치·자동 업데이트됩니다 (직접 설치 APK 는 설치할 때 Play Protect 검사가 뜰 수 있음)
 
 ---
 

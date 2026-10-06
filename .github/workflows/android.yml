@@ -3,6 +3,8 @@ name: Android APK
 # - 브랜치 push / PR    : 단위 테스트 + 디버그 APK 빌드(검증용, 아티팩트로 보관)
 # - 태그 v1.2.3 push    : 서명된 Release APK 빌드 → GitHub Releases 게시 (+ update.json)
 # - Actions 화면 수동 실행: 버전을 입력하면 서명된 Release APK 빌드, 'publish' 선택 시 Releases 게시
+# - 릴리스 때마다 Google Play 용 AAB(play 빌드)도 만들어 Play 정책 사전 검사를 하고,
+#   Secrets 에 PLAY_SERVICE_ACCOUNT_JSON 이 있으면 Play Console 의 지정 트랙(기본: 내부 테스트)에 자동 업로드
 on:
   push:
     branches: ["**", "!relay/**"]      # relay/** = 원격 중계 작업용 브랜치 (빌드하지 않음)
@@ -18,6 +20,11 @@ on:
         description: "GitHub Releases 에 게시 (태그 v<버전> 생성)"
         type: boolean
         default: false
+      play_track:
+        description: "Google Play 업로드 트랙 (PLAY_SERVICE_ACCOUNT_JSON 이 있을 때)"
+        type: choice
+        options: [internal, alpha, beta, production]
+        default: internal
       unsigned_build:
         description: "(내부용) Secrets 없이 미서명 Release APK 를 사전 릴리스 'unsigned-build' 에 올림 — 외부에서 서명할 때만 사용"
         type: boolean
@@ -81,7 +88,7 @@ jobs:
           echo "### 버전 $VERSION (versionCode $CODE) · release=$RELEASE · publish=$PUBLISH" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 단위 테스트 + 디버그 APK
-        run: ./gradlew --stacktrace testDebugUnitTest assembleDebug -PappVersion=${{ steps.mode.outputs.version }}
+        run: ./gradlew --stacktrace testDirectDebugUnitTest assembleDirectDebug -PappVersion=${{ steps.mode.outputs.version }}
 
       - name: PC 프로그램(tvrelay) 시험
         working-directory: pc
@@ -93,7 +100,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tv-dashboard-debug-${{ steps.mode.outputs.version }}
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/direct/debug/*.apk
           retention-days: 14
 
       # ──────────── (내부용) 미서명 Release → 사전 릴리스 unsigned-build ────────────
@@ -105,9 +112,9 @@ jobs:
           VERSION: ${{ steps.mode.outputs.version }}
         run: |
           set -euo pipefail
-          ./gradlew --stacktrace assembleRelease -PappVersion="$VERSION"
+          ./gradlew --stacktrace assembleDirectRelease -PappVersion="$VERSION"
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release-unsigned.apk "dist/tv-dashboard-v$VERSION-unsigned.apk"
+          cp app/build/outputs/apk/direct/release/app-direct-release-unsigned.apk "dist/tv-dashboard-v$VERSION-unsigned.apk"
           gh release delete unsigned-build --cleanup-tag -y >/dev/null 2>&1 || true
           gh release create unsigned-build "dist/tv-dashboard-v$VERSION-unsigned.apk" --prerelease \
             --target "$GITHUB_SHA" --title "내부용 미서명 빌드 (설치 불가)" \
@@ -153,13 +160,66 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "SIGNING_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
-      - name: 서명된 Release APK 빌드
+      - name: 서명된 Release 빌드 (APK = 직접 설치용 · AAB = Google Play 용) + lint
         if: steps.mode.outputs.release == 'true'
         env:
           SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --stacktrace assembleRelease -PappVersion=${{ steps.mode.outputs.version }}
+        run: ./gradlew --stacktrace assembleDirectRelease bundlePlayRelease lintPlayRelease -PappVersion=${{ steps.mode.outputs.version }}
+
+      - name: Google Play 사전 검사 (정책 · 서명 · 버전 · lint)
+        if: steps.mode.outputs.release == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.mode.outputs.version }}
+          CODE: ${{ steps.mode.outputs.code }}
+        run: |
+          set -euo pipefail
+          AAB=app/build/outputs/bundle/playRelease/app-play-release.aab
+          [[ -f "$AAB" ]] || { echo "::error::Play 용 AAB 가 생성되지 않았습니다."; exit 1; }
+          curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+          java -jar "$RUNNER_TEMP/bundletool.jar" dump manifest --bundle "$AAB" > "$RUNNER_TEMP/manifest.xml"
+          jarsigner -verify "$AAB" >/dev/null || { echo "::error::AAB 서명이 올바르지 않습니다."; exit 1; }
+          python3 - "$RUNNER_TEMP/manifest.xml" "$CODE" <<'PY'
+          import re, sys
+          m = open(sys.argv[1], encoding="utf-8").read()
+          code = int(sys.argv[2])
+          errs = []
+          REQUIRED_TARGET = 36          # Google Play: 새 앱·업데이트는 최신 Android(API 36) 대상
+          t = re.search(r'targetSdkVersion="(\d+)"', m)
+          if not t or int(t.group(1)) < REQUIRED_TARGET:
+              errs.append("targetSdk 가 %d 미만입니다 (%s)" % (REQUIRED_TARGET, t.group(1) if t else "?"))
+          vc = re.search(r'versionCode="(\d+)"', m)
+          if not vc or int(vc.group(1)) != code:
+              errs.append("versionCode 가 %d 이 아닙니다" % code)
+          RESTRICTED = ["REQUEST_INSTALL_PACKAGES", "MANAGE_EXTERNAL_STORAGE", "QUERY_ALL_PACKAGES", "READ_SMS",
+                        "SEND_SMS", "READ_CALL_LOG", "ACCESS_BACKGROUND_LOCATION", "REQUEST_DELETE_PACKAGES"]
+          for p in RESTRICTED:
+              if "android.permission." + p in m:
+                  errs.append("Play 제한 권한이 들어 있습니다: " + p)
+          if 'android:debuggable="true"' in m:
+              errs.append("debuggable 빌드입니다")
+          if "PROPERTY_SPECIAL_USE_FGS_SUBTYPE" not in m:
+              errs.append("specialUse 포그라운드 서비스 설명(PROPERTY_SPECIAL_USE_FGS_SUBTYPE)이 없습니다")
+          for e in errs:
+              print("::error::" + e)
+          sys.exit(1 if errs else 0)
+          PY
+          # lint: Play 관련 오류(Error/Fatal) 요약을 실행 결과에 남긴다
+          LINT=$(ls app/build/reports/lint-results-playRelease.xml 2>/dev/null || true)
+          if [[ -n "$LINT" ]]; then
+            python3 - "$LINT" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          issues = ET.parse(sys.argv[1]).getroot().findall("issue")
+          bad = [i for i in issues if i.get("severity") in ("Error", "Fatal")]
+          print("### Google Play 사전 검사: 통과 (lint 오류 %d · 경고 %d)" % (len(bad), len(issues) - len(bad)))
+          for i in bad[:20]:
+              print("- **%s** %s" % (i.get("id"), i.get("message")))
+          PY
+          fi
+          mkdir -p dist
+          cp "$AAB" "dist/tv-dashboard-v$VERSION-play.aab"
 
       - name: 서명 검증 · update.json 생성
         if: steps.mode.outputs.release == 'true'
@@ -171,7 +231,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f "$RUNNER_TEMP/release.jks"
-          SRC=$(ls app/build/outputs/apk/release/*.apk | grep -v unsigned | head -1)
+          SRC=$(ls app/build/outputs/apk/direct/release/*.apk | grep -v unsigned | head -1)
           [[ -f "$SRC" ]] || { echo "::error::서명된 APK 가 생성되지 않았습니다."; exit 1; }
           mkdir -p dist
           APK="tv-dashboard-v$VERSION.apk"
@@ -212,6 +272,34 @@ jobs:
           (cd pc && zip -qr "../dist/tvrelay-pc-v$VERSION.zip" tvrelay tvrun.bat tvupload.bat README.md -x '*/__pycache__/*')
           echo "apk=dist/$APK" >> "$GITHUB_OUTPUT"
 
+      - name: Google Play 업로드 키 확인
+        if: steps.mode.outputs.publish == 'true'
+        id: play
+        shell: bash
+        env:
+          PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [[ -n "${PLAY_JSON:-}" ]]; then echo "upload=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::PLAY_SERVICE_ACCOUNT_JSON 이 없어 Google Play 업로드는 건너뜁니다 (AAB 는 릴리스에 첨부됩니다)."
+          fi
+          # Play '새로운 기능' (500자 제한)
+          mkdir -p dist/whatsnew
+          head -c 480 dist/notes.md > dist/whatsnew/whatsnew-ko-KR
+
+      - name: Google Play 업로드
+        if: steps.mode.outputs.publish == 'true' && steps.play.outputs.upload == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.seyoungjo.tvdashboard
+          releaseFiles: dist/tv-dashboard-v${{ steps.mode.outputs.version }}-play.aab
+          releaseName: v${{ steps.mode.outputs.version }}
+          track: ${{ inputs.play_track || 'internal' }}
+          status: completed
+          whatsNewDirectory: dist/whatsnew
+
       - name: Release APK 보관
         if: steps.mode.outputs.release == 'true'
         uses: actions/upload-artifact@v4
@@ -229,6 +317,6 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete unsigned-build --cleanup-tag -y >/dev/null 2>&1 || true
-          gh release create "v$VERSION" "${{ steps.out.outputs.apk }}" dist/update.json dist/tvrelay-pc-v*.zip \
+          gh release create "v$VERSION" "${{ steps.out.outputs.apk }}" dist/update.json dist/tvrelay-pc-v*.zip dist/*-play.aab \
             --target "$GITHUB_SHA" --title "v$VERSION" --notes-file dist/notes.md
           echo "게시 완료: https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"

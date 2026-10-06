@@ -15,6 +15,7 @@ import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
+import com.seyoungjo.tvdashboard.BuildConfig
 import com.seyoungjo.tvdashboard.R
 import com.seyoungjo.tvdashboard.data.AppEvent
 import com.seyoungjo.tvdashboard.data.AppSettings
@@ -139,6 +140,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
         findPreference<Preference>("relay_interval")?.setOnPreferenceChangeListener { _, _ ->
             view?.post { RelayWorker.kick() }; true
+        }
+        if (!BuildConfig.SELF_UPDATE) {                  // Google Play 버전: 업데이트는 Play 스토어, 자료는 앱 전용 폴더
+            for (k in listOf("update_url", "install_unknown", "storage_mode")) findPreference<Preference>(k)?.isVisible = false
+            findPreference<Preference>("check_update")?.title = "Play 스토어에서 업데이트 확인"
         }
         click("check_update") { UpdateUi.checkForUpdate(requireActivity()) }
         click("install_unknown") { UpdateUi.openUnknownSources(requireActivity()) }

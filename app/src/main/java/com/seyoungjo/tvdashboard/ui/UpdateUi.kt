@@ -13,6 +13,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import com.seyoungjo.tvdashboard.BuildConfig
 import com.seyoungjo.tvdashboard.data.AppSettings
 import com.seyoungjo.tvdashboard.update.UpdateManager
 import java.io.File
@@ -25,6 +26,19 @@ object UpdateUi {
     private var promptShowing = false
 
     fun checkForUpdate(a: Activity) {
+        if (!BuildConfig.SELF_UPDATE) {                  // Google Play 버전: Play 스토어의 앱 화면으로
+            val id = a.packageName
+            try {
+                a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$id")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (e: ActivityNotFoundException) {
+                try {
+                    a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$id")))
+                } catch (_: ActivityNotFoundException) {
+                    Toast.makeText(a, "Play 스토어를 열 수 없습니다.", Toast.LENGTH_LONG).show()
+                }
+            }
+            return
+        }
         val (dialog, bar, label) = progressDialog(a, "업데이트 확인 중…")
         bar.isIndeterminate = true
         val url = AppSettings.updateUrl

@@ -21,13 +21,14 @@ val hasSigning = !keystoreFile.isNullOrBlank() && file(keystoreFile).exists()
 
 android {
     namespace = "com.seyoungjo.tvdashboard"
-    compileSdk = 34
+    // Google Play 요구 수준(최신 Android 대상)에 맞춘다. 동작 변화는 그 Android 버전 기기에서만 생긴다 (75TR3DQ = Android 14)
+    compileSdk = 36
 
     defaultConfig {
         // 패키지명은 업데이트를 위해 절대 변경하지 않습니다.
         applicationId = "com.seyoungjo.tvdashboard"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         versionCode = computedVersionCode
         versionName = appVersion
         buildConfigField("String", "DEFAULT_UPDATE_URL", "\"$defaultUpdateUrl\"")
@@ -44,6 +45,23 @@ android {
                 enableV1Signing = true
                 enableV2Signing = true
             }
+        }
+    }
+
+    // ── 배포 경로 ─────────────────────────────────────────────────────────
+    //  direct : GitHub Releases APK 직접 설치 — 앱 안에서 스스로 업데이트(PackageInstaller), 공용 폴더 선택 가능
+    //  play   : Google Play 배포 (AAB) — Play 정책상 제한 권한(REQUEST_INSTALL_PACKAGES · MANAGE_EXTERNAL_STORAGE)을 빼고
+    //           업데이트는 Play 스토어가 맡는다. 패키지명·서명이 같아 두 빌드는 서로 덮어쓰기 설치가 된다.
+    flavorDimensions += "store"
+    productFlavors {
+        create("direct") {
+            dimension = "store"
+            isDefault = true
+            buildConfigField("boolean", "SELF_UPDATE", "true")
+        }
+        create("play") {
+            dimension = "store"
+            buildConfigField("boolean", "SELF_UPDATE", "false")
         }
     }
 
@@ -73,6 +91,8 @@ android {
     lint {
         abortOnError = false
         checkReleaseBuilds = false
+        xmlReport = true
+        htmlReport = true
     }
 
     packaging {
