@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -140,6 +141,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        keep16by9()
         header = findViewById(R.id.header)
         headerTitle = findViewById(R.id.headerTitle)
         headerClock = findViewById(R.id.headerClock)
@@ -438,6 +440,26 @@ class MainActivity : AppCompatActivity() {
         placeHandle()
         if (save) AppSettings.prefs.edit().putBoolean("sidebar_open", open).apply()
         if (open && !fullscreen) focusSelectedTile()
+    }
+
+    /**
+     * 앱 화면을 항상 16:9 로 — 휴대폰처럼 비율이 다른 화면에서는 가운데 16:9 만 쓰고 남는 곳은 검게.
+     * (TV 는 16:9 라 그대로 꽉 찬다)
+     */
+    private fun keep16by9() {
+        val content = findViewById<FrameLayout>(android.R.id.content)
+        content.setBackgroundColor(Color.BLACK)
+        val app = content.getChildAt(0) ?: return
+        content.addOnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
+            val w = r - l
+            val h = b - t
+            if (w <= 0 || h <= 0) return@addOnLayoutChangeListener
+            val (tw, th) = if (w * 9 > h * 16) Pair(h * 16 / 9, h) else Pair(w, w * 9 / 16)
+            val lp = app.layoutParams as FrameLayout.LayoutParams
+            if (lp.width != tw || lp.height != th || lp.gravity != Gravity.CENTER) {
+                content.post { app.layoutParams = FrameLayout.LayoutParams(tw, th, Gravity.CENTER) }
+            }
+        }
     }
 
     /** 손잡이는 대시보드 위에 겹쳐 있으므로 사이드바가 보이면 그 오른쪽, 아니면 화면 왼쪽 끝에 붙인다 */
