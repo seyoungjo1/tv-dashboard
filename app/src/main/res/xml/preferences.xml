@@ -33,7 +33,7 @@
             app:summary="일정 시간 입력이 없으면 자료 폴더 루트의 동영상과 멘트를 표시합니다." />
         <EditTextPreference app:key="idle_seconds" app:defaultValue="300"
             app:dependency="idle_enabled" app:title="대기 시간(초)" app:useSimpleSummaryProvider="true" />
-        <EditTextPreference app:key="idle_message" app:defaultValue="오산공장 dashboard 터치시 접속됩니다"
+        <EditTextPreference app:key="idle_message" app:defaultValue="화면을 터치하면 대시보드로 들어갑니다"
             app:dependency="idle_enabled" app:title="멘트" app:useSimpleSummaryProvider="true" />
         <EditTextPreference app:key="idle_msg_show_sec" app:defaultValue="0"
             app:dependency="idle_enabled" app:title="멘트 표시 시간(초, 0=계속 표시)"

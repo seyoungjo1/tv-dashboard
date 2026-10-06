@@ -12,7 +12,8 @@ object AppSettings {
         private set
 
     const val DEFAULT_TITLE = "대상 오산공장 Dashboard"
-    const val DEFAULT_MESSAGE = "오산공장 dashboard 터치시 접속됩니다"
+    const val DEFAULT_MESSAGE = "화면을 터치하면 대시보드로 들어갑니다"
+    private const val OLD_DEFAULT_MESSAGE = "오산공장 dashboard 터치시 접속됩니다"
 
     fun init(context: Context) {
         PreferenceManager.setDefaultValues(context, R.xml.preferences, false)
@@ -40,7 +41,8 @@ object AppSettings {
 
     val idleEnabled get() = prefs.getBoolean("idle_enabled", true)
     val idleSeconds get() = int("idle_seconds", 300, 10, 24 * 3600)
-    val idleMessage: String get() = prefs.getString("idle_message", DEFAULT_MESSAGE) ?: ""
+    val idleMessage: String get() = (prefs.getString("idle_message", DEFAULT_MESSAGE) ?: "")
+        .let { if (it == OLD_DEFAULT_MESSAGE) DEFAULT_MESSAGE else it }   // 예전 기본 멘트는 새 문구로
     val idleMsgShowSec get() = int("idle_msg_show_sec", 0, 0, 3600)
     val idleMsgHideSec get() = int("idle_msg_hide_sec", 0, 0, 3600)
 

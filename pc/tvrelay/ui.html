@@ -96,6 +96,14 @@
   #pwModal p { margin:0 0 14px; font-size:13px; color:#666; line-height:1.5; }
   #pwModal input { width:100%; box-sizing:border-box; margin-bottom:8px; }
   #pwModal .err { color:var(--danger); font-size:13px; min-height:18px; }
+  #ssModal { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:50; }
+  #ssModal.hidden { display:none; }
+  #ssModal .box { background:#fff; border-radius:12px; padding:22px 24px; width:min(620px, calc(100vw - 32px)); max-height:calc(100vh - 32px); overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,.3); }
+  #ssModal h3 { margin:0 0 4px; font-size:17px; } #ssModal h4 { margin:16px 0 6px; font-size:14px; }
+  #ssModal textarea { width:100%; box-sizing:border-box; min-height:150px; font-family:inherit; font-size:14px; line-height:1.7; padding:10px; border:1px solid var(--line); border-radius:8px; }
+  #ssModal .opt { display:flex; gap:10px; } #ssModal .opt label { flex:1; border:1px solid var(--line); border-radius:10px; padding:10px 12px; cursor:pointer; font-size:13px; line-height:1.5; }
+  #ssModal .opt input { margin-right:6px; } #ssModal .opt label:has(input:checked) { border-color:var(--accent); background:#e8f7fd; }
+  #ssModal .st { font-size:13px; color:#666; min-height:18px; margin-top:8px; }
 </style>
 </head>
 <body>
@@ -233,6 +241,19 @@
   <div class="err" id="pwErr"></div>
   <div style="text-align:right;margin-top:8px"><button type="button" class="secondary" id="pwCancel">취소</button> <button type="submit">HTML 내려받기</button></div>
 </form></div>
+<div id="ssModal" class="hidden"><div class="box">
+  <h3>화면보호기 설정 (main 폴더)</h3>
+  <div class="hint">TV 의 main 폴더에 <code>공지.txt</code> · <code>설정.json</code> 으로 저장되고, 화면보호기에 바로 반영됩니다.</div>
+  <h4>공지사항 <span class="hint" id="ssCount"></span></h4>
+  <textarea id="ssNotice" placeholder="한 줄에 공지 하나 (위에서부터 5개까지 표시)&#10;예) 10월 정기교육은 14일에 진행됩니다."></textarea>
+  <h4>동영상 표시 방식</h4>
+  <div class="opt">
+    <label><input type="radio" name="ssFit" value="fit" checked><b>맞춤</b><br><span class="hint">영상 전체가 보이고, 비율이 다르면 남는 곳을 같은 영상으로 흐리게 채움</span></label>
+    <label><input type="radio" name="ssFit" value="crop"><b>크롭</b><br><span class="hint">칸을 꽉 채우고, 넘치는 위아래/양옆은 잘라 냄</span></label>
+  </div>
+  <div class="st" id="ssSt"></div>
+  <div style="text-align:right;margin-top:10px"><button type="button" class="secondary" id="ssCancel">닫기</button> <button type="button" id="ssSave">TV 에 저장</button></div>
+</div></div>
 <div id="jobsBar" class="hidden"><div class="jh"><span>진행 중인 작업</span><button class="icon" id="jobsClose" style="font-size:14px">✕</button></div><div id="jobsMini"></div></div>
 
 <script>
@@ -342,16 +363,51 @@
       const r = await api('GET', '/api/grants');
       grantMap = Object.fromEntries(r.items.map(g => [g.folder, g]));
       $('#grantList').innerHTML = r.items.length ? '<table style="width:100%">' + r.items.map(g =>
-        `<tr><td>🔑 <b>${esc(g.folder)}</b></td><td>${g.status === 'active' ? '<span style="color:var(--ok)">사용 중</span>' : g.status === 'pending' ? 'TV 확인 대기' : '<span style="color:var(--danger)">실패</span>'}</td>
+        `<tr><td>🔑 <b>${esc(toolLabel(g.folder))}</b></td><td>${g.status === 'active' ? '<span style="color:var(--ok)">사용 중</span>' : g.status === 'pending' ? 'TV 확인 대기' : '<span style="color:var(--danger)">실패</span>'}</td>
          <td style="text-align:right;white-space:nowrap"><button class="secondary" data-gt="get" data-f="${esc(g.folder)}">다시 받기</button>
          <button class="secondary" data-gt="renew" data-f="${esc(g.folder)}">새로 발급</button>
          <button class="danger" data-gt="revoke" data-f="${esc(g.folder)}">폐기</button></td></tr>`).join('') + '</table>' : '발급된 도구가 없습니다.';
     } catch (_) {}
   }
+  const NOTICE_KEY = 'main#공지';
+  const isMain = (p) => !!p && p.toLowerCase() === 'main';
+  const toolLabel = (f) => f === NOTICE_KEY ? '공지사항 편집 도구' : f;
+
+  // ── 화면보호기 설정 (main/공지.txt · main/설정.json) ──
+  let ssDir = 'main', ssConf = {};
+  function ssCount() { const n = $('#ssNotice').value.split('\n').map(s => s.trim()).filter(Boolean).length; $('#ssCount').textContent = n ? `${n}개${n > 5 ? ' — 5개까지만 표시됩니다' : ''}` : '(없으면 공지 칸이 숨겨집니다)'; }
+  $('#ssNotice').addEventListener('input', ssCount);
+  $('#ssCancel').onclick = () => $('#ssModal').classList.add('hidden');
+  async function openScreensaver(dir) {
+    ssDir = dir; ssConf = {};
+    $('#ssNotice').value = ''; ssCount(); $('#ssSave').disabled = true;
+    $('#ssModal').classList.remove('hidden');
+    const say = (t) => $('#ssSt').textContent = t;
+    const want = ['공지.txt', '설정.json'].map(n => dir + '/' + n).filter(p => entry(p));
+    say(want.length ? 'TV 에서 지금 설정을 불러오는 중…' : '');
+    if (want.length && await ensure(want, () => !$('#ssModal').classList.contains('hidden'), say)) {
+      const get = async (n) => { if (!entry(dir + '/' + n)) return ''; const r = await fetch(prevUrl(dir + '/' + n) + '?t=' + Date.now()); return r.ok ? r.text() : ''; };
+      $('#ssNotice').value = (await get('공지.txt')).replace(/^\uFEFF/, '').trim();
+      try { ssConf = JSON.parse(await get('설정.json') || '{}') || {}; } catch (_) { ssConf = {}; }
+      say('불러왔습니다.');
+    }
+    document.querySelector(`input[name=ssFit][value=${ssConf.videoFit === 'crop' ? 'crop' : 'fit'}]`).checked = true;
+    ssCount(); $('#ssSave').disabled = false;
+  }
+  $('#ssSave').onclick = async () => {
+    const lines = $('#ssNotice').value.split('\n').map(s => s.trim()).filter(Boolean);
+    const conf = Object.assign({}, ssConf, { videoFit: document.querySelector('input[name=ssFit]:checked').value });
+    $('#ssModal').classList.add('hidden');
+    await stageAndSend([
+      [ssDir + '/공지.txt', new File([lines.join('\n') + (lines.length ? '\n' : '')], '공지.txt', { type: 'text/plain' })],
+      [ssDir + '/설정.json', new File([JSON.stringify(conf, null, 2)], '설정.json', { type: 'application/json' })],
+    ], '화면보호기 설정 저장');
+  };
+
   // 업로드 비밀번호 2번 입력 → 그 비밀번호로 잠근 HTML 을 내려받는다
   function askPassword(folder) {
     return new Promise((resolve) => {
-      const m = $('#pwModal'); $('#pwTitle').textContent = `'${folder}' 업로드 비밀번호 정하기`;
+      const m = $('#pwModal'); $('#pwTitle').textContent = `'${toolLabel(folder)}' 비밀번호 정하기`;
       $('#pw1').value = ''; $('#pw2').value = ''; $('#pwErr').textContent = '';
       m.classList.remove('hidden'); setTimeout(() => $('#pw1').focus(), 0);
       const done = (v) => { m.classList.add('hidden'); $('#pwForm').onsubmit = null; $('#pwCancel').onclick = null; resolve(v); };
@@ -378,12 +434,12 @@
   }
   async function getTool(folder, renew) {
     try {
-      if (renew && !confirm(`'${folder}' 업로드 도구를 새로 발급할까요?\n지금 나눠 준 HTML 은 더 이상 동작하지 않습니다.`)) return;
+      if (renew && !confirm(`'${toolLabel(folder)}' 를 새로 발급할까요?\n지금 나눠 준 HTML 은 더 이상 동작하지 않습니다.`)) return;
       const pw = await askPassword(folder);
       if (pw === null) return;
       const r = await api('POST', '/api/grant', { folder, renew: !!renew });
       if (r.ready) { downloadTool(folder, pw); return; }
-      jobs.unshift({ id: r.id, desc: `업로드 도구 ${renew ? '새로 발급' : '등록'}: ${folder}`, st: 'wait', note: 'TV 가 등록하기를 기다리는 중… (보통 10~20초)' });
+      jobs.unshift({ id: r.id, desc: `${toolLabel(folder)} ${renew ? "새로 발급" : "등록"}`, st: 'wait', note: 'TV 가 등록하기를 기다리는 중… (보통 10~20초)' });
       renderJobs();
       for (let i = 0; i < 100; i++) {
         await new Promise(res => setTimeout(res, 3000));
@@ -492,7 +548,10 @@
     if (!e) { $('#pInfo').textContent = '(TV 목록에 없음)'; $('#pActions').innerHTML = ''; pb.innerHTML = '<div class="loading">TV 목록에 없는 항목입니다. ⟳ 로 새로고침하세요.</div>'; return; }
     $('#pInfo').textContent = e.d ? `폴더 · 항목 ${kids(e.p).length}개` : `${size(e.s)} · ${new Date(e.t).toLocaleString('ko-KR')}`;
     $('#pActions').innerHTML = e.d
-      ? (sel ? `<button data-gt="get" data-f="${esc(sel)}" title="이 폴더에만 올릴 수 있는 직원용 HTML">업로드 도구 받기</button> ` +
+      ? (isMain(sel) ? `<button data-a="ssset" title="공지사항 · 동영상 크롭/맞춤">화면보호기 설정</button> ` +
+               `<button class="secondary" data-gt="get" data-f="${NOTICE_KEY}" title="공지사항만 조회·수정하는 HTML (비밀번호 잠금)">공지사항 편집 HTML 받기</button> ` +
+               (grantMap[NOTICE_KEY] ? `<button class="secondary" data-gt="renew" data-f="${NOTICE_KEY}">공지 도구 새로 발급</button> ` : '') : '') +
+        (sel ? `<button data-gt="get" data-f="${esc(sel)}" title="이 폴더에만 올릴 수 있는 직원용 HTML">업로드 도구 받기</button> ` +
                (grantMap[sel] ? `<button class="secondary" data-gt="renew" data-f="${esc(sel)}">새로 발급</button> ` : '') +
                `<a class="btn secondary" href="/api/syncbat?folder=${encodeURIComponent(sel)}" download title="PC 의 아무 폴더에 넣고 실행하면 그 폴더의 파일을 이 TV 폴더로 올립니다 (바뀐 파일만)">자동 업로드 .bat 받기</a> ` : '') +
         `<button class="secondary" data-a="sample">예제 대시보드 만들기</button> <button class="secondary" data-a="reload">TV 새로고침</button>` + (sel ? ` <button class="secondary" data-a="rename">이름 변경</button> <button class="danger" data-a="delete">삭제</button>` : '')
@@ -583,6 +642,7 @@
     if (a === 'download') return send([{ op: 'get', path: p }], '다운로드: ' + p);
     if (a === 'replace') { replaceTarget = p; $('#replaceInput').value = ''; return $('#replaceInput').click(); }
     if (a === 'reload') return send([{ op: 'reload' }], 'TV 화면 새로고침');
+    if (a === 'ssset') return openScreensaver(p);
     if (a === 'sample') { const n = prompt('만들 폴더 이름', '생산팀'); if (n) send([{ op: 'sample', path: join(p, n.trim()) }], '예제 대시보드: ' + n); return; }
     if (a === 'rename') { const n = prompt('새 이름', base(p)); if (n && n !== base(p)) send([{ op: 'rename', path: p, to: join(parent(p), n.trim()) }], '이름 변경: ' + p + ' → ' + n); return; }
     if (a === 'delete') { const d = entry(p)?.d; if (confirm(`'${p}' ${d ? '폴더와 안의 모든 파일을' : '파일을'} 삭제할까요?`)) { send([{ op: 'delete', path: p, recursive: !!d }], '삭제: ' + p); sel = parent(p); } }

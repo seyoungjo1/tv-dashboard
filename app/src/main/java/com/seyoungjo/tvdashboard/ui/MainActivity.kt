@@ -75,6 +75,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var idleVideo: VideoView
     private lateinit var idleMessage: TextView
     private var webView: WebView? = null
+    private lateinit var screensaver: Screensaver
+    private var hasMain = false                       // 자료/main 폴더가 있으면 대기 화면 = 화면보호기
 
     private val adapter = MenuAdapter { openEntry(it, userAction = true) }
     private val handler = Handler(Looper.getMainLooper())
@@ -154,6 +156,7 @@ class MainActivity : AppCompatActivity() {
             // 앱 내장 폰트 등: https://appassets.androidplatform.net/assets/fonts/Pretendard-Bold.woff2
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(applicationContext))
             .build()
+        screensaver = Screensaver(this, findViewById(R.id.ssLayer), assetLoader, handler)
 
         menuList.layoutManager = LinearLayoutManager(this)
         menuList.adapter = adapter
@@ -211,6 +214,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        screensaver.destroy()
         ChangeBus.remove(busListener)
         handler.removeCallbacksAndMessages(null)
         webView?.destroy()
@@ -337,14 +341,24 @@ class MainActivity : AppCompatActivity() {
             val root = ContentStore.root(app)
             val list = MenuScanner.scan(root)
             val videos = MenuScanner.idleVideos(root)
+            val main = MenuScanner.mainDir(root)
+            val mainVideos = MenuScanner.mainVideos(main)
+            val crop = MenuScanner.mainCrop(main)
             val sig = MenuScanner.signature(list)
-            handler.post { applyMenu(list, sig, videos, force) }
+            handler.post { applyMenu(list, sig, videos, main != null, mainVideos, crop, force) }
         }
     }
 
-    private fun applyMenu(list: List<MenuEntry>, sig: String, videos: List<File>, force: Boolean) {
+    private fun applyMenu(
+        list: List<MenuEntry>, sig: String, videos: List<File>, main: Boolean, mainVideos: List<File>, crop: Boolean,
+        force: Boolean,
+    ) {
         if (isDestroyed) return
         idleVideos = videos
+        hasMain = main
+        screensaver.crop = crop
+        screensaver.setVideos(mainVideos)
+        if (!main && screensaver.active && idleOverlay.visibility == View.VISIBLE) hideIdle()
         if (!force && sig == signature) return
         signature = sig
         entries = list
@@ -386,6 +400,8 @@ class MainActivity : AppCompatActivity() {
                 handler.removeCallbacks(menuRefreshRunnable)
                 handler.postDelayed(menuRefreshRunnable, 400)
                 if (e.path.equals(LOGO_FILE, ignoreCase = true)) applyHeader()
+                val top = e.path.substringBefore('/')
+                if (MenuScanner.isMain(top) || e.path.equals(LOGO_FILE, ignoreCase = true)) screensaver.refresh()
                 val c = current
                 if (c != null && AppSettings.autoRefresh &&
                     (e.path == c.folder || e.path.startsWith(c.folder + "/"))
@@ -400,6 +416,7 @@ class MainActivity : AppCompatActivity() {
                 applyHeader()
                 if (idleOverlay.visibility == View.VISIBLE) {
                     idleMessage.text = AppSettings.idleMessage
+                    screensaver.refresh()
                 } else resetIdle()
             }
             is AppEvent.UpdateUploaded -> if (resumed) checkPendingUploadedApk()
@@ -491,6 +508,14 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(idleRunnable)
         idleOverlay.visibility = View.VISIBLE
         idleOverlay.bringToFront()
+        if (hasMain) {                                 // 화면보호기 (공지·실적 그래프·동영상, 멘트는 페이지 맨 아래)
+            handler.removeCallbacks(blinkRunnable)
+            try { idleVideo.stopPlayback() } catch (_: Exception) {}
+            idleVideo.visibility = View.GONE
+            idleMessage.visibility = View.GONE
+            screensaver.show()
+            return
+        }
         val msg = AppSettings.idleMessage.trim()
         idleMessage.text = msg
         msgVisible = true
@@ -533,6 +558,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun hideIdle() {
         handler.removeCallbacks(blinkRunnable)
+        screensaver.hide()
         try { idleVideo.stopPlayback() } catch (_: Exception) {}
         idleVideo.visibility = View.GONE
         idleOverlay.visibility = View.GONE

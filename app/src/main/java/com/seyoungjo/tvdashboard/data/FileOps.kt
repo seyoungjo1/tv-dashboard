@@ -112,6 +112,9 @@ class FileOps(private val ctx: Context) {
         ChangeBus.post(AppEvent.Changed(rel))
     }
 
+    /** 읽기용 파일 (없으면 null) */
+    fun fileOrNull(path: String?): File? = guard().resolve(requirePath(path)).takeIf { it.isFile }
+
     /** 읽기용 파일 (자료 폴더 안, 존재하는 파일만) */
     fun file(path: String?): File {
         val f = guard().resolve(requirePath(path))

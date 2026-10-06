@@ -193,6 +193,42 @@
             android:layout_height="match_parent"
             android:layout_gravity="center" />
 
+        <!-- 화면보호기: 자료/main 폴더가 있으면 대기 화면 대신 표시 (assets/screensaver + 동영상) -->
+        <FrameLayout
+            android:id="@+id/ssLayer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#FFEAEEF3"
+            android:visibility="gone">
+
+            <!-- 동영상 칸: 위치·크기는 화면보호기 페이지가 알려 준다. 비율이 다르면 가운데 원본 + 남는 곳은 흐리게 -->
+            <FrameLayout
+                android:id="@+id/ssVideoBox"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:background="#FF0D1620"
+                android:visibility="invisible">
+
+                <ImageView
+                    android:id="@+id/ssBlur"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:importantForAccessibility="no"
+                    android:scaleType="centerCrop" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="#40000000" />
+
+                <TextureView
+                    android:id="@+id/ssVideo"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:layout_gravity="center" />
+            </FrameLayout>
+        </FrameLayout>
+
         <TextView
             android:id="@+id/idleMessage"
             android:layout_width="wrap_content"

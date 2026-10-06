@@ -119,6 +119,22 @@ class ToolTest(unittest.TestCase):
         self.assertEqual(grants.unlock(conf2["lock"], "pw1234", g["gid"])["token"], "github_pat_tool")
         self.assertNotIn("toolToken", json.dumps(cfg2.to_json(for_tv=True)))
 
+    def test_notice_tool(self):
+        from tvrelay import grants
+        tmp = Path(tempfile.mkdtemp())
+        cfg = config.setup("github_pat_main", "o/relay", "osan", tmp)
+        g = grants.new_grant(grants.NOTICE_KEY)
+        op = grants.grant_op(g)
+        self.assertEqual((op["folder"], op["files"], op["read"], op["types"]), ("main", ["공지.txt"], True, ["txt"]))
+        self.assertEqual(grants.file_name(g), "공지사항_편집.html")
+        html = grants.bake(cfg, g, "pw1234")
+        self.assertIn("공지사항 편집", html)
+        conf = json.loads(html.split("const CFG = ", 1)[1].split(";\n", 1)[0])
+        self.assertEqual((conf["folder"], conf["file"]), ("main", "공지.txt"))
+        self.assertNotIn(g["key"], html)
+        up = grants.new_grant("원가")
+        self.assertNotIn("read", grants.grant_op(up))                # 업로드 도구는 읽기 불가
+
     def test_send_skips_unchanged(self):
         from tvrelay import ui
         tmp = Path(tempfile.mkdtemp())

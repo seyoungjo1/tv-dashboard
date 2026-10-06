@@ -11,6 +11,7 @@ import java.io.File
  *  4) 아이콘 = 폴더 안 'icon.png' (icon.jpg / icon.jpeg / icon.webp 도 허용)
  *     예전 이름 '대표이미지.png' 도 인식. 없으면 이름 첫 글자 색상 타일
  *  5) 버튼 선택 시 폴더의 index.html (없으면 index.htm) 표시
+ *  6) 'main' 폴더는 메뉴가 아니라 화면보호기 (실적 JSON 4개 + 1.mp4 2.mp4 … )
  */
 data class MenuEntry(
     val folder: String,          // 실제 폴더명 (상대 경로)
@@ -24,6 +25,7 @@ object MenuScanner {
     val VIDEO_EXT = setOf("mp4", "m4v", "webm", "mkv", "3gp", "mov", "ts")
     val ICON_EXT = setOf("png", "jpg", "jpeg", "webp")
     val ICON_NAMES = listOf("icon", "대표이미지")
+    const val MAIN_FOLDER = "main"
     private val ORDER_PREFIX = Regex("""^\d+\s*[_.\-)\s]\s*""")
 
     fun displayName(folder: String): String {
@@ -32,7 +34,7 @@ object MenuScanner {
     }
 
     fun scan(root: File): List<MenuEntry> {
-        val dirs = root.listFiles()?.filter { it.isDirectory && !PathGuard.isHidden(it.name) } ?: return emptyList()
+        val dirs = root.listFiles()?.filter { it.isDirectory && !PathGuard.isHidden(it.name) && !isMain(it.name) } ?: return emptyList()
         return dirs.sortedWith { a, b -> naturalCompare(a.name, b.name) }.map { dir ->
             val files = dir.listFiles()?.filter { it.isFile && !it.name.startsWith(".") } ?: emptyList()
             val index = listOf("index.html", "index.htm").firstOrNull { n -> files.any { it.name.equals(n, true) } }
@@ -51,6 +53,24 @@ object MenuScanner {
             images.firstOrNull { it.nameWithoutExtension.equals(base, ignoreCase = true) }?.let { return it }
         }
         return null
+    }
+
+    fun isMain(name: String) = name.equals(MAIN_FOLDER, ignoreCase = true)
+
+    /** 화면보호기 폴더 (자료/main) — 없으면 null */
+    fun mainDir(root: File): File? = root.listFiles()?.firstOrNull { it.isDirectory && isMain(it.name) }
+
+    /** 화면보호기 동영상: main 안의 동영상, 이름 오름차순 (1.mp4 2.mp4 … 10.mp4) */
+    fun mainVideos(dir: File?): List<File> =
+        dir?.listFiles()?.filter { it.isFile && it.extension.lowercase() in VIDEO_EXT && !it.name.startsWith(".") }
+            ?.sortedWith { a, b -> naturalCompare(a.name, b.name) } ?: emptyList()
+
+    /** 화면보호기 설정 (main/설정.json, PC 프로그램이 저장) — 동영상 크롭 여부. 없으면 맞춤(블러) */
+    fun mainCrop(dir: File?): Boolean = try {
+        val f = dir?.let { File(it, "설정.json") }
+        f != null && f.isFile && org.json.JSONObject(f.readText()).optString("videoFit") == "crop"
+    } catch (e: Exception) {
+        false
     }
 
     /** 루트에 있는 동영상(대기 화면용), 이름순 */

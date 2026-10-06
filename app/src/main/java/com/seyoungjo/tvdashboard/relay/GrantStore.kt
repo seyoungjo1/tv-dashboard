@@ -22,6 +22,8 @@ object GrantStore {
                 gid, g.getString("key"), g.getString("folder"), g.getLong("maxBytes"),
                 (0 until types.length()).map { types.getString(it).lowercase().removePrefix(".") }.toSet(),
                 g.optString("name", g.getString("folder")),
+                g.optJSONArray("files")?.let { f -> (0 until f.length()).map { f.getString(it) }.toSet() } ?: emptySet(),
+                g.optBoolean("read", false),
             )
         }
         return out
@@ -40,9 +42,15 @@ object GrantStore {
         val maxBytes = op.optLong("maxBytes", 100L * 1024 * 1024)
         require(maxBytes in 1..(4L * 1024 * 1024 * 1024)) { "용량 한도가 올바르지 않습니다" }
         val types = op.optJSONArray("types") ?: JSONArray(DEFAULT_TYPES)
+        val files = op.optJSONArray("files") ?: JSONArray()
+        for (i in 0 until files.length()) {
+            val f = files.getString(i)
+            require(f.isNotEmpty() && !f.contains('/') && !f.startsWith(".")) { "잘못된 파일 이름" }
+        }
         val o = try { JSONObject(AppSettings.prefs.getString(KEY, "{}") ?: "{}") } catch (e: Exception) { JSONObject() }
         o.put(gid, JSONObject().put("key", key).put("folder", folder).put("maxBytes", maxBytes).put("types", types)
-            .put("name", op.optString("name", folder)).put("created", System.currentTimeMillis()))
+            .put("name", op.optString("name", folder)).put("created", System.currentTimeMillis())
+            .put("files", files).put("read", op.optBoolean("read", false)))
         AppSettings.prefs.edit().putString(KEY, o.toString()).apply()
         return get(gid)!!
     }

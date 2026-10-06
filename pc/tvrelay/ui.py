@@ -171,8 +171,8 @@ class Api:
             raise ValueError("두 비밀번호가 서로 다릅니다")
         cfg = config.load(self.root)
         html = grants.bake(cfg, g, password, cfg.tool_token)
-        echo("업로드 도구 내려받음: '%s' (비밀번호 잠금)" % g["folder"])
-        return "%s_업로드.html" % g["name"], html.encode("utf-8")
+        echo("%s 내려받음: '%s' (비밀번호 잠금)" % ("공지사항 편집 도구" if g.get("kind") == "notice" else "업로드 도구", g["folder"]))
+        return grants.file_name(g), html.encode("utf-8")
 
     def cached_state(self) -> dict[str, Any]:
         """화면을 켤 때 바로 보여 줄 마지막 상태 (네트워크 없이)"""

@@ -1,0 +1,68 @@
+/* 화면보호기 — 1920×1080 무대를 화면 크기에 맞춰 통째로 확대/축소한다 (ss.js fit) */
+@font-face { font-family: "Pretendard"; font-weight: 600; src: url("/assets/fonts/Pretendard-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "Pretendard"; font-weight: 700; src: url("/assets/fonts/Pretendard-Bold.woff2") format("woff2"); }
+@font-face { font-family: "Pretendard"; font-weight: 800; src: url("/assets/fonts/Pretendard-ExtraBold.woff2") format("woff2"); }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #eaeef3; }
+body { font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif; font-weight: 600; color: #1d2b3a; word-break: keep-all; }
+
+#stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0;
+         background: linear-gradient(180deg, #edf1f5 0%, #e7ecf2 100%); }
+
+header { position: absolute; left: 0; right: 0; top: 0; height: 118px; display: flex; align-items: center; padding: 0 54px; }
+#logo { height: 66px; width: auto; max-width: 260px; object-fit: contain; }
+#title { position: absolute; left: 0; right: 0; text-align: center; margin: 0; font-size: 54px; font-weight: 800; letter-spacing: -1px; color: #1f2d3d; pointer-events: none; }
+.clock { margin-left: auto; display: flex; align-items: center; gap: 30px; position: relative; }
+.clock span { font-size: 31px; color: #5d6b7a; font-weight: 600; }
+.clock i { width: 2px; height: 44px; background: #cfd6de; }
+.clock b { font-size: 44px; font-weight: 800; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+
+main { position: absolute; left: 38px; right: 38px; top: 122px; bottom: 76px; display: flex; gap: 22px; }
+#left { width: 1080px; display: flex; flex-direction: column; gap: 22px; }
+#right { flex: 1; position: relative; }
+
+.card { background: #fff; border-radius: 22px; box-shadow: 0 4px 18px rgba(29, 43, 58, .07); }
+
+/* 공지 */
+#notice { padding: 14px 34px; flex: 0 0 auto; }
+#notice .row { font-size: 37px; font-weight: 600; padding: 26px 0; border-bottom: 2px solid #eef1f4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#notice .row:last-child { border-bottom: 0; }
+#notice.none { display: none; }
+
+/* 매출 · 생산량 */
+#perf { flex: 1; min-height: 0; position: relative; display: flex; padding: 54px 26px 18px 40px; }
+.asof { position: absolute; right: 30px; top: 18px; font-size: 21px; color: #7a8796; }
+.half { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.vline { width: 2px; background: #eef1f4; margin: 30px 26px 10px; }
+.half h2 { margin: 0 0 14px; font-size: 32px; font-weight: 800; }
+.nums { display: flex; }
+.n { flex: 1; padding-right: 18px; }
+.n + .n { padding-left: 22px; border-left: 2px solid #eef1f4; }
+.nl { font-size: 25px; color: #4b5866; }
+.nv { margin-top: 6px; white-space: nowrap; }
+.nv .count { font-size: 46px; font-weight: 800; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.nv small { font-size: 27px; font-weight: 600; margin-left: 4px; color: #3b4855; }
+.badge { margin-top: 12px; height: 46px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; }
+.badge:empty { visibility: hidden; }
+#sales .badge { background: #fdeee2; color: #e8731c; }
+#prod .badge { background: #e4efff; color: #2f74e0; }
+.badge.low { filter: saturate(.6); opacity: .85; }
+.chart { flex: 1; min-height: 0; width: 100%; margin-top: 8px; overflow: visible; }
+.chart text { font-family: inherit; }
+.empty { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; font-size: 28px; color: #7a8796; text-align: center; padding: 40px; }
+#perf.nodata .half, #perf.nodata .vline { visibility: hidden; }
+#perf.nodata .empty { display: flex; }
+
+/* 동영상 자리 — 실제 영상은 TV 앱이 이 위치에 겹쳐 재생한다 */
+/* 오른쪽 칸을 꽉 채운다. 비율이 다른 영상은 TV 앱이 가운데 원본 + 남는 곳은 같은 영상을 흐리게 채움 */
+#video { position: absolute; inset: 0; background: #0d1620; border-radius: 22px; overflow: hidden; box-shadow: 0 6px 22px rgba(0, 0, 0, .18); }
+#video .ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #8d9aa8; font-size: 24px; line-height: 1.6; padding: 30px; }
+#video.playing .ph { display: none; }
+/* 안내 멘트: 화면 맨 아래 */
+#hint { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 30px; color: #3b4855; font-weight: 700; }
+#hint.blink { animation: blink 2.4s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+
+/* 숫자·차트 등장 */
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise .7s cubic-bezier(.2, .7, .2, 1) both; }

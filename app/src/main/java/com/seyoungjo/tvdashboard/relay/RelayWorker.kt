@@ -164,14 +164,21 @@ object RelayWorker {
             val puts = ArrayList<Pair<String, Long>>()
             for (i in 0 until list.length()) {
                 val op = list.getJSONObject(i)
-                if (op.optString("op") != "put") throw GrantPolicy.Denied("이 도구로는 파일 올리기만 할 수 있습니다.")
+                GrantPolicy.checkOp(grant, op.optString("op"))
                 puts.add(GrantPolicy.checkPath(grant, op.getString("path")) to op.optLong("size", 0))
             }
             for (i in 0 until list.length()) {
                 val op = list.getJSONObject(i)
-                val r = JSONObject().put("op", "put").put("path", op.optString("path"))
+                val kind = op.optString("op")
+                val r = JSONObject().put("op", kind).put("path", op.optString("path"))
                 try {
-                    runOp(ctx, c, ops, job, files, op.put("path", puts[i].first).put("overwrite", true), r, ArrayList())
+                    if (kind == "get") {                   // 공지사항 도구: 작은 글 파일을 결과에 그대로 담는다
+                        val f = ops.fileOrNull(puts[i].first)
+                        if (f != null && f.length() > 256 * 1024) throw FileOps.OpError(413, "파일이 너무 큽니다.")
+                        r.put("text", f?.readText(Charsets.UTF_8) ?: "").put("exists", f != null)
+                    } else {
+                        runOp(ctx, c, ops, job, files, op.put("path", puts[i].first).put("overwrite", true), r, ArrayList())
+                    }
                     r.put("ok", true)
                 } catch (e: FileOps.OpError) {
                     allOk = false; r.put("ok", false).put("error", e.message)
@@ -186,13 +193,14 @@ object RelayWorker {
             allOk = false
             results.put(JSONObject().put("op", "put").put("ok", false).put("error", e.message))
         }
+        val wrote = (0 until list.length()).any { list.getJSONObject(it).optString("op") == "put" }
         val result = JSONObject().put("v", 1).put("id", job.id).put("ok", allOk).put("results", results)
             .put("folder", grant.folder).put("maxBytes", grant.maxBytes)
             .put("used", ops.folderUsage(grant.folder)).put("files", ops.filesIn(grant.folder))
             .put("time", System.currentTimeMillis())
         c.writeResult(job.id, result, key = key)
         c.deleteJob(up)
-        stateDirty = true
+        if (wrote) stateDirty = true
         Log.i(TAG, "upload ${job.id} via ${grant.folder} ok=$allOk")
     }
 

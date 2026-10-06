@@ -6,6 +6,7 @@
   · 구운 HTML 은 브라우저만으로 동작 (Python 불필요). 한 번에 30MB 까지, 같은 이름은 덮어쓰기.
   · 업로드 비밀번호: 내려받을 때 정한 비밀번호로 폴더 열쇠·토큰을 잠가서(PBKDF2 → AES-256-GCM) 넣는다.
     HTML 파일만 가져가서는 아무것도 할 수 없고, 비밀번호가 맞아야 열쇠가 풀린다.
+  · 공지사항 편집 도구(main 전용): 키 'main#공지' — main/공지.txt 하나만 읽기(get)·저장(put) 가능
 보관: 이 폴더의 grants.json (키가 들어 있으므로 레포에 올리지 않는다).
 """
 from __future__ import annotations
@@ -26,6 +27,8 @@ from .github import API
 FILE_NAME = "grants.json"
 TYPES = ["png", "js", "json", "html", "htm"]
 MAX_UPLOAD = 30 * 1024 * 1024
+NOTICE_KEY = "main#공지"                 # grants.json 의 키 (폴더 키와 겹치지 않게)
+NOTICE_FILE = "공지.txt"
 LOCK_ITER = 300_000
 MIN_PASSWORD = 4
 HERE = Path(__file__).resolve().parent
@@ -46,14 +49,30 @@ def save(root: Path, data: dict[str, dict[str, Any]]) -> None:
     _path(root).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def new_grant(folder: str) -> dict[str, Any]:
-    return {"gid": secrets.token_hex(8), "key": new_key(), "folder": folder, "types": list(TYPES),
-            "name": folder.rsplit("/", 1)[-1], "created": int(time.time() * 1000), "status": "pending"}
+def is_notice(key: str) -> bool:
+    return key == NOTICE_KEY
+
+
+def new_grant(key: str) -> dict[str, Any]:
+    g = {"gid": secrets.token_hex(8), "key": new_key(), "folder": key, "types": list(TYPES),
+         "name": key.rsplit("/", 1)[-1], "created": int(time.time() * 1000), "status": "pending"}
+    if is_notice(key):                      # 공지사항 편집 도구: main/공지.txt 만 읽고 쓴다
+        g.update(folder=key.split("#", 1)[0], types=["txt"], files=[NOTICE_FILE], read=True, name="공지사항", kind="notice")
+    return g
 
 
 def grant_op(g: dict[str, Any]) -> dict[str, Any]:
-    return {"op": "grant", "gid": g["gid"], "key": g["key"], "folder": g["folder"], "types": g["types"],
-            "name": g["name"], "maxBytes": 4 * 1024 * 1024 * 1024}
+    op = {"op": "grant", "gid": g["gid"], "key": g["key"], "folder": g["folder"], "types": g["types"],
+          "name": g["name"], "maxBytes": 4 * 1024 * 1024 * 1024}
+    if g.get("files"):
+        op["files"] = g["files"]
+    if g.get("read"):
+        op["read"] = True
+    return op
+
+
+def file_name(g: dict[str, Any]) -> str:
+    return "공지사항_편집.html" if g.get("kind") == "notice" else "%s_업로드.html" % g["name"]
 
 
 def _b64(b: bytes) -> str:
@@ -90,7 +109,9 @@ def bake(cfg: RelayConfig, g: dict[str, Any], password: str, tool_token: str = "
         "types": g["types"], "maxUpload": MAX_UPLOAD,
         "api": os.environ.get("TVRELAY_GITHUB_API") or API,
     }
-    tpl = (HERE / "uploader.html").read_text(encoding="utf-8")
+    if g.get("kind") == "notice":
+        conf["file"] = NOTICE_FILE
+    tpl = (HERE / ("notice.html" if g.get("kind") == "notice" else "uploader.html")).read_text(encoding="utf-8")
     js = json.dumps(conf, ensure_ascii=False).replace("</", "<\\/")
     if "/*__CONFIG__*/null" not in tpl:
         raise ValueError("uploader.html 템플릿이 올바르지 않습니다")

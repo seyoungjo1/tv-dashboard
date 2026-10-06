@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>공지사항 편집</title>
+<!-- 대상 오산공장 Dashboard — 화면보호기 공지사항 편집 도구 (관리자 PC 프로그램이 만든 파일입니다. 내용을 고치지 마세요)
+     TV 의 main/공지.txt 하나만 읽고 저장할 수 있습니다 (TV 가 확인합니다). -->
+<style>
+  :root { --bg:#eef1f4; --line:#dde3ea; --text:#2b3440; --dim:#6b7785; --accent:#0bb5e8; --danger:#e5534b; --ok:#19b394; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"Pretendard","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif; font-weight:600; }
+  header { background:#1e2125; color:#fff; padding:14px 22px; }
+  header h1 { margin:0; font-size:20px; font-weight:800; }
+  header .sub { color:#c9d1d9; font-size:13px; margin-top:4px; }
+  main { max-width:760px; margin:24px auto; padding:0 16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  .drop { border:3px dashed var(--line); border-radius:12px; padding:34px 16px; text-align:center; color:var(--dim); cursor:pointer; }
+  .drop.over { border-color:var(--accent); background:#e8f7fd; color:var(--text); }
+  .drop b { color:var(--text); font-size:17px; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:14px; }
+  td { padding:7px 4px; border-bottom:1px solid #f0f2f5; }
+  td.r { text-align:right; color:var(--dim); white-space:nowrap; }
+  .bad { color:var(--danger); }
+  .okc { color:var(--ok); }
+  button { border:0; border-radius:8px; padding:11px 22px; background:var(--accent); color:#fff; font-size:15px; font-weight:800; cursor:pointer; font-family:inherit; }
+  button.secondary { background:#e6ebf1; color:var(--text); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:14px; flex-wrap:wrap; }
+  .bar { height:8px; background:#e6ebf1; border-radius:4px; overflow:hidden; flex:1; min-width:160px; }
+  .bar div { height:100%; background:var(--accent); width:0; transition:width .2s; }
+  .msg { padding:12px 14px; border-radius:8px; margin-top:12px; white-space:pre-wrap; font-size:14px; }
+  .msg.err { background:#fde8e8; color:#8c1d1d; } .msg.ok { background:#e5f6ec; color:#14663d; } .msg.wait { background:#fff4dc; color:#7a5300; }
+  .hint { color:var(--dim); font-size:13px; }
+  .hidden { display:none; }
+  .pw { border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:15px; font-family:inherit; width:190px; }
+  .pw.bad { border-color:var(--danger); }
+  .lock { max-width:420px; margin:60px auto; text-align:center; }
+  .lock input { width:100%; margin:14px 0; }
+  .items { margin-top:6px; }
+  .it { display:flex; gap:8px; align-items:center; margin:8px 0; }
+  .it .no { width:26px; text-align:center; color:var(--dim); }
+  .it input { flex:1; border:1px solid var(--line); border-radius:8px; padding:11px 12px; font-size:16px; font-family:inherit; font-weight:600; }
+  .it button { padding:9px 12px; font-size:14px; }
+  .pv { background:#eef1f4; border-radius:12px; padding:14px 18px; margin-top:14px; }
+  #pv > div { background:#fff; border-radius:8px; padding:10px 14px; margin:6px 0; font-size:17px; }
+  .warn { color:#a15c00; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>공지사항 편집</h1>
+  <div class="sub" id="sub"></div>
+</header>
+<main>
+  <div class="card lock" id="lockCard">
+    <b>관리자에게 받은 비밀번호를 입력하세요</b>
+    <input type="password" class="pw" id="pw" placeholder="비밀번호" autocomplete="current-password">
+    <button id="unlockBtn">열기</button>
+    <div id="lockMsg"></div>
+  </div>
+  <div class="card hidden" id="editCard">
+    <div class="row" style="margin-top:0">
+      <b>화면보호기 왼쪽 위 공지 (한 줄에 하나, 위에서부터 최대 5개 표시)</b>
+      <button class="secondary" id="reloadBtn">TV 에서 다시 불러오기</button>
+    </div>
+    <div class="items" id="items"></div>
+    <div class="row">
+      <button class="secondary" id="addBtn">+ 공지 추가</button>
+      <span class="warn" id="over"></span>
+      <button id="saveBtn">TV 에 저장</button>
+    </div>
+    <div class="bar" style="margin-top:12px"><div id="prog"></div></div>
+    <div id="msg"></div>
+    <div class="pv"><span class="hint">미리보기</span><div id="pv"></div></div>
+  </div>
+  <div class="card hint">
+    · 저장하면 TV 가 10~20초 안에 받아 화면보호기에 바로 반영합니다.<br>
+    · 이 도구로는 공지사항(main/공지.txt)만 읽고 고칠 수 있습니다. 다른 파일은 바꿀 수 없습니다.
+  </div>
+</main>
+<script>
+const CFG = /*__CONFIG__*/null;
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const msg = (t, k) => $('#msg').innerHTML = t ? `<div class="msg ${k}">${esc(t)}</div>` : '';
+  if (!CFG || !CFG.lock) { document.body.innerHTML = '<p style="padding:30px">관리자 PC 프로그램의 [공지사항 편집 HTML 받기]로 만든 파일이 아닙니다.</p>'; return; }
+  $('#sub').textContent = `대상 오산공장 Dashboard · TV '${CFG.tv}' · 화면보호기 공지`;
+  if (!window.crypto || !crypto.subtle) { $('#lockMsg').innerHTML = '<div class="msg err">이 브라우저에서는 사용할 수 없습니다. Edge 또는 Chrome 으로 여세요.</div>'; return; }
+  const PATH = CFG.folder + '/' + CFG.file;
+
+  // ── 암호화 (TV 앱과 같은 형식: "TVR1" + nonce12 + AES-256-GCM + tag16) ──
+  const b64urlToBytes = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+  const toB64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  // ── 업로드 비밀번호로 열쇠·토큰 풀기 (PBKDF2-SHA256 → AES-256-GCM, 관리자 PC 의 grants.lock 과 같은 방식) ──
+  let SECRET = null, keyP = null;
+  const fromB64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  async function unlock(pw) {
+    const L = CFG.lock;
+    const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']);
+    const k = await crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(L.salt), iterations: L.iter },
+                                            base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    const box = fromB64(L.data);
+    if (dec.decode(box.subarray(0, 4)) !== 'TVR1') throw new Error('도구 파일이 손상되었습니다');
+    try {
+      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: box.subarray(4, 16), additionalData: enc.encode(`tvtool/${CFG.gid}/lock`), tagLength: 128 }, k, box.subarray(16));
+      return JSON.parse(dec.decode(plain));
+    } catch (_) { throw new Error('비밀번호가 틀렸습니다.'); }
+  }
+  const key = () => keyP || (keyP = crypto.subtle.importKey('raw', b64urlToBytes(SECRET.key), 'AES-GCM', false, ['encrypt', 'decrypt']));
+  const aad = (kind, id, name) => enc.encode(`${CFG.tv}/${kind}/${id}/${name}`);
+  async function seal(plain, ad) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: ad, tagLength: 128 }, await key(), plain));
+    const out = new Uint8Array(4 + 12 + ct.length);
+    out.set(enc.encode('TVR1')); out.set(iv, 4); out.set(ct, 16);
+    return out;
+  }
+  async function open(sealed, ad) {
+    if (sealed.length < 32 || dec.decode(sealed.subarray(0, 4)) !== 'TVR1') throw new Error('암호화 형식이 아닙니다');
+    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: sealed.subarray(4, 16), additionalData: ad, tagLength: 128 }, await key(), sealed.subarray(16)));
+  }
+  const sha256 = async (u8) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', u8))].map(b => b.toString(16).padStart(2, '0')).join('');
+
+  // ── GitHub (우체통 역할만) ──
+  async function gh(method, path, body, raw) {
+    const r = await fetch(`${CFG.api}/repos/${CFG.repo}/${path}`, {
+      method, headers: { 'Authorization': 'Bearer ' + SECRET.token, 'Accept': raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json',
+                         'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
+    if (r.status === 404 && method === 'GET') return null;
+    if (!r.ok && !(method === 'DELETE' && r.status === 422)) {
+      let m = ''; try { m = (await r.json()).message; } catch (_) {}
+      throw new Error(r.status === 401 ? '열쇠(토큰)가 만료되었거나 폐기되었습니다. 관리자에게 새 도구를 받으세요.' : `GitHub 오류 ${r.status} ${m}`);
+    }
+    return raw ? new Uint8Array(await r.arrayBuffer()) : (r.status === 204 ? null : r.json());
+  }
+  const blob = async (u8) => (await gh('POST', 'git/blobs', { content: toB64(u8), encoding: 'base64' })).sha;
+
+  // ── TV 와 주고받기: relay/<tv>/up/<gid>/<id> 로 보내고 relay/<tv>/res/<id> 를 기다린다 ──
+  const newId = () => `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('')}`;
+  async function send(ops, data) {
+    const id = newId(), kind = `up/${CFG.gid}`, tree = [];
+    if (data) {
+      tree.push({ path: 'd0', mode: '100644', type: 'blob', sha: await blob(await seal(data, aad(kind, id, 'd0'))) });
+      ops[0].chunks = ['d0']; ops[0].size = data.length; ops[0].sha256 = await sha256(data); ops[0].overwrite = true;
+    }
+    tree.push({ path: 'm', mode: '100644', type: 'blob', sha: await blob(await seal(enc.encode(JSON.stringify({ v: 1, id, created: Date.now(), ops })), aad(kind, id, 'm'))) });
+    const t = await gh('POST', 'git/trees', { tree });
+    const c = await gh('POST', 'git/commits', { message: 'up', tree: t.sha, parents: [] });
+    await gh('POST', 'git/refs', { ref: `refs/heads/relay/${CFG.tv}/up/${CFG.gid}/${id}`, sha: c.sha });
+    const resBranch = `relay/${CFG.tv}/res/${id}`;
+    for (let i = 0; i < 80; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      $('#prog').style.width = Math.min(95, 10 + i * 4) + '%';
+      const ref = await gh('GET', 'git/ref/heads/' + resBranch);
+      if (!ref) continue;
+      const commit = await gh('GET', 'git/commits/' + ref.object.sha);
+      const tr = await gh('GET', 'git/trees/' + commit.tree.sha);
+      const m = tr.tree.find(x => x.path === 'm');
+      const res = JSON.parse(dec.decode(await open(await gh('GET', 'git/blobs/' + m.sha, null, true), aad('res', id, 'm'))));
+      await gh('DELETE', 'git/refs/heads/' + resBranch);
+      $('#prog').style.width = '100%';
+      return res;
+    }
+    throw new Error('TV 응답이 없습니다. TV 가 꺼져 있거나 인터넷이 끊겼을 수 있습니다.');
+  }
+
+  // ── 편집 ──
+  let items = [];
+  function render() {
+    $('#items').innerHTML = items.map((t, i) => `<div class="it"><span class="no">${i + 1}</span>
+      <input data-i="${i}" value="${esc(t)}" placeholder="공지 내용">
+      <button class="secondary" data-up="${i}" title="위로">▲</button><button class="secondary" data-dn="${i}" title="아래로">▼</button>
+      <button class="secondary" data-rm="${i}" title="지우기">✕</button></div>`).join('');
+    preview();
+  }
+  function preview() {
+    const shown = items.map(s => s.trim()).filter(Boolean);
+    $('#pv').innerHTML = shown.slice(0, 5).map(t => `<div>${esc(t)}</div>`).join('') || '<span class="hint">(공지 없음 — 화면보호기에서 공지 칸이 숨겨집니다)</span>';
+    $('#over').textContent = shown.length > 5 ? `5개까지만 표시됩니다 (지금 ${shown.length}개)` : '';
+  }
+  $('#items').addEventListener('input', (e) => { const i = e.target.dataset.i; if (i !== undefined) { items[+i] = e.target.value; preview(); } });
+  $('#items').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const up = b.dataset.up, dn = b.dataset.dn, rm = b.dataset.rm;
+    if (up !== undefined && +up > 0) [items[+up - 1], items[+up]] = [items[+up], items[+up - 1]];
+    if (dn !== undefined && +dn < items.length - 1) [items[+dn + 1], items[+dn]] = [items[+dn], items[+dn + 1]];
+    if (rm !== undefined) items.splice(+rm, 1);
+    render();
+  });
+  $('#addBtn').onclick = () => { items.push(''); render(); const ins = document.querySelectorAll('#items input'); ins[ins.length - 1].focus(); };
+
+  async function load() {
+    msg('TV 에서 지금 공지를 불러오는 중… (보통 10~20초)', 'wait');
+    $('#reloadBtn').disabled = $('#saveBtn').disabled = true;
+    try {
+      const res = await send([{ op: 'get', path: PATH }]);
+      const r = (res.results || [])[0] || {};
+      if (!r.ok) throw new Error(r.error || '불러오지 못했습니다');
+      items = (r.text || '').replace(/^\uFEFF/, '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      render();
+      msg(r.exists ? `불러왔습니다 (${items.length}개).` : '아직 공지가 없습니다. [+ 공지 추가]로 만드세요.', 'ok');
+    } catch (e) { msg('불러오지 못했습니다: ' + e.message, 'err'); }
+    finally { $('#reloadBtn').disabled = $('#saveBtn').disabled = false; }
+  }
+  $('#reloadBtn').onclick = load;
+  $('#saveBtn').onclick = async () => {
+    $('#reloadBtn').disabled = $('#saveBtn').disabled = true;
+    msg('TV 에 저장하는 중…', 'wait');
+    try {
+      const text = items.map(s => s.trim()).filter(Boolean).join('\n') + '\n';
+      const res = await send([{ op: 'put', path: PATH }], enc.encode(text));
+      const r = (res.results || [])[0] || {};
+      if (!res.ok) throw new Error(r.error || '저장하지 못했습니다');
+      msg('저장했습니다! TV 화면보호기에 반영됩니다.', 'ok');
+    } catch (e) { msg('저장하지 못했습니다: ' + e.message, 'err'); }
+    finally { $('#reloadBtn').disabled = $('#saveBtn').disabled = false; }
+  };
+
+  // ── 비밀번호 ──
+  async function doUnlock() {
+    const pw = $('#pw').value;
+    if (!pw) { $('#pw').focus(); return; }
+    $('#lockMsg').innerHTML = '<div class="msg wait">확인 중…</div>';
+    try { SECRET = await unlock(pw); }
+    catch (e) { $('#lockMsg').innerHTML = `<div class="msg err">${esc(e.message)}</div>`; $('#pw').select(); return; }
+    $('#lockCard').classList.add('hidden'); $('#editCard').classList.remove('hidden');
+    load();
+  }
+  $('#unlockBtn').onclick = doUnlock;
+  $('#pw').onkeydown = (e) => { if (e.key === 'Enter') doUnlock(); };
+  $('#pw').focus();
+})();
+</script>
+</body>
+</html>
