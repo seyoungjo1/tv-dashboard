@@ -22,6 +22,7 @@ import json
 import mimetypes
 import shutil
 import threading
+import time
 import traceback
 import uuid
 import webbrowser
@@ -83,6 +84,8 @@ class Api:
         self.tree: dict[str, dict[str, Any]] = {}
         self.grant_jobs: dict[str, str] = {}               # 도구 등록 작업 id → 폴더
         self._last_state: dict[str, Any] | None = None
+        self._state_at = 0.0                               # 마지막으로 TV 상태를 확인한 시각
+        self.state_cache = root / "out" / "state-cache.json"
         self._relay: Relay | None = None
         self.lock = threading.Lock()
 
@@ -171,8 +174,22 @@ class Api:
         echo("업로드 도구 내려받음: '%s' (비밀번호 잠금)" % g["folder"])
         return "%s_업로드.html" % g["name"], html.encode("utf-8")
 
-    def state(self) -> dict[str, Any]:
-        st = self.relay().state()
+    def cached_state(self) -> dict[str, Any]:
+        """화면을 켤 때 바로 보여 줄 마지막 상태 (네트워크 없이)"""
+        try:
+            c = json.loads(self.state_cache.read_text(encoding="utf-8"))
+            st = Relay._with_age(dict(c["state"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            return {"none": True, "online": False, "cached": True}
+        self.tree = {e["p"]: e for e in st.get("tree") or []}
+        st["cached"] = True
+        return st
+
+    def state(self, max_age: float = 0) -> dict[str, Any]:
+        if max_age and self._last_state and time.time() - self._state_at < max_age:
+            return self._last_state                        # 방금 확인했으면 다시 묻지 않는다
+        st = self.relay().state(self.state_cache)
+        self._state_at = time.time()
         if st is None:
             return {"none": True, "online": False}
         self.tree = {e["p"]: e for e in st.get("tree") or []}
@@ -265,7 +282,7 @@ class Api:
         vers = versions.load(self.root)
         if not force and any(op.get("op") == "put" for op in body.get("ops") or []):
             try:
-                self.state()                                   # 최신 TV 목록·버전으로 비교
+                self.state(max_age=20)                         # 최신 TV 목록·버전으로 비교 (20초 안에 확인했으면 그대로)
             except Exception:
                 pass
         for op in body.get("ops") or []:
@@ -363,7 +380,7 @@ class Api:
         lines: list[str] = []
         try:
             before = update.local_version(self.root)
-            rc = update.run(root=self.root, echo=lambda m: (lines.append(str(m)), echo(str(m))))
+            rc = update.run(root=self.root, force=True, echo=lambda m: (lines.append(str(m)), echo(str(m))))
             after = update.local_version(self.root)
         except Exception as e:
             return {"ok": False, "error": "업데이트 실패: %s: %s" % (e.__class__.__name__, e), "lines": lines}
@@ -397,7 +414,7 @@ class Api:
         if method == "POST" and path == "/api/setup":
             return 200, self.setup(body)
         if method == "GET" and path == "/api/state":
-            return 200, self.state()
+            return 200, self.cached_state() if one("cached") else self.state()
         if method == "PUT" and path == "/api/stage":
             return 200, self.put_stage(raw)
         if method == "POST" and path == "/api/send":

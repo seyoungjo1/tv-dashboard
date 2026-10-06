@@ -99,7 +99,7 @@ def run(root: Path, relay: Relay, src: Path, folder: str, wait: int = 180, force
         return 2
     files = scan(src)
     echo("[%s] %s → TV '%s' (파일 %d개 확인)" % (time.strftime("%Y-%m-%d %H:%M:%S"), src, folder, len(files)))
-    st = relay.state() or {}
+    st = relay.state(root / "out" / "state-cache.json") or {}
     tree = {e["p"]: e for e in st.get("tree") or []}
     if st and not st.get("online"):
         echo("  (TV 가 지금 오프라인입니다 — 켜지면 반영됩니다)")

@@ -111,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--child", action="store_true", help=argparse.SUPPRESS)       # 감시자가 띄우는 실제 화면
     s = sub.add_parser("update", help="프로그램 업데이트")
     s.add_argument("--check", action="store_true")
+    s.add_argument("--force", action="store_true", help="10분 확인 캐시를 무시하고 지금 GitHub 에 확인")
     s = sub.add_parser("setup", help="처음 설정 (키 자동 생성)")
     s.add_argument("--token", required=True)
     s.add_argument("--repo", default="")
@@ -135,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd in (None, "ui"):
         return cmd_ui(getattr(a, "port", 8790), not getattr(a, "no_browser", False), getattr(a, "child", False))
     if a.cmd == "update":
-        return update.run(check_only=a.check, root=ROOT)
+        return update.run(check_only=a.check, root=ROOT, force=a.force)
     if a.cmd == "setup":
         cfg = config.setup(a.token, a.repo, a.tv, ROOT)
         Relay(cfg).gh.repo_info()

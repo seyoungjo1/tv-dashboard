@@ -65,6 +65,7 @@ class Relay:
         self.tv = cfg.tv
         self.gh = gh or GitHub(cfg.repo, cfg.token, base=os.environ.get("TVRELAY_GITHUB_API") or API)
         self.box = Box(cfg.key)
+        self._state: tuple[str, dict[str, Any]] | None = None   # (상태 커밋 sha, 내용) — 같으면 다시 받지 않는다
 
     def _branch(self, kind: str, id_: str = "") -> str:
         return "relay/%s/%s" % (self.tv, kind) + ("/" + id_ if id_ else "")
@@ -122,12 +123,36 @@ class Relay:
         return None
 
     # ── TV 상태 ──
-    def state(self) -> dict[str, Any] | None:
+    def state(self, cache: Path | None = None) -> dict[str, Any] | None:
+        """TV 상태. 상태 브랜치가 그대로면(ETag 304) 기억해 둔 내용/디스크 캐시(cache)를 써서 호출 1번으로 끝낸다."""
         sha = self.gh.ref_sha(self._branch("state"))
         if not sha:
             return None
-        files = self.gh.commit_files(sha)
-        st = json.loads(self.box.open(self.gh.blob(files["m"]), aad(self.tv, "state", "state", "m")).decode("utf-8"))
+        if self._state is None and cache is not None:
+            try:
+                c = json.loads(cache.read_text(encoding="utf-8"))
+                if c.get("tv") == self.tv and c.get("sha") and isinstance(c.get("state"), dict):
+                    self._state = (c["sha"], c["state"])
+            except (OSError, ValueError):
+                pass
+        if self._state and self._state[0] == sha:
+            st = dict(self._state[1])
+        else:
+            files = self.gh.commit_files(sha)
+            st = json.loads(self.box.open(self.gh.blob(files["m"]), aad(self.tv, "state", "state", "m")).decode("utf-8"))
+            self._state = (sha, dict(st))
+            if cache is not None:
+                try:
+                    cache.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = cache.with_suffix(".tmp")
+                    tmp.write_text(json.dumps({"tv": self.tv, "sha": sha, "state": st}, ensure_ascii=False), encoding="utf-8")
+                    os.replace(tmp, cache)
+                except OSError:
+                    pass
+        return self._with_age(st)
+
+    @staticmethod
+    def _with_age(st: dict[str, Any]) -> dict[str, Any]:
         st["age_sec"] = max(0, int(time.time() - st.get("time", 0) / 1000))
         interval = int(st.get("interval", 10) or 10)
         st["online"] = st["age_sec"] < max(6 * 60, interval * 3)    # TV 는 5분마다 상태를 다시 올린다

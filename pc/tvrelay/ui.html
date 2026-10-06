@@ -285,7 +285,8 @@
     $('#pairCard').classList.toggle('hidden', !info.configured);
     if (!info.configured) { $('#nav').classList.add('hidden'); show('setup'); return; }
     $('#nav').classList.remove('hidden');
-    await loadState();
+    await loadState(true);                       // 저장해 둔 마지막 상태로 바로 그리고
+    if (state?.cached) { if (state.none) await loadState(); else loadState(); }   // TV 최신 상태는 한 번만 확인
     if (state?.none) show('setup'); else if (tab === 'setup') show('explorer'); else show(tab);
   }
   $('#setupBtn').onclick = async () => {
@@ -314,15 +315,19 @@
   $('#toSetupBtn').onclick = () => show('setup');
 
   // ── TV 상태 ──
-  async function loadState() {
+  let stateAt = 0;
+  async function loadState(cached) {
     try {
-      state = await api('GET', '/api/state');
+      const st = await api('GET', '/api/state' + (cached ? '?cached=1' : ''));
+      if (!cached) stateAt = Date.now();
+      else if (st.none) { state = st; return; }
+      state = st;
       const pill = $('#tvPill');
       if (state.none) { pill.className = 'pill off'; pill.textContent = 'TV 미연결 — 연결 코드를 입력하세요'; }
       else {
         pill.className = 'pill ' + (state.online ? 'on' : 'off');
         const ago = state.age_sec < 60 ? state.age_sec + '초' : Math.round(state.age_sec / 60) + '분';
-        pill.textContent = (state.online ? 'TV 온라인' : 'TV 오프라인') + ` · ${ago} 전 · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}`;
+        pill.textContent = (state.cached ? '확인 중… ' : '') + (state.online ? 'TV 온라인' : 'TV 오프라인') + ` · ${ago} 전 · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}`;
       }
       await loadGrants();
       renderTree(); fillSettings();
@@ -405,7 +410,10 @@
     try { await api('POST', '/api/setup', { token: '', repo: '', tv: '', toolToken: $('#toolToken').value }); $('#toolToken').value = ''; alert('저장했습니다. 이제부터 받는 업로드 도구에 이 토큰이 들어갑니다. (이미 나눠 준 도구는 [새로 발급]해야 바뀝니다)'); }
     catch (e) { alert(e.message); }
   };
-  setInterval(() => { if (info?.configured && !document.hidden) loadState(); }, 20000);
+  // 계속 묻지 않는다: 작업이 끝났을 때·⟳ 를 눌렀을 때·창으로 돌아왔는데 1분 넘게 지났을 때만 TV 상태를 다시 확인
+  const refreshIfOld = () => { if (info?.configured && !document.hidden && Date.now() - stateAt > 60000) loadState(); };
+  window.addEventListener('focus', refreshIfOld);
+  document.addEventListener('visibilitychange', refreshIfOld);
 
   // ── 왼쪽: 폴더 트리 (끌어다 놓기 대상) ──
   const entries = () => state?.tree || [];

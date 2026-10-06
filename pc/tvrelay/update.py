@@ -71,19 +71,29 @@ def local_version(root: Path | None = None) -> str:
         return "0"
 
 
-def _get(path: str, token: str, raw: bool = False, timeout: float = 30) -> bytes:
+def _get(path: str, token: str, raw: bool = False, timeout: float = 30, etag: str = "",
+         meta: dict[str, Any] | None = None) -> bytes:
+    """etag 를 주면 조건부 요청 — 안 바뀌었으면 b"" 와 meta["status"]=304 (GitHub 호출 한도에 세지 않음)"""
     headers = {"X-GitHub-Api-Version": "2022-11-28", "User-Agent": "tvrelay-updater",
                "Accept": "application/vnd.github.raw" if raw else "application/vnd.github+json"}
     if token:
         headers["Authorization"] = "Bearer " + token
+    if etag:
+        headers["If-None-Match"] = etag
     req = urllib.request.Request(API + path, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as r:
+            if meta is not None:
+                meta["status"], meta["etag"] = r.status, r.headers.get("ETag") or ""
             return r.read()
     except urllib.error.HTTPError as e:
+        if e.code == 304 and etag:
+            if meta is not None:
+                meta["status"], meta["etag"] = 304, etag
+            return b""
         if e.code in (401, 403) and token:
             # 토큰이 이 레포에 권한이 없더라도 공개 레포이므로 토큰 없이 한 번 더
-            return _get(path, "", raw, timeout)
+            return _get(path, "", raw, timeout, etag, meta)
         if e.code == 403:
             raise UpdateError("GitHub 호출 한도를 넘었습니다 (HTTP 403). 잠시 후 다시 실행하세요.") from None
         if e.code == 404:
@@ -306,14 +316,60 @@ def apply(blobs: dict[str, bytes], version: str, root: Path) -> dict[str, list[s
     return res
 
 
-def run(check_only: bool = False, root: Path | None = None, echo: Any = print) -> int:
+CACHE_PATH = Path("out") / "update-cache.json"
+FRESH_SEC = 10 * 60          # 이 시간 안에 확인했으면 켤 때 GitHub 에 다시 묻지 않는다
+
+
+def _load_cache(root: Path) -> dict[str, Any]:
+    try:
+        c = json.loads((root / CACHE_PATH).read_text(encoding="utf-8"))
+        return c if isinstance(c, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_cache(root: Path, c: dict[str, Any]) -> None:
+    try:
+        (root / CACHE_PATH).parent.mkdir(parents=True, exist_ok=True)
+        (root / CACHE_PATH).write_text(json.dumps(c), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def check(token: str, root: Path, force: bool = False) -> tuple[str, str, dict[str, str], bool]:
+    """(배포 커밋 sha, 배포 버전, 파일 목록, 캐시로 끝났는지).
+    · 10분 안에 확인했으면 네트워크 없이 캐시 그대로 (force 면 무시)
+    · 아니면 브랜치를 조건부(ETag)로 1번만 묻고, 커밋이 그대로면 버전·목록은 캐시를 쓴다"""
+    c = _load_cache(root)
+    have = bool(c.get("sha") and c.get("there") and isinstance(c.get("entries"), dict))
+    if have and not force and 0 <= time.time() - float(c.get("checked", 0)) < FRESH_SEC:
+        return c["sha"], c["there"], c["entries"], True
+    branch = c.get("branch") or ""
+    if not branch:
+        branch = json.loads(_get("/repos/%s" % REPO, token)).get("default_branch") or "main"
+    meta: dict[str, Any] = {}
+    body = _get("/repos/%s/branches/%s" % (REPO, quote(branch)), token, etag=c.get("etag", "") if have else "", meta=meta)
+    if meta.get("status") == 304:
+        sha = c["sha"]
+    else:
+        sha = (json.loads(body).get("commit") or {}).get("sha") or ""
+        if not sha:
+            raise UpdateError("브랜치 %s 의 커밋을 찾지 못했습니다" % branch)
+    if have and sha == c["sha"]:
+        there, entries = c["there"], c["entries"]
+    else:
+        there, entries = remote_version(token, sha), tree_entries(token, sha)
+    _save_cache(root, {"branch": branch, "etag": meta.get("etag", ""), "sha": sha, "there": there,
+                       "entries": entries, "checked": time.time()})
+    return sha, there, entries, False
+
+
+def run(check_only: bool = False, root: Path | None = None, echo: Any = print, force: bool = False) -> int:
     root = root or ROOT
     token = read_token(root)
     here = local_version(root)
     try:
-        sha = branch_sha(token)
-        there = remote_version(token, sha)
-        entries = tree_entries(token, sha)
+        sha, there, entries, cached = check(token, root, force)
     except UpdateError as e:
         echo("업데이트 확인 실패: %s — 기존 파일로 진행합니다." % e)
         return 0
@@ -323,7 +379,7 @@ def run(check_only: bool = False, root: Path | None = None, echo: Any = print) -
     sweep_alt_bats(root, set())        # self-heal 이 끝난 tvrun_vX.bat 잔해 정리
     stale = stale_paths(root, entries)
     if there == here and not stale:
-        echo("최신 버전입니다 (tvrelay v%s)." % here)
+        echo("최신 버전입니다 (tvrelay v%s%s)." % (here, " · 방금 확인함" if cached else ""))
         return 0
     if there == here:
         echo("버전은 v%s 인데 배포와 다른 파일이 %d개 있습니다 — 다시 받습니다." % (here, len(stale)))

@@ -193,6 +193,59 @@ class SyncTest(unittest.TestCase):
             fake.close()
 
 
+class CacheTest(unittest.TestCase):
+    def test_update_check_cached(self):
+        from tvrelay import update
+        root = Path(tempfile.mkdtemp())
+        calls: list[str] = []
+
+        def fake_get(path, token, raw=False, timeout=30, etag="", meta=None):
+            calls.append(path)
+            if path.endswith("/branches/main"):
+                if etag == '"e1"':
+                    meta.update(status=304, etag=etag)
+                    return b""
+                if meta is not None:
+                    meta.update(status=200, etag='"e1"')
+                return b'{"commit": {"sha": "abc"}}'
+            if path == "/repos/%s" % update.REPO:
+                return b'{"default_branch": "main"}'
+            raise AssertionError(path)
+
+        orig = (update._get, update.remote_version, update.tree_entries)
+        update._get = fake_get
+        update.remote_version = lambda t, sha: (calls.append("version"), "9.9.9")[1]
+        update.tree_entries = lambda t, sha: (calls.append("tree"), {"tvrelay/VERSION": "x"})[1]
+        try:
+            self.assertEqual(update.check("", root)[:2], ("abc", "9.9.9"))
+            self.assertEqual(len(calls), 4)                         # 처음: 레포·브랜치·버전·목록
+            calls.clear()
+            self.assertTrue(update.check("", root)[3])              # 10분 안: 네트워크 없음
+            self.assertEqual(calls, [])
+            update.check("", root, force=True)                      # 강제: 브랜치만 조건부(304)로 1번
+            self.assertEqual(calls, ["/repos/%s/branches/main" % update.REPO])
+        finally:
+            update._get, update.remote_version, update.tree_entries = orig
+
+    def test_state_memo_and_disk_cache(self):
+        fake = FakeGitHub()
+        try:
+            root = Path(tempfile.mkdtemp())
+            cfg = config.setup("tok", "o/relay", "osan", root)
+            gh = GitHub(cfg.repo, cfg.token, base=fake.base)
+            m = Box(cfg.key).seal(json.dumps({"v": 1, "time": 0, "tree": [{"p": "a", "d": True}]}).encode(),
+                                  aad(cfg.tv, "state", "state", "m"))
+            gh.create_branch("relay/osan/state", gh.create_orphan_commit({"m": m}, "state"))
+            cache = root / "out" / "state-cache.json"
+            self.assertEqual(Relay(cfg, gh).state(cache)["tree"][0]["p"], "a")
+            r2 = Relay(cfg, gh)                                      # 새로 켠 프로그램: 디스크 캐시로 내용은 안 받음
+            r2.gh.commit_files = lambda sha: (_ for _ in ()).throw(AssertionError("다시 받으면 안 됨"))
+            self.assertEqual(r2.state(cache)["tree"][0]["p"], "a")
+            self.assertEqual(r2.state(cache)["tree"][0]["p"], "a")
+        finally:
+            fake.close()
+
+
 class PairTest(unittest.TestCase):
     def test_pair_roundtrip(self):
         fake = FakeGitHub()

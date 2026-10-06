@@ -25,23 +25,34 @@ class GitHub:
         self.token = token
         self.base = base.rstrip("/")
         self.timeout = timeout
+        self._etags: dict[str, tuple[str, bytes]] = {}     # 브랜치 조회 캐시 — 안 바뀌었으면 304 (호출 한도에 안 셈)
 
     def request(self, method: str, path: str, body: Any = None, raw: bool = False,
                 ok: tuple[int, ...] = (200, 201, 204)) -> tuple[int, bytes]:
         data = json.dumps(body).encode("utf-8") if body is not None else None
+        cacheable = method == "GET" and path.startswith("git/ref/")
+        cached = self._etags.get(path) if cacheable else None
         req = urllib.request.Request(
             "%s/repos/%s%s" % (self.base, self.repo, ("/" + path) if path else ""), data=data, method=method,
             headers={"Authorization": "Bearer " + self.token,
                      "Accept": "application/vnd.github.raw+json" if raw else "application/vnd.github+json",
                      "X-GitHub-Api-Version": "2022-11-28",
                      "User-Agent": "tvrelay-pc",
-                     **({"Content-Type": "application/json"} if data is not None else {})})
+                     **({"Content-Type": "application/json"} if data is not None else {}),
+                     **({"If-None-Match": cached[0]} if cached else {})})
         ctx = ssl_context() if self.base.startswith("https") else None
         try:
             with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as r:
-                return r.status, r.read()
+                out = r.read()
+                if cacheable and r.status == 200 and r.headers.get("ETag"):
+                    self._etags[path] = (r.headers["ETag"], out)
+                return r.status, out
         except urllib.error.HTTPError as e:
             text = e.read()
+            if e.code == 304 and cached:
+                return 200, cached[1]
+            if cacheable:
+                self._etags.pop(path, None)
             if e.code in ok:
                 return e.code, text
             try:
