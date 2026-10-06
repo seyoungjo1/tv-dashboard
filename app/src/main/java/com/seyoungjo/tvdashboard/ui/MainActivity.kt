@@ -535,12 +535,7 @@ class MainActivity : AppCompatActivity() {
     private fun circleTransition(wx: Float, wy: Float, action: () -> Unit) {
         val root = reveal.parent as View
         if (root.width <= 0 || !reveal.isAttachedToWindow) { action(); return }
-        val (x, y) = if (wx < 0 || wy < 0) root.width / 2f to root.height / 2f else {
-            val c = IntArray(2)
-            (root.parent as View).getLocationInWindow(c)                 // 앱 화면을 담은 칸(축소 전 좌표계)
-            ((wx - c[0] - root.left - root.pivotX) / root.scaleX + root.pivotX) to
-                ((wy - c[1] - root.top - root.pivotY) / root.scaleY + root.pivotY)
-        }
+        val (x, y) = toRoot(wx, wy)
         val radius = kotlin.math.hypot(maxOf(x, root.width - x), maxOf(y, root.height - y))
         reveal.animate().cancel()
         reveal.bringToFront()
@@ -557,6 +552,83 @@ class MainActivity : AppCompatActivity() {
             }
         })
         anim.start()
+    }
+
+    /** 창 좌표 → 앱 화면(1920×1080 기준, keep16by9 로 축소될 수 있음) 좌표. 음수면 화면 가운데 */
+    private fun toRoot(wx: Float, wy: Float): Pair<Float, Float> {
+        val root = reveal.parent as View
+        if (wx < 0 || wy < 0) return root.width / 2f to root.height / 2f
+        val c = IntArray(2)
+        (root.parent as View).getLocationInWindow(c)                     // 앱 화면을 담은 칸(축소 전 좌표계)
+        return ((wx - c[0] - root.left - root.pivotX) / root.scaleX + root.pivotX) to
+            ((wy - c[1] - root.top - root.pivotY) / root.scaleY + root.pivotY)
+    }
+
+    /** 화면보호기에서 한 번 터치했을 때: 누른 자리에 물결(동그라미 두 겹이 퍼지며 사라짐) */
+    private fun touchRipple(wx: Float, wy: Float) {
+        val root = reveal.parent as? FrameLayout ?: return
+        if (root.width <= 0) return
+        val (x, y) = toRoot(wx, wy)
+        val d = resources.displayMetrics.density
+        val v = object : View(this) {
+            var p = 0f
+            val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF2F80ED.toInt() }
+            val ring = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                style = android.graphics.Paint.Style.STROKE; color = 0xFF2F80ED.toInt()
+            }
+            override fun onDraw(c: android.graphics.Canvas) {
+                val e = 1f - (1f - p) * (1f - p)                      // 빠르게 퍼지다 천천히
+                fill.alpha = (90 * (1f - p)).toInt()
+                c.drawCircle(x, y, 70f * d * e, fill)
+                ring.strokeWidth = 5f * d * (1f - p) + 1f
+                ring.alpha = (230 * (1f - p)).toInt()
+                c.drawCircle(x, y, 130f * d * e, ring)
+                val q = ((p - 0.18f) / 0.82f).coerceIn(0f, 1f)          // 두 번째 동그라미는 조금 늦게
+                if (q > 0f) {
+                    ring.alpha = (170 * (1f - q)).toInt()
+                    ring.strokeWidth = 3f * d * (1f - q) + 1f
+                    c.drawCircle(x, y, 190f * d * (1f - (1f - q) * (1f - q)), ring)
+                }
+            }
+        }
+        root.addView(v, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        val anim = android.animation.ValueAnimator.ofFloat(0f, 1f)
+        anim.duration = 700
+        anim.addUpdateListener { v.p = it.animatedValue as Float; v.invalidate() }
+        anim.addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) { root.removeView(v) }
+        })
+        anim.start()
+    }
+
+    // 화면보호기는 두 번 터치해야 나간다: 한 번 누르면 물결 + '한 번 더 눌러 주세요', 5초 안에 다시 누르면 대시보드로
+    private var tapArmedAt = 0L
+    private val disarmTapRunnable = Runnable { disarmTap() }
+    private fun disarmTap() {
+        handler.removeCallbacks(disarmTapRunnable)
+        if (tapArmedAt == 0L) return
+        tapArmedAt = 0L
+        if (hasMain) screensaver.prompt(null)
+        else if (idleOverlay.visibility == View.VISIBLE) {
+            val msg = AppSettings.idleMessage.trim()
+            idleMessage.text = msg
+            msgVisible = true
+            idleMessage.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
+            val show = AppSettings.idleMsgShowSec
+            if (msg.isNotEmpty() && show > 0) handler.postDelayed(blinkRunnable, show * 1000L)
+        }
+    }
+    private fun armTap() {
+        tapArmedAt = android.os.SystemClock.uptimeMillis()
+        handler.removeCallbacks(disarmTapRunnable)
+        handler.postDelayed(disarmTapRunnable, TAP_WINDOW_MS)
+        if (hasMain) screensaver.prompt(TAP_AGAIN)
+        else {
+            handler.removeCallbacks(blinkRunnable)
+            idleMessage.text = TAP_AGAIN
+            msgVisible = true
+            idleMessage.visibility = View.VISIBLE
+        }
     }
 
     /** 손잡이는 대시보드 위에 겹쳐 있으므로 사이드바가 보이면 그 오른쪽, 아니면 화면 왼쪽 끝에 붙인다 */
@@ -601,7 +673,14 @@ class MainActivity : AppCompatActivity() {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             if (idleOverlay.visibility == View.VISIBLE) {
                 swallowGesture = true
-                circleTransition(ev.x, ev.y) { hideIdle() }       // 터치한 자리에서 동그라미가 퍼지며 대시보드로
+                val armed = tapArmedAt != 0L && android.os.SystemClock.uptimeMillis() - tapArmedAt <= TAP_WINDOW_MS
+                if (armed) {
+                    disarmTap()
+                    circleTransition(ev.x, ev.y) { hideIdle() }   // 두 번째 터치: 누른 자리에서 동그라미가 퍼지며 대시보드로
+                } else if (!morphing) {
+                    touchRipple(ev.x, ev.y)                        // 첫 터치: 물결 + '한 번 더 눌러 주세요'
+                    armTap()
+                }
                 return true
             }
             resetIdle()
@@ -641,6 +720,8 @@ class MainActivity : AppCompatActivity() {
     private fun showIdle() {
         if (!resumed) return
         handler.removeCallbacks(idleRunnable)
+        handler.removeCallbacks(disarmTapRunnable)
+        tapArmedAt = 0L
         idleOverlay.visibility = View.VISIBLE
         idleOverlay.bringToFront()
         if (hasMain) {                                 // 화면보호기 (공지·실적 그래프·동영상, 멘트는 페이지 맨 아래)
@@ -692,6 +773,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hideIdle() {
+        handler.removeCallbacks(disarmTapRunnable)
+        tapArmedAt = 0L
         handler.removeCallbacks(blinkRunnable)
         screensaver.hide()
         try { idleVideo.stopPlayback() } catch (_: Exception) {}
@@ -760,5 +843,7 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_PREVIEW_IDLE = "preview_idle"
         private const val LOGO_FILE = "logo.png"
         private const val SCAN_MS = 15_000L
+        private const val TAP_WINDOW_MS = 5_000L
+        private const val TAP_AGAIN = "대시보드로 들어가시려면 한 번 더 눌러 주세요"
     }
 }

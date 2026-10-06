@@ -77,6 +77,8 @@ main { position: absolute; left: 38px; right: 38px; top: 122px; bottom: 82px; di
 #hint { position: absolute; left: 0; right: 0; bottom: 22px; line-height: 1.2; text-align: center; font-size: 30px; color: #3b4855; font-weight: 700; }
 #hint.blink { animation: blink 2.4s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .35; } }
+#hint.prompt { color: #0b63c4; animation: prompt .9s ease-in-out infinite alternate; }
+@keyframes prompt { from { transform: scale(1); } to { transform: scale(1.06); } }
 
 /* 숫자·차트 등장 */
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }

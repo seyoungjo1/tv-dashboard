@@ -160,6 +160,11 @@ class Screensaver(
         web?.onPause()
     }
 
+    /** 아래 멘트를 잠시 바꾼다 (한 번 터치 → '한 번 더 눌러 주세요'), null 이면 원래 멘트로 */
+    fun prompt(msg: String?) {
+        if (active) web?.evaluateJavascript("window.ssPrompt&&ssPrompt(${JSONObject.quote(msg ?: "")})", null)
+    }
+
     /** main 폴더 내용이 바뀌었을 때 (숫자·그래프 다시 읽기) */
     fun refresh() {
         if (active) web?.evaluateJavascript("window.ssRefresh&&ssRefresh()", null)

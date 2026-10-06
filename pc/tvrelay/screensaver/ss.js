@@ -21,11 +21,13 @@
     var de = document.documentElement;
     var W = de.clientWidth || innerWidth, H = de.clientHeight || innerHeight;   // WebView 가 아직 크기를 못 잡았으면 다음 기회에
     if (!W || !H) { requestAnimationFrame(fit); return; }
+    // 무대는 항상 1920×1080 (16:9) 그대로 비율 축소 — TV 와 PC 미리보기에서 동영상 칸 크기·위치(px)가 똑같도록.
+    // 앱 화면이 16:9 로 고정이라 TV 에서는 남는 곳이 없고, 비율이 조금 다른 창이면 가운데에 둔다
     var s = Math.min(W / 1920, H / 1080);
     var st = $('stage');
-    st.style.width = (W / s) + 'px';
-    st.style.height = (H / s) + 'px';
-    st.style.transform = 'scale(' + s + ')';
+    st.style.width = '1920px';
+    st.style.height = '1080px';
+    st.style.transform = 'translate(' + (W - 1920 * s) / 2 + 'px,' + (H - 1080 * s) / 2 + 'px) scale(' + s + ')';
     reportVideo();
   }
   function reportVideo() {
@@ -250,8 +252,10 @@
 
   var lastKey = '', lastA = null, cfg = {};
   function paint(a) {
-    $('hint').textContent = cfg.message || '';
-    $('hint').className = cfg.blink ? 'blink' : '';
+    if (!promptOn) {
+      $('hint').textContent = cfg.message || '';
+      $('hint').className = cfg.blink ? 'blink' : '';
+    }
     var title = (a[5] || '').split(/\r?\n/)[0].trim();
     $('title').textContent = title || cfg.title || '오산공장 스마트 현황판';   // 제목.txt → 설정의 상단 제목(메인 화면과 같음)
     var lines = override && override.notices ? override.notices
@@ -431,6 +435,14 @@
   // TV 앱이 부른다: 화면보호기를 다시 띄울 때(show) · main 폴더가 바뀌었을 때(refresh)
   window.ssShow = function () { load(true); };
   window.ssRefresh = function () { load(false); };
+  // 한 번 터치했을 때 TV 앱이 부른다: 아래 멘트를 '한 번 더 눌러 주세요' 로 잠시 바꾼다 (빈 값이면 원래대로)
+  var promptOn = false;
+  window.ssPrompt = function (msg) {
+    var h = $('hint');
+    promptOn = !!msg;
+    h.textContent = msg || cfg.message || '';
+    h.className = msg ? 'prompt' : (cfg.blink ? 'blink' : '');
+  };
 
   if (TV) document.documentElement.classList.add('tv');
   if (PREVIEW) document.documentElement.classList.add('preview');
