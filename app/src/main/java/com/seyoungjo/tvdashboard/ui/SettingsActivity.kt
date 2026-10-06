@@ -21,6 +21,8 @@ import com.seyoungjo.tvdashboard.data.AppEvent
 import com.seyoungjo.tvdashboard.data.AppSettings
 import com.seyoungjo.tvdashboard.data.ChangeBus
 import com.seyoungjo.tvdashboard.data.ContentStore
+import com.seyoungjo.tvdashboard.data.FileOps
+import com.seyoungjo.tvdashboard.data.MenuScanner
 import com.seyoungjo.tvdashboard.server.Auth
 import com.seyoungjo.tvdashboard.server.NetInfo
 import com.seyoungjo.tvdashboard.server.ServerService
@@ -101,6 +103,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 .setNeutralButton("새로 발급") { _, _ -> Auth.regenerateApiToken(); toast("새 토큰을 발급했습니다. 기존 토큰은 더 이상 사용할 수 없습니다.") }
                 .show()
         }
+        click("ss_notice") { editNotice() }
         click("idle_preview") {
             startActivity(
                 Intent(requireContext(), MainActivity::class.java)
@@ -187,6 +190,49 @@ class SettingsFragment : PreferenceFragmentCompat() {
             "현재 버전 ${UpdateManager.currentVersionName(ctx)} (${UpdateManager.currentVersionCode(ctx)})"
         findPreference<Preference>("install_unknown")?.summary =
             if (UpdateManager.canInstall(ctx)) "허용됨" else "허용 안 됨 — 업데이트 설치 전에 허용해야 합니다."
+    }
+
+    /** 화면보호기 공지(main/공지.txt)를 TV 에서 바로 고친다 — PC 프로그램·공지 편집 HTML 과 같은 파일 */
+    private fun editNotice() {
+        val ctx = requireContext()
+        val root = ContentStore.root(ctx)
+        val dir = MenuScanner.mainDir(root)?.name ?: MenuScanner.MAIN_FOLDER
+        val path = "$dir/공지.txt"
+        val f = java.io.File(java.io.File(root, dir), "공지.txt")
+        val now = try { if (f.isFile) f.readText(Charsets.UTF_8).removePrefix("\uFEFF").trim() else "" } catch (e: Exception) { "" }
+        val input = android.widget.EditText(ctx).apply {
+            setText(now)
+            hint = "한 줄에 공지 하나 (위에서부터 5개까지 표시)\n예) 10월 정기교육은 14일에 진행됩니다."
+            minLines = 6
+            maxLines = 12
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            setSelection(text.length)
+        }
+        val box = android.widget.FrameLayout(ctx).apply {
+            val p = (20 * resources.displayMetrics.density).toInt()
+            setPadding(p, p / 2, p, 0)
+            addView(input)
+        }
+        AlertDialog.Builder(ctx)
+            .setTitle("화면보호기 공지사항")
+            .setMessage(if (MenuScanner.mainDir(root) == null) "main 폴더가 없어 저장하면 새로 만듭니다 (main 폴더가 있으면 대기 화면이 화면보호기로 바뀝니다)." else null)
+            .setView(box)
+            .setPositiveButton("저장") { _, _ ->
+                val lines = input.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() }
+                val data = (lines.joinToString("\n") + if (lines.isEmpty()) "" else "\n").toByteArray(Charsets.UTF_8)
+                Thread {
+                    val msg = try {
+                        FileOps(ctx.applicationContext).put(path, data.size.toLong(), data.inputStream(), true)
+                        "공지 ${lines.size}개를 저장했습니다. 화면보호기에 바로 반영됩니다."
+                    } catch (e: Exception) {
+                        "저장하지 못했습니다: ${e.message}"
+                    }
+                    activity?.runOnUiThread { toast(msg) }
+                }.start()
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun showUninstallNotice() {
