@@ -193,6 +193,12 @@ PowerShell 예시와 작업 스케줄러용 스크립트: [`scripts/upload-json.
 
 ---
 
+### TV 주소 고정
+- **Tailscale 주소는 고정입니다.** TV에 한 번 부여된 `100.x.y.z` 는 공유기·통신사·내부 IP가 바뀌어도 그대로라서 `http://100.x.y.z:8080` 을 계속 쓰면 됩니다.
+  - 이름으로 접속: Tailscale 관리 콘솔(login.tailscale.com) → Machines 에서 TV 이름을 예: `osan-tv` 로 변경 → **MagicDNS** 켜기 → `http://osan-tv:8080`
+  - 같은 화면에서 TV 항목 ⋯ → **Disable key expiry** (기본 180일 후 재로그인 요구를 없앰)
+- 같은 공유기 안에서 내부 IP(192.168.x.x)를 고정하려면: 공유기 관리 화면의 **DHCP 고정 할당(MAC 주소 예약)** 또는 TV `설정 > 네트워크 > IP 설정 > 고정` 사용.
+
 ## 8. 절전 · 화면 꺼짐 · 재부팅 시 동작
 
 | 상황 | 동작 |

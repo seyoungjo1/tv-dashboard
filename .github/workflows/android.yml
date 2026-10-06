@@ -18,6 +18,10 @@ on:
         description: "GitHub Releases 에 게시 (태그 v<버전> 생성)"
         type: boolean
         default: false
+      unsigned_build:
+        description: "(내부용) Secrets 없이 미서명 Release APK 를 사전 릴리스 'unsigned-build' 에 올림 — 외부에서 서명할 때만 사용"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -51,9 +55,13 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_PUBLISH: ${{ inputs.publish }}
+          INPUT_UNSIGNED: ${{ inputs.unsigned_build }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          UNSIGNED=false
+          if [[ "${INPUT_UNSIGNED:-false}" == "true" ]]; then
+            VERSION="${INPUT_VERSION#v}"; RELEASE=false; PUBLISH=false; UNSIGNED=true
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"; RELEASE=true; PUBLISH=true
           elif [[ -n "${INPUT_VERSION:-}" ]]; then
             VERSION="${INPUT_VERSION#v}"; RELEASE=true; PUBLISH="${INPUT_PUBLISH:-false}"
@@ -69,6 +77,7 @@ jobs:
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
           echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "unsigned=$UNSIGNED" >> "$GITHUB_OUTPUT"
           echo "### 버전 $VERSION (versionCode $CODE) · release=$RELEASE · publish=$PUBLISH" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 단위 테스트 + 디버그 APK
@@ -80,6 +89,23 @@ jobs:
           name: tv-dashboard-debug-${{ steps.mode.outputs.version }}
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+      # ──────────── (내부용) 미서명 Release → 사전 릴리스 unsigned-build ────────────
+      - name: 미서명 Release APK 빌드 · 업로드
+        if: steps.mode.outputs.unsigned == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.mode.outputs.version }}
+        run: |
+          set -euo pipefail
+          ./gradlew --stacktrace assembleRelease -PappVersion="$VERSION"
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release-unsigned.apk "dist/tv-dashboard-v$VERSION-unsigned.apk"
+          gh release delete unsigned-build --cleanup-tag -y >/dev/null 2>&1 || true
+          gh release create unsigned-build "dist/tv-dashboard-v$VERSION-unsigned.apk" --prerelease \
+            --target "$GITHUB_SHA" --title "내부용 미서명 빌드 (설치 불가)" \
+            --notes "외부 서명용 미서명 APK 입니다. 그대로는 설치할 수 없습니다. 정식 릴리스 게시 시 자동 삭제됩니다."
 
       # ───────────────────────── 서명된 Release ─────────────────────────
       - name: 이전 릴리스보다 버전이 높은지 확인 (versionCode 증가 보장)
@@ -191,6 +217,7 @@ jobs:
           VERSION: ${{ steps.mode.outputs.version }}
         run: |
           set -euo pipefail
+          gh release delete unsigned-build --cleanup-tag -y >/dev/null 2>&1 || true
           gh release create "v$VERSION" "${{ steps.out.outputs.apk }}" dist/update.json \
             --target "$GITHUB_SHA" --title "v$VERSION" --notes-file dist/notes.md
           echo "게시 완료: https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"
