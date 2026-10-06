@@ -13,22 +13,21 @@ class MenuScannerTest {
     private fun file(rel: String, text: String = "x") = File(root, rel).apply { parentFile!!.mkdirs(); writeText(text) }
 
     @Test fun buildsMenuFromFolders() {
-        file("10_지원팀/index.html"); file("10_지원팀/a.png"); file("10_지원팀/b.jpg")
-        file("2_생산팀/index.html"); file("2_생산팀/대표이미지.png"); file("2_생산팀/z.png")
-        file("품질팀/index.htm")
-        file("품질팀.webp")                       // 루트의 '폴더명.이미지'
-        file("빈폴더/readme.txt")
+        file("10_지원팀/index.html"); file("10_지원팀/icon.png"); file("10_지원팀/chart.png")
+        file("2_생산팀/index.html"); file("2_생산팀/ICON.webp")
+        file("품질팀/index.htm"); file("품질팀/대표이미지.jpg")
+        file("빈폴더/readme.txt"); file("빈폴더/photo.png")
         file("_숨김/index.html"); file(".tmp/x")
         file("대기화면.mp4")
 
         val m = MenuScanner.scan(root)
         assertEquals(listOf("2_생산팀", "10_지원팀", "빈폴더", "품질팀"), m.map { it.folder })
         assertEquals(listOf("생산팀", "지원팀", "빈폴더", "품질팀"), m.map { it.title })
-        assertEquals("대표이미지.png", m[0].image!!.name)
-        assertEquals("a.png", m[1].image!!.name)
-        assertNull(m[2].image)
+        assertEquals("ICON.webp", m[0].image!!.name)
+        assertEquals("icon.png", m[1].image!!.name)
+        assertNull(m[2].image)          // icon.png 가 아니면 아이콘으로 쓰지 않음
         assertNull(m[2].indexFile)
-        assertEquals("품질팀.webp", m[3].image!!.name)
+        assertEquals("대표이미지.jpg", m[3].image!!.name)
         assertEquals("index.htm", m[3].indexFile)
         assertEquals(listOf("대기화면.mp4"), MenuScanner.idleVideos(root).map { it.name })
     }

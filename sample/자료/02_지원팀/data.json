@@ -1,21 +1,158 @@
 {
   "title": "지원팀 현황",
   "updated": "2026-10-06 09:00",
-  "kpi": [
+  "tiles": [
     {
       "label": "처리 요청",
-      "value": 42,
-      "unit": "건"
+      "value": "42",
+      "sub": "오늘 접수",
+      "color": "blue"
     },
     {
-      "label": "평균 처리시간",
-      "value": 3.2,
-      "unit": "시간"
+      "label": "완료율",
+      "value": "88%",
+      "sub": "37 / 42 건",
+      "color": "red"
+    },
+    {
+      "label": "평균 처리",
+      "value": "3.2h",
+      "sub": "목표 4h",
+      "color": "green"
     },
     {
       "label": "만족도",
-      "value": 4.7,
-      "unit": "점"
+      "value": "4.7",
+      "sub": "5점 만점",
+      "color": "orange"
+    }
+  ],
+  "lists": [
+    {
+      "title": "공지",
+      "color": "sky",
+      "items": [
+        {
+          "time": "10/06",
+          "text": "안전교육 14시"
+        },
+        {
+          "time": "10/05",
+          "text": "설비 점검 일정"
+        },
+        {
+          "time": "10/02",
+          "text": "자재 입고"
+        }
+      ]
+    },
+    {
+      "title": "요청 현황",
+      "color": "teal",
+      "items": [
+        {
+          "time": "09:40",
+          "text": "전산 장애",
+          "tag": "진행"
+        },
+        {
+          "time": "09:10",
+          "text": "자재 요청",
+          "tag": "완료"
+        },
+        {
+          "time": "08:20",
+          "text": "시설 보수",
+          "tag": "대기"
+        }
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "type": "gauge",
+      "title": "처리 완료",
+      "value": 88,
+      "color": "orange",
+      "rest": "green",
+      "legend": [
+        {
+          "label": "완료",
+          "color": "orange"
+        },
+        {
+          "label": "미완료",
+          "color": "green"
+        }
+      ]
+    },
+    {
+      "type": "bars",
+      "title": "부서별 요청",
+      "items": [
+        {
+          "label": "생산",
+          "value": 18,
+          "color": "pink"
+        },
+        {
+          "label": "품질",
+          "value": 12,
+          "color": "sky"
+        },
+        {
+          "label": "물류",
+          "value": 8,
+          "color": "pink"
+        },
+        {
+          "label": "기타",
+          "value": 4,
+          "color": "sky"
+        }
+      ]
+    },
+    {
+      "type": "bars",
+      "title": "유형별",
+      "items": [
+        {
+          "label": "전산",
+          "value": 15,
+          "color": "sky"
+        },
+        {
+          "label": "시설",
+          "value": 14,
+          "color": "sky"
+        },
+        {
+          "label": "자재",
+          "value": 13,
+          "color": "sky"
+        }
+      ]
+    },
+    {
+      "type": "donut",
+      "title": "처리 상태",
+      "items": [
+        {
+          "label": "완료",
+          "value": 37,
+          "color": "green"
+        },
+        {
+          "label": "진행",
+          "value": 3,
+          "color": "blue"
+        },
+        {
+          "label": "대기",
+          "value": 2,
+          "color": "gray"
+        }
+      ]
     }
   ]
 }

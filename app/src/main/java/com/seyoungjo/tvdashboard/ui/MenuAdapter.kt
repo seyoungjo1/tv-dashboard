@@ -2,6 +2,7 @@ package com.seyoungjo.tvdashboard.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
@@ -16,7 +17,7 @@ import com.seyoungjo.tvdashboard.data.MenuEntry
 import java.io.File
 import java.util.concurrent.Executors
 
-/** 왼쪽 정사각형 아이콘 메뉴 */
+/** 왼쪽 사이드바: 정사각형 아이콘(폴더의 icon.png) + 이름 */
 class MenuAdapter(
     private val onClick: (MenuEntry) -> Unit,
 ) : RecyclerView.Adapter<MenuAdapter.Holder>() {
@@ -43,6 +44,7 @@ class MenuAdapter(
     }
 
     class Holder(v: View) : RecyclerView.ViewHolder(v) {
+        val frame: View = v.findViewById(R.id.tileFrame)
         val image: ImageView = v.findViewById(R.id.tileImage)
         val initial: TextView = v.findViewById(R.id.tileInitial)
         val name: TextView = v.findViewById(R.id.tileName)
@@ -51,10 +53,9 @@ class MenuAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_menu_tile, parent, false)
-        v.setOnFocusChangeListener { view, has ->
-            view.animate().scaleX(if (has) 1.05f else 1f).scaleY(if (has) 1.05f else 1f).setDuration(120).start()
-        }
-        return Holder(v)
+        val h = Holder(v)
+        h.frame.clipToOutline = true
+        return h
     }
 
     override fun getItemCount() = items.size
@@ -66,6 +67,10 @@ class MenuAdapter(
         h.itemView.contentDescription = e.title
         h.itemView.setOnClickListener { onClick(e) }
         h.initial.text = e.title.take(1)
+        h.frame.background = GradientDrawable().apply {
+            cornerRadius = 12 * h.frame.resources.displayMetrics.density
+            setColor(PALETTE[position % PALETTE.size])
+        }
         val img = e.image
         if (img == null) {
             h.key = null
@@ -83,7 +88,7 @@ class MenuAdapter(
         h.image.setImageDrawable(null)
         h.initial.visibility = View.VISIBLE
         io.execute {
-            val bmp = decode(img, 360)
+            val bmp = decode(img, 256)
             main.post {
                 if (bmp != null) cache.put(key, bmp)
                 if (h.key == key && bmp != null) {
@@ -91,6 +96,14 @@ class MenuAdapter(
                 }
             }
         }
+    }
+
+    companion object {
+        /** 아이콘이 없을 때 쓰는 vDesk 풍 색상 */
+        private val PALETTE = intArrayOf(
+            0xFF0BB5E8.toInt(), 0xFF19B394.toInt(), 0xFFF5655F.toInt(), 0xFFF5A03A.toInt(),
+            0xFF10C1C6.toInt(), 0xFF7E57C2.toInt(), 0xFF3F7FE0.toInt(), 0xFFE0559A.toInt(),
+        )
     }
 
     private fun decode(f: File, target: Int): Bitmap? = try {

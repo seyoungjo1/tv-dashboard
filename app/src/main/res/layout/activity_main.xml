@@ -2,106 +2,158 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@color/content_bg">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="horizontal">
+        android:orientation="vertical">
 
-        <!-- 왼쪽: 정사각형 아이콘 메뉴 -->
+        <!-- 상단 헤더: 로고 + 제목 + 날짜/시각 -->
         <LinearLayout
-            android:id="@+id/menuPanel"
-            android:layout_width="@dimen/menu_panel_width"
-            android:layout_height="match_parent"
-            android:background="@color/panel"
-            android:orientation="vertical">
+            android:id="@+id/header"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/header_height"
+            android:background="@color/header"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="18dp"
+            android:paddingEnd="24dp">
 
-            <TextView
-                android:id="@+id/titleText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:gravity="center"
-                android:maxLines="2"
-                android:paddingHorizontal="8dp"
-                android:paddingTop="14dp"
-                android:paddingBottom="6dp"
-                android:text="@string/app_name"
-                android:textColor="@color/text"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/menuList"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:clipToPadding="false"
-                android:descendantFocusability="afterDescendants"
-                android:paddingHorizontal="12dp"
-                android:paddingVertical="6dp"
-                android:scrollbars="none" />
-
-            <ImageButton
-                android:id="@+id/settingsButton"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
-                android:layout_gravity="center_horizontal"
-                android:layout_marginVertical="10dp"
-                android:background="@drawable/round_button_bg"
-                android:contentDescription="@string/settings"
-                android:focusable="true"
-                android:padding="12dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_settings" />
-        </LinearLayout>
-
-        <!-- 오른쪽: 대시보드(index.html) -->
-        <FrameLayout
-            android:id="@+id/contentPanel"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1">
-
-            <!-- WebView 는 코드에서 생성 (렌더러 종료 시 재생성) -->
-            <FrameLayout
-                android:id="@+id/webContainer"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent" />
-
-            <ScrollView
-                android:id="@+id/emptyView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@color/bg"
-                android:visibility="gone">
-
-                <TextView
-                    android:id="@+id/emptyText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:lineSpacingExtra="6dp"
-                    android:padding="40dp"
-                    android:textColor="@color/text"
-                    android:textIsSelectable="false"
-                    android:textSize="20sp" />
-            </ScrollView>
-
-            <ImageButton
-                android:id="@+id/fullscreenButton"
+            <ImageView
+                android:id="@+id/headerLogo"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
-                android:layout_gravity="top|end"
-                android:layout_margin="10dp"
-                android:alpha="0.75"
-                android:background="@drawable/round_button_bg"
-                android:contentDescription="@string/fullscreen"
-                android:focusable="true"
-                android:padding="11dp"
+                android:adjustViewBounds="true"
+                android:contentDescription="@null"
                 android:scaleType="fitCenter"
-                android:src="@drawable/ic_fullscreen" />
-        </FrameLayout>
+                android:src="@drawable/logo_daesang_mark" />
+
+            <TextView
+                android:id="@+id/headerTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/default_header_title"
+                android:textColor="#FFFFFFFF"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/headerClock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFC9D1D9"
+                android:textSize="20sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal">
+
+            <!-- 왼쪽 사이드바: 정사각형 아이콘 메뉴, 맨 아래 설정 -->
+            <LinearLayout
+                android:id="@+id/menuPanel"
+                android:layout_width="@dimen/sidebar_width"
+                android:layout_height="match_parent"
+                android:background="@color/sidebar"
+                android:orientation="vertical">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/menuList"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:descendantFocusability="afterDescendants"
+                    android:scrollbars="none" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#FF3C4147" />
+
+                <LinearLayout
+                    android:id="@+id/settingsButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/side_item_bg"
+                    android:clickable="true"
+                    android:contentDescription="@string/settings"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:paddingVertical="12dp">
+
+                    <ImageView
+                        android:layout_width="34dp"
+                        android:layout_height="34dp"
+                        android:importantForAccessibility="no"
+                        android:src="@drawable/ic_settings" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/settings"
+                        android:textColor="@color/sidebar_text"
+                        android:textSize="14sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 오른쪽: 대시보드(index.html) -->
+            <FrameLayout
+                android:id="@+id/contentPanel"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@color/content_bg">
+
+                <!-- WebView 는 코드에서 생성 (렌더러 종료 시 재생성) -->
+                <FrameLayout
+                    android:id="@+id/webContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <ScrollView
+                    android:id="@+id/emptyView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@color/content_bg"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/emptyText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_margin="32dp"
+                        android:background="#FFFFFFFF"
+                        android:elevation="2dp"
+                        android:lineSpacingExtra="6dp"
+                        android:padding="32dp"
+                        android:textColor="@color/content_text"
+                        android:textSize="20sp" />
+                </ScrollView>
+
+                <ImageButton
+                    android:id="@+id/fullscreenButton"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_gravity="top|end"
+                    android:layout_margin="10dp"
+                    android:alpha="0.7"
+                    android:background="@drawable/round_button_bg"
+                    android:contentDescription="@string/fullscreen"
+                    android:focusable="true"
+                    android:padding="10dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_fullscreen" />
+            </FrameLayout>
+        </LinearLayout>
     </LinearLayout>
 
     <!-- 일정 시간 무입력 시: 루트 동영상 + 멘트 오버레이 -->

@@ -98,6 +98,7 @@ class AdminServer(private val ctx: Context, port: Int) : NanoHTTPD(port) {
             "/api/file" to Method.POST -> upload(s, param(s, "path"), param(s, "overwrite") != "0")
             "/api/file" to Method.DELETE -> delete(param(s, "path"), param(s, "recursive") == "1")
             "/api/mkdir" to Method.POST -> mkdir(param(s, "path"))
+            "/api/sample" to Method.POST -> sample(param(s, "path"))
             "/api/rename" to Method.POST -> rename(param(s, "path"), param(s, "to"))
             "/api/reload" to Method.POST -> { ChangeBus.post(AppEvent.Reload); ok() }
             "/api/settings" to Method.GET -> getSettings()
@@ -260,6 +261,28 @@ class AdminServer(private val ctx: Context, port: Int) : NanoHTTPD(port) {
         val d = g.resolve(rel)
         if (d.isFile) throw HttpError(409, "같은 이름의 파일이 있습니다.")
         if (!d.isDirectory && !d.mkdirs()) throw HttpError(500, "폴더를 만들 수 없습니다.")
+        ChangeBus.post(AppEvent.Changed(rel))
+        return json(JSONObject().put("ok", true).put("path", rel))
+    }
+
+    /** 예제 대시보드(앱에 포함된 assets/sample)를 새 폴더에 복사 */
+    private fun sample(path: String?): Response {
+        val g = ContentStore.guard(ctx)
+        val rel = requirePath(path)
+        val dir = g.resolve(rel)
+        if (dir.exists()) throw HttpError(409, "이미 있는 이름입니다: $rel")
+        if (!dir.mkdirs()) throw HttpError(500, "폴더를 만들 수 없습니다.")
+        val title = MenuScanner.displayName(rel.substringAfterLast('/'))
+        for (name in ctx.assets.list("sample") ?: emptyArray()) {
+            var bytes = ctx.assets.open("sample/$name").use { it.readBytes() }
+            if (name == "data.json") {
+                val o = JSONObject(bytes.toString(Charsets.UTF_8)).put("title", "$title 현황")
+                bytes = o.toString(2).toByteArray(Charsets.UTF_8)
+            }
+            val tmp = File(ContentStore.tmpDir(ctx), "up-" + UUID.randomUUID())
+            FileOutputStream(tmp).use { it.write(bytes); it.fd.sync() }
+            atomicReplace(tmp, File(dir, name))
+        }
         ChangeBus.post(AppEvent.Changed(rel))
         return json(JSONObject().put("ok", true).put("path", rel))
     }

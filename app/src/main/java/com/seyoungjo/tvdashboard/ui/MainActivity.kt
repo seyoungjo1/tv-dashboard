@@ -2,6 +2,7 @@ package com.seyoungjo.tvdashboard.ui
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
@@ -21,6 +22,7 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.VideoView
@@ -46,6 +48,9 @@ import com.seyoungjo.tvdashboard.server.NetInfo
 import com.seyoungjo.tvdashboard.server.ServerService
 import com.seyoungjo.tvdashboard.update.UpdateManager
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
@@ -53,13 +58,17 @@ import java.util.concurrent.Executors
  */
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var header: View
+    private lateinit var headerTitle: TextView
+    private lateinit var headerClock: TextView
+    private lateinit var headerLogo: ImageView
     private lateinit var menuPanel: View
     private lateinit var menuList: RecyclerView
     private lateinit var webContainer: FrameLayout
     private lateinit var emptyView: View
     private lateinit var emptyText: TextView
     private lateinit var fullscreenButton: ImageButton
-    private lateinit var settingsButton: ImageButton
+    private lateinit var settingsButton: View
     private lateinit var idleOverlay: View
     private lateinit var idleVideo: VideoView
     private lateinit var idleMessage: TextView
@@ -88,6 +97,13 @@ class MainActivity : AppCompatActivity() {
     private val idleRunnable = Runnable { showIdle() }
     private val reloadRunnable = Runnable { reloadCurrent() }
     private val menuRefreshRunnable = Runnable { refreshMenu() }
+    private val clockFormat = SimpleDateFormat("yyyy.MM.dd (E)  HH:mm", Locale.KOREA)
+    private val clockRunnable = object : Runnable {
+        override fun run() {
+            headerClock.text = clockFormat.format(Date())
+            handler.postDelayed(this, 60_000L - System.currentTimeMillis() % 60_000L + 50)
+        }
+    }
     private val scanRunnable = object : Runnable {
         override fun run() {
             refreshMenu()
@@ -114,6 +130,10 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        header = findViewById(R.id.header)
+        headerTitle = findViewById(R.id.headerTitle)
+        headerClock = findViewById(R.id.headerClock)
+        headerLogo = findViewById(R.id.headerLogo)
         menuPanel = findViewById(R.id.menuPanel)
         menuList = findViewById(R.id.menuList)
         webContainer = findViewById(R.id.webContainer)
@@ -158,7 +178,10 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         resumed = true
         applyKeepScreenOn()
+        applyHeader()
         hideSystemBars()
+        handler.removeCallbacks(clockRunnable)
+        clockRunnable.run()
         refreshMenu(force = true)
         handler.removeCallbacks(scanRunnable)
         handler.postDelayed(scanRunnable, SCAN_MS)
@@ -175,6 +198,7 @@ class MainActivity : AppCompatActivity() {
         resumed = false
         handler.removeCallbacks(scanRunnable)
         handler.removeCallbacks(idleRunnable)
+        handler.removeCallbacks(clockRunnable)
         if (idleOverlay.visibility == View.VISIBLE) hideIdle()
         super.onPause()
     }
@@ -353,6 +377,7 @@ class MainActivity : AppCompatActivity() {
             is AppEvent.Changed -> {
                 handler.removeCallbacks(menuRefreshRunnable)
                 handler.postDelayed(menuRefreshRunnable, 400)
+                if (e.path.equals(LOGO_FILE, ignoreCase = true)) applyHeader()
                 val c = current
                 if (c != null && AppSettings.autoRefresh &&
                     (e.path == c.folder || e.path.startsWith(c.folder + "/"))
@@ -364,6 +389,7 @@ class MainActivity : AppCompatActivity() {
             }
             AppEvent.SettingsChanged -> {
                 applyKeepScreenOn()
+                applyHeader()
                 if (idleOverlay.visibility == View.VISIBLE) {
                     idleMessage.text = AppSettings.idleMessage
                 } else resetIdle()
@@ -376,6 +402,7 @@ class MainActivity : AppCompatActivity() {
     private fun setFullscreen(on: Boolean) {
         fullscreen = on
         menuPanel.visibility = if (on) View.GONE else View.VISIBLE
+        header.visibility = if (on) View.GONE else View.VISIBLE
         fullscreenButton.setImageResource(if (on) R.drawable.ic_menu else R.drawable.ic_fullscreen)
         fullscreenButton.contentDescription = getString(if (on) R.string.exit_fullscreen else R.string.fullscreen)
         if (!on) focusSelectedTile()
@@ -529,6 +556,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** 상단 제목(설정) + 로고(자료 폴더 루트의 logo.png 가 있으면 그것, 없으면 기본 로고) */
+    private fun applyHeader() {
+        headerTitle.text = AppSettings.headerTitle
+        val logo = File(ContentStore.root(this), LOGO_FILE)
+        val bmp = if (logo.isFile) try { BitmapFactory.decodeFile(logo.path) } catch (e: Throwable) { null } else null
+        if (bmp != null) headerLogo.setImageBitmap(bmp) else headerLogo.setImageResource(R.drawable.logo_daesang_mark)
+    }
+
     private fun applyKeepScreenOn() {
         if (AppSettings.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -544,6 +579,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_PREVIEW_IDLE = "preview_idle"
+        private const val LOGO_FILE = "logo.png"
         private const val SCAN_MS = 15_000L
     }
 }

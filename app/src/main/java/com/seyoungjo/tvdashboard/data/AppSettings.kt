@@ -11,6 +11,7 @@ object AppSettings {
     lateinit var prefs: SharedPreferences
         private set
 
+    const val DEFAULT_TITLE = "대상 오산공장 Dashboard"
     const val DEFAULT_MESSAGE = "오산공장 dashboard 터치시 접속됩니다"
 
     fun init(context: Context) {
@@ -34,6 +35,9 @@ object AppSettings {
     val updateUrl: String get() = prefs.getString("update_url", null)?.trim().orEmpty()
         .ifEmpty { BuildConfig.DEFAULT_UPDATE_URL }
 
+    val headerTitle: String get() = prefs.getString("header_title", null)?.trim().orEmpty()
+        .ifEmpty { DEFAULT_TITLE }
+
     val idleEnabled get() = prefs.getBoolean("idle_enabled", true)
     val idleSeconds get() = int("idle_seconds", 300, 10, 24 * 3600)
     val idleMessage: String get() = prefs.getString("idle_message", DEFAULT_MESSAGE) ?: ""
@@ -46,6 +50,7 @@ object AppSettings {
 
     /** 관리 웹에서 바꿀 수 있는 항목 (키 → 타입) */
     val REMOTE_KEYS = linkedMapOf(
+        "header_title" to String::class,
         "idle_enabled" to Boolean::class,
         "idle_seconds" to Int::class,
         "idle_message" to String::class,
