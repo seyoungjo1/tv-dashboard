@@ -449,7 +449,8 @@
     if (!YT_RE.test(u)) { alert('유튜브 영상 주소가 아닙니다.'); return; }
     ssVids.push(newItem({ yt: u, fit: /\/shorts\//.test(u) ? 'fit' : undefined })); ssRenderVids();
   };
-  $('#ssNotice').addEventListener('input', ssCount);
+  let ssNoticeDirty = false, ssNoticeKnown = false;          // 직접 고쳤는지 · TV 의 지금 공지를 알고 있는지
+  $('#ssNotice').addEventListener('input', () => { ssNoticeDirty = true; ssCount(); });
   // main 폴더(또는 그 안)를 고르면 오른쪽 모니터 = 화면보호기 미리보기 + 아래 설정. 다른 폴더를 고르면 원래 TV 미리보기
   let ssActive = false;
   function ssMode(on, dir) {
@@ -466,21 +467,38 @@
     ssDir = dir; ssConf = {};
     const tvVids = () => kids(dir).filter(k => !k.d && VID_EXT.includes(ext(k.p))).map(k => base(k.p)).sort(natCmp);
     ssVids = tvVids().map(n => newItem({ name: n }));
-    $('#ssNotice').value = ''; $('#ssSave').disabled = true;
+    const ta = $('#ssNotice');
+    ta.value = ''; ssNoticeDirty = false; $('#ssSave').disabled = true;
     $('#ssFrame').src = 'about:blank';
     ssRenderVids(); ssCount();
     const say = (t) => $('#ssSt').textContent = t;
+    const hasNotice = !!entry(dir + '/공지.txt');
+    // 1) PC 에 받아 둔 마지막 내용을 바로 보여 준다 (TV 에서 받는 데 10~20초 걸리므로)
+    const get = async (n) => { if (!entry(dir + '/' + n)) return null; try { const r = await fetch(prevUrl(dir + '/' + n) + '?t=' + Date.now()); return r.ok ? r.text() : null; } catch (_) { return null; } };
+    const cachedNotice = await get('공지.txt');
+    ssNoticeKnown = !hasNotice || cachedNotice !== null;          // TV 에 공지가 없거나, 받아 둔 내용이 있으면 '알고 있음'
+    if (cachedNotice !== null) ta.value = cachedNotice.replace(/^﻿/, '').trim();
+    try { const c = await get('설정.json'); if (c) ssConf = JSON.parse(c) || {}; } catch (_) {}
+    ta.readOnly = !ssNoticeKnown;
+    ta.placeholder = ssNoticeKnown ? '한 줄에 공지 하나 (위에서부터 5개까지 표시)\n예) 10월 정기교육은 14일에 진행됩니다.' : 'TV 에서 지금 공지를 불러오는 중… (10~20초)';
+    ssCount();
+    // 2) TV 에서 최신 내용을 받아 바꿔 넣는다 (그사이 직접 고쳤으면 고친 내용을 유지)
     const names = ['생산.json', 'sd.json', 'fi.json', 'plan.json', '공지.txt', '설정.json', '제목.txt'];
     const want = names.map(n => dir + '/' + n).filter(p => entry(p)).concat(entry('logo.png') ? ['logo.png'] : []);
-    say(want.length ? 'TV 에서 화면보호기 자료를 불러오는 중…' : '');
+    say(want.length ? 'TV 에서 최신 내용을 확인하는 중…' : '');
     const alive = () => ssActive && ssDir === dir;
     if (!want.length || await ensure(want, alive, say)) {
-      const get = async (n) => { if (!entry(dir + '/' + n)) return ''; const r = await fetch(prevUrl(dir + '/' + n) + '?t=' + Date.now()); return r.ok ? r.text() : ''; };
-      $('#ssNotice').value = (await get('공지.txt')).replace(/^﻿/, '').trim();
-      try { ssConf = JSON.parse(await get('설정.json') || '{}') || {}; } catch (_) { ssConf = {}; }
-      say(want.length ? '불러왔습니다.' : '');
+      const tvNotice = await get('공지.txt');
+      if (tvNotice !== null && !ssNoticeDirty) ta.value = tvNotice.replace(/^﻿/, '').trim();
+      if (tvNotice !== null || !hasNotice) ssNoticeKnown = true;
+      try { const c = await get('설정.json'); ssConf = c ? (JSON.parse(c) || {}) : {}; } catch (_) {}
+      say(want.length ? 'TV 의 최신 내용입니다.' : '');
+    } else if (alive()) {
+      say(ssNoticeKnown ? 'TV 에 연결되지 않아 마지막으로 받아 둔 내용을 보여 줍니다.' : 'TV 에서 공지를 불러오지 못했습니다 — 공지를 고치지 않으면 TV 의 공지는 그대로 둡니다.');
     }
     if (!alive()) return;
+    ta.readOnly = false;
+    ta.placeholder = '한 줄에 공지 하나 (위에서부터 5개까지 표시)\n예) 10월 정기교육은 14일에 진행됩니다.';
     // 재생 목록 (설정.json playlist) — 목록에 없는 TV 의 동영상은 뒤에 이름순으로
     const files = tvVids(), used = new Set(), list = [];
     for (const o of Array.isArray(ssConf.playlist) ? ssConf.playlist : []) {
@@ -515,7 +533,8 @@
       for (const [i, v] of ssVids.entries()) if (v.file) { say('동영상 준비 중… ' + v.file.name); const st = await api('PUT', '/api/stage', v.file, true); ops.push({ op: 'put', path: dir + '/' + target(v, i), stage: st.id }); }
       const txt = new File([lines.join('\n') + (lines.length ? '\n' : '')], '공지.txt', { type: 'text/plain' });
       const js = new File([JSON.stringify(conf, null, 2)], '설정.json', { type: 'application/json' });
-      ops.push({ op: 'put', path: dir + '/공지.txt', stage: (await api('PUT', '/api/stage', txt, true)).id });
+      // TV 의 공지를 모르는 채로(불러오기 실패) 고치지도 않았으면 공지 파일은 건드리지 않는다 — 빈 공지로 덮어쓰기 방지
+      if (ssNoticeKnown || ssNoticeDirty) ops.push({ op: 'put', path: dir + '/공지.txt', stage: (await api('PUT', '/api/stage', txt, true)).id });
       ops.push({ op: 'put', path: dir + '/설정.json', stage: (await api('PUT', '/api/stage', js, true)).id });
       say('');
       // 이름을 옮기는 작업과 함께 보내므로 '바뀐 파일만' 비교는 끈다 (옮기기 전 이름과 비교하면 틀릴 수 있음)
