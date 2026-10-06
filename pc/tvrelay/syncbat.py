@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import versions
+from . import backup, versions
 from .relay import Job, Relay
 
 # 올리지 않는 파일
@@ -104,7 +104,7 @@ def run(root: Path, relay: Relay, src: Path, folder: str, wait: int = 180, force
     if st and not st.get("online"):
         echo("  (TV 가 지금 오프라인입니다 — 켜지면 반영됩니다)")
     vers = versions.load(root)
-    job, sent, same = Job(), [], 0
+    job, sent, same, blobs = Job(), [], 0, []
     for rel, f in files:
         data = f.read_bytes()
         path = folder + "/" + rel
@@ -114,6 +114,7 @@ def run(root: Path, relay: Relay, src: Path, folder: str, wait: int = 180, force
         job.put(path, data, True)
         versions.remember(vers, path, data)
         sent.append(rel)
+        blobs.append((path, data))
     if not sent:
         echo("바뀐 파일이 없습니다 (%d개 모두 TV 와 같음)" % same)
         return 0
@@ -121,6 +122,8 @@ def run(root: Path, relay: Relay, src: Path, folder: str, wait: int = 180, force
         echo("  올림: %s" % rel)
     id_ = relay.submit(job)
     versions.save(root, vers)
+    for path, data in blobs:                       # 백업(tv-backup)에도 — 새 TV 연결 때 그대로 올림
+        backup.record_put(root, relay.tv, path, data)
     echo("보냄: %d개 (%.1f MB), 그대로 %d개 — 작업 %s" % (len(sent), job.size / 1048576, same, id_))
     if wait <= 0:
         return 0

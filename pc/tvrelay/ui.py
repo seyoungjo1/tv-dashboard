@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, config, grants, syncbat, update, versions
+from . import __version__, backup, config, grants, syncbat, update, versions
 from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
@@ -84,6 +84,7 @@ class Api:
         self.pending_paths: dict[str, str] = {}           # 받는 중인 경로 → 작업 id (같은 파일을 두 번 받지 않게)
         self.tree: dict[str, dict[str, Any]] = {}
         self.grant_jobs: dict[str, str] = {}               # 도구 등록 작업 id → 폴더
+        self.bk: dict[str, Any] = {}                        # 백업/복원 진행 상황
         self._last_state: dict[str, Any] | None = None
         self._state_at = 0.0                               # 마지막으로 TV 상태를 확인한 시각
         self.state_cache = root / "out" / "state-cache.json"
@@ -279,6 +280,7 @@ class Api:
         job = Job()
         used: list[Path] = []
         skipped: list[str] = []
+        rec: list[tuple[str, Any]] = []                     # 보낸 뒤 백업(tv-backup)에 반영할 것
         force = bool(body.get("force"))
         vers = versions.load(self.root)
         if not force and any(op.get("op") == "put" for op in body.get("ops") or []):
@@ -301,6 +303,7 @@ class Api:
                 if kind == "put":
                     versions.remember(vers, str(op["path"]), data)
                     job.put(str(op["path"]), data, bool(op.get("overwrite", True)))
+                    rec.append(("put", (str(op["path"]), data)))
                     try:
                         self._cache_put(str(op["path"]), data, local=True)   # 방금 올린 파일은 바로 미리보기
                     except (OSError, ValueError):
@@ -309,6 +312,8 @@ class Api:
                     job.apk(data)
             elif kind in ("mkdir", "delete", "rename", "sample", "settings", "reload", "get", "ping", "list"):
                 job.op(kind, **{k: v for k, v in op.items() if k != "op"})
+                if kind in ("mkdir", "delete", "rename", "settings"):
+                    rec.append((kind, op))
             else:
                 raise ValueError("알 수 없는 작업: %s" % kind)
         if not job.ops:
@@ -330,7 +335,158 @@ class Api:
             except OSError:
                 pass
         echo("보냄: %s — TV 가 가져가면 결과가 표시됩니다" % id_)
+        self._record(rec)
         return {"id": id_, "skipped": skipped}
+
+    def _record(self, rec: list[tuple[str, Any]]) -> None:
+        """PC 에서 보낸 그대로 백업(tv-backup)에 반영 — 새 TV 를 연결하면 이걸 그대로 올린다"""
+        try:
+            tv = self.relay().tv
+            for kind, a in rec:
+                if kind == "put":
+                    backup.record_put(self.root, tv, a[0], a[1])
+                elif kind == "delete":
+                    backup.record_delete(self.root, tv, str(a.get("path", "")))
+                elif kind == "rename":
+                    backup.record_rename(self.root, tv, str(a.get("path", "")), str(a.get("to", "")))
+                elif kind == "mkdir":
+                    backup.record_mkdir(self.root, tv, str(a.get("path", "")))
+                elif kind == "settings":
+                    backup.record_settings(self.root, tv, a.get("values") or {})
+        except Exception as e:                              # 백업 실패는 작업에 영향 주지 않음
+            echo("백업 기록 실패: %s" % e)
+
+    # ── TV 백업 · 새 TV 로 복원 ──
+    def backup_info(self) -> dict[str, Any]:
+        cfg = config.load(self.root)
+        tv = cfg.tv if cfg else ""
+        return {"current": tv, "items": backup.all_backups(self.root), "job": self.bk,
+                "mine": backup.info(self.root, tv) if tv else None}
+
+    def _bk_run(self, kind: str, fn: Any) -> dict[str, Any]:
+        if self.bk.get("running"):
+            raise ValueError("백업/복원이 이미 진행 중입니다")
+        self.bk = {"running": True, "kind": kind, "done": 0, "total": 0, "msg": "준비 중…"}
+
+        def run() -> None:
+            try:
+                fn()
+                self.bk.update(running=False, ok=True)
+            except Exception as e:
+                echo(traceback.format_exc())
+                self.bk.update(running=False, ok=False, msg="실패: %s" % e)
+        threading.Thread(target=run, daemon=True).start()
+        return self.bk
+
+    def backup_pull(self) -> dict[str, Any]:
+        """TV 에만 있거나 다른 파일을 받아 백업을 TV 와 똑같이 맞춘다 (바뀐 것만)"""
+        def go() -> None:
+            st = self.state()
+            if st.get("none"):
+                raise ValueError("TV 가 연결되지 않았습니다")
+            tree = {e["p"]: e for e in st.get("tree") or []}
+            tv = self.relay().tv
+            backup.record_settings(self.root, tv, st.get("settings") or {})
+            for p, e in tree.items():
+                if e.get("d"):
+                    backup.record_mkdir(self.root, tv, p)
+            local = dict(backup.files(self.root, tv))
+            need = [p for p, e in tree.items() if not e.get("d") and not (p in local and backup.same_on_tv(tree, p, local[p]))]
+            for p in [p for p in local if p not in tree]:  # TV 에서 지워진 파일은 백업에서도 지움
+                backup.record_delete(self.root, tv, p)
+            self.bk.update(total=len(need), msg="TV 에서 %d개 받는 중…" % len(need))
+            relay = self.relay()
+            group: list[str] = []
+            size = 0
+
+            def flush() -> None:
+                nonlocal group, size
+                if not group:
+                    return
+                job = Job()
+                for p in group:
+                    job.op("get", path=p)
+                id_ = relay.submit(job)
+                r = relay.wait(id_, timeout=600)
+                if r is None:
+                    raise ValueError("TV 응답이 없습니다 — TV 가 켜져 있는지 확인하고 다시 누르세요 (받은 것은 남아 있음)")
+                for item in r.get("results", []):
+                    if "data" in item:
+                        backup.record_put(self.root, tv, str(item.get("path")), item.pop("data"))
+                self.bk["done"] += len(group)
+                self.bk["msg"] = "TV 에서 받는 중… %d/%d" % (self.bk["done"], self.bk["total"])
+                group, size = [], 0
+
+            for p in need:
+                n = int(tree[p].get("s") or 0)
+                if group and size + n > backup.BATCH:
+                    flush()
+                group.append(p)
+                size += n
+            flush()
+            self.bk["msg"] = "백업 완료 — %d개 받음" % len(need)
+            echo(self.bk["msg"])
+        return self._bk_run("pull", go)
+
+    def backup_restore(self, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        """고른 TV 의 백업(기본: 지금 TV)을 지금 연결된 TV 로 그대로 올린다 — 파일(같은 것은 건너뜀) · TV 설정 · 직원용 도구(같은 열쇠)"""
+        src = str((body or {}).get("from") or "") or self.relay().tv
+
+        def go() -> None:
+            st = self.state()
+            if st.get("none"):
+                raise ValueError("TV 가 아직 연결되지 않았습니다")
+            tree = {e["p"]: e for e in st.get("tree") or []}
+            tv = self.relay().tv
+            items = [(p, f) for p, f in backup.files(self.root, src) if not backup.same_on_tv(tree, p, f)]
+            m = backup.meta(self.root, src)
+            data = grants.load(self.root)
+            g_ops = [grants.grant_op(g) for g in data.values() if g.get("status") == "active"]
+            parts = list(backup.batches(items))
+            self.bk.update(total=len(items), msg="새 TV 로 %d개 올리는 중…" % len(items))
+            relay = self.relay()
+            vers = versions.load(self.root)
+            for part in parts:
+                job = Job()
+                for p, f in part:
+                    blob = f.read_bytes()
+                    job.put(p, blob, True)
+                    versions.remember(vers, p, blob)
+                id_ = relay.submit(job)
+                r = relay.wait(id_, timeout=900)
+                if r is None:
+                    raise ValueError("TV 응답이 없습니다 — 다시 누르면 이어서 올립니다")
+                bad = [x for x in r.get("results", []) if not x.get("ok")]
+                if bad:
+                    echo("복원 중 실패 %d개: %s" % (len(bad), ", ".join("%s(%s)" % (x.get("path"), x.get("error")) for x in bad[:5])))
+                self.bk["done"] += len(part)
+                self.bk["msg"] = "새 TV 로 올리는 중… %d/%d" % (self.bk["done"], self.bk["total"])
+            versions.save(self.root, vers)
+            if src != tv:                                   # 다른 TV 의 백업을 올렸으면 이 TV 의 백업으로도 복사
+                for p, f in items:
+                    backup.record_put(self.root, tv, p, f.read_bytes())
+                if m.get("settings"):
+                    backup.record_settings(self.root, tv, m["settings"])
+            # 빈 폴더 · TV 설정 · 직원용 업로드 도구/공지 도구(같은 gid·열쇠라 나눠 준 HTML 이 그대로 동작)
+            job = Job()
+            have = {p.rsplit("/", 1)[0] for p, _ in backup.files(self.root, src) if "/" in p}
+            for d in backup.dirs(self.root, src):
+                if d not in have and d not in tree:
+                    job.op("mkdir", path=d)
+            if m.get("settings"):
+                job.op("settings", values=m["settings"])
+            job.ops.extend(g_ops)
+            if job.ops:
+                self.bk["msg"] = "TV 설정 · 직원용 도구 적용 중…"
+                r = relay.wait(relay.submit(job), timeout=600)
+                if r is None:
+                    raise ValueError("TV 응답이 없습니다 (파일은 모두 올라감) — 다시 누르면 설정만 적용합니다")
+            self.bk["msg"] = "복원 완료 — 파일 %d개%s%s" % (len(items), " · TV 설정" if m.get("settings") else "",
+                                                       " · 직원용 도구 %d개" % len(g_ops) if g_ops else "")
+            echo(self.bk["msg"])
+        r = self._bk_run("restore", go)
+        r["from"] = src
+        return r
 
     def result(self, id_: str) -> dict[str, Any]:
         if id_ in self.preview_done:
@@ -342,7 +498,9 @@ class Api:
             for item in r.get("results", []):
                 if "data" in item:
                     p = str(item.get("path"))
-                    self._cache_put(p, item.pop("data"), t=(self.tree.get(p) or {}).get("t"))
+                    blob = item.pop("data")
+                    self._cache_put(p, blob, t=(self.tree.get(p) or {}).get("t"))
+                    backup.record_put(self.root, self.relay().tv, p, blob)   # TV 에서 받은 것도 백업에
             with self.lock:
                 for p in self.preview_jobs.pop(id_, []):
                     if self.pending_paths.get(p) == id_:
@@ -443,6 +601,12 @@ class Api:
             return 200, {"done": bool(cfg) and pair_done(cfg, one("branch"))}
         if method == "POST" and path == "/api/preview":
             return 200, self.request_preview(body)
+        if method == "GET" and path == "/api/backup":
+            return 200, self.backup_info()
+        if method == "POST" and path == "/api/backup/pull":
+            return 200, self.backup_pull()
+        if method == "POST" and path == "/api/backup/restore":
+            return 200, self.backup_restore(body)
         if method == "GET" and path == "/api/grants":
             return 200, self.grant_list()
         if method == "POST" and path == "/api/grant":

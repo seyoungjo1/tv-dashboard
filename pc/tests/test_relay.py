@@ -279,6 +279,54 @@ class RepoRulesTest(unittest.TestCase):
             self.assertEqual(f.read_bytes(), (pc / f.name).read_bytes(), "pc/tvrelay/screensaver/%s 를 다시 복사하세요" % f.name)
 
 
+class BackupTest(unittest.TestCase):
+    def test_record_and_restore_to_new_tv(self):
+        import os, threading, time as _t
+        from tvrelay import backup, ui
+        fake = FakeGitHub()
+        old = os.environ.get("TVRELAY_GITHUB_API")
+        os.environ["TVRELAY_GITHUB_API"] = fake.base
+        try:
+            root = Path(tempfile.mkdtemp())
+            cfg = config.setup("tok", "o/relay", "osan", root)
+            api = ui.Api(root)
+            # PC 에서 올리고 · 이름 바꾸고 · 지우고 · 설정 바꾼 기록
+            api._record([("put", ("a팀/index.html", b"<h1>A</h1>")), ("put", ("main/공지.txt", "공지".encode())),
+                         ("put", ("tmp.txt", b"x")), ("delete", {"path": "tmp.txt"}),
+                         ("put", ("old.json", b"{}")), ("rename", {"path": "old.json", "to": "a팀/data.json"}),
+                         ("mkdir", {"path": "빈폴더"}), ("settings", {"values": {"idle_seconds": "60"}})])
+            self.assertEqual(sorted(p for p, _ in backup.files(root, "osan")), ["a팀/data.json", "a팀/index.html", "main/공지.txt"])
+            self.assertEqual(backup.meta(root, "osan")["settings"], {"idle_seconds": "60"})
+            # 새 TV (비어 있음) 에 복원
+            gh = GitHub(cfg.repo, cfg.token, base=fake.base)
+            box = Box(cfg.key)
+            m = box.seal(json.dumps({"v": 1, "time": int(_t.time() * 1000), "tree": []}).encode(), aad(cfg.tv, "state", "state", "m"))
+            gh.create_branch("relay/osan/state", gh.create_orphan_commit({"m": m}, "state"))
+            store: dict[str, bytes] = {}
+            stop = threading.Event()
+
+            def tv():
+                while not stop.is_set():
+                    fake_tv_process(gh, box, cfg.tv, store)
+                    _t.sleep(0.2)
+            threading.Thread(target=tv, daemon=True).start()
+            api.backup_restore({})
+            for _ in range(200):
+                if not api.bk.get("running"):
+                    break
+                _t.sleep(0.1)
+            stop.set()
+            self.assertTrue(api.bk.get("ok"), api.bk)
+            self.assertEqual(store, {"a팀/index.html": b"<h1>A</h1>", "main/공지.txt": "공지".encode(), "a팀/data.json": b"{}"})
+            self.assertEqual([b["tv"] for b in backup.all_backups(root)], ["osan"])
+        finally:
+            if old is None:
+                os.environ.pop("TVRELAY_GITHUB_API", None)
+            else:
+                os.environ["TVRELAY_GITHUB_API"] = old
+            fake.close()
+
+
 class PairTest(unittest.TestCase):
     def test_pair_roundtrip(self):
         fake = FakeGitHub()

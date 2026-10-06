@@ -145,7 +145,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.cmd == "put":
         r = _relay()
-        id_ = r.submit(Job().put(a.remote, read_local(a.local)))
+        from . import backup
+        blob = read_local(a.local)
+        id_ = r.submit(Job().put(a.remote, blob))
+        backup.record_put(ROOT, r.tv, a.remote.strip().strip("/"), blob)
         print("보냄: %s → %s (작업 %s)" % (a.local, a.remote, id_))
         if a.wait <= 0:
             return 0
