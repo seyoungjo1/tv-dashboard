@@ -443,21 +443,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 앱 화면을 항상 16:9 로 — 휴대폰처럼 비율이 다른 화면에서는 가운데 16:9 만 쓰고 남는 곳은 검게.
-     * (TV 는 16:9 라 그대로 꽉 찬다)
+     * 앱 화면을 항상 16:9 로, 그리고 TV(4K 3840×2160 = 1920×1080dp) 보다 작은 화면에서는 통째로 같은 비율로 줄인다.
+     *  · 앱은 늘 TV 크기(1920×1080dp)로 배치하고, 화면의 16:9 영역에 맞춰 확대/축소만 한다
+     *    → 상단바 글자 · 사이드바 · 아이콘 · 손잡이 · 대시보드 · 화면보호기가 휴대폰에서도 TV 와 같은 배치로 작게 보임
+     *  · 비율이 다른 화면에서는 가운데 16:9 만 쓰고 남는 곳은 검게. 터치 위치는 Android 가 함께 환산한다
+     *  · TV 처럼 1920×1080dp 이상이면 그대로(축소 없음) 꽉 채운다
      */
     private fun keep16by9() {
         val content = findViewById<FrameLayout>(android.R.id.content)
         content.setBackgroundColor(Color.BLACK)
+        content.clipChildren = true
         val app = content.getChildAt(0) ?: return
+        val d = resources.displayMetrics.density
+        val designW = (1920 * d).toInt()
+        val designH = (1080 * d).toInt()
         content.addOnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
             val w = r - l
             val h = b - t
             if (w <= 0 || h <= 0) return@addOnLayoutChangeListener
-            val (tw, th) = if (w * 9 > h * 16) Pair(h * 16 / 9, h) else Pair(w, w * 9 / 16)
+            val (tw, th) = if (w * 9 > h * 16) Pair(h * 16 / 9, h) else Pair(w, w * 9 / 16)   // 화면 안의 16:9 영역
+            val scale = if (tw < designW) tw.toFloat() / designW else 1f
+            val lw = if (scale < 1f) designW else tw
+            val lh = if (scale < 1f) designH else th
             val lp = app.layoutParams as FrameLayout.LayoutParams
-            if (lp.width != tw || lp.height != th || lp.gravity != Gravity.CENTER) {
-                content.post { app.layoutParams = FrameLayout.LayoutParams(tw, th, Gravity.CENTER) }
+            if (lp.width != lw || lp.height != lh || lp.gravity != Gravity.CENTER || app.scaleX != scale) {
+                content.post {
+                    app.layoutParams = FrameLayout.LayoutParams(lw, lh, Gravity.CENTER)
+                    app.pivotX = lw / 2f            // 가운데를 기준으로 줄여서 16:9 영역에 딱 맞게
+                    app.pivotY = lh / 2f
+                    app.scaleX = scale
+                    app.scaleY = scale
+                }
             }
         }
     }
