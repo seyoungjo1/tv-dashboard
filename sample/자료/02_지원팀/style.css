@@ -1,0 +1,8 @@
+body { margin: 0; font-family: "Noto Sans KR", sans-serif; background: #0f141a; color: #eaf0f6; padding: 4vh 4vw; }
+h1 { font-size: 4vh; margin: 0 0 1vh; }
+.upd { color: #9aa8b8; font-size: 2vh; margin-bottom: 4vh; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(28vh, 1fr)); gap: 3vh; }
+.kpi { background: #1b2532; border-radius: 2vh; padding: 4vh 3vh; }
+.kpi .l { font-size: 2.4vh; color: #9aa8b8; }
+.kpi .v { font-size: 8vh; font-weight: bold; margin-top: 1vh; }
+.kpi .u { font-size: 3vh; color: #9cc8ff; margin-left: 1vh; }

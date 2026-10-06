@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV 대시보드 관리</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --line:#dde3ea; --text:#1d2733; --dim:#6b7785; --accent:#1f6fe0; --danger:#d23b3b; --ok:#1c9a5b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:15px; }
+  header { background:#16202c; color:#fff; padding:12px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  header .meta { font-size:13px; color:#b8c4d2; flex:1; }
+  main { max-width:1100px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
+  .tabs button { background:#e6ebf1; color:var(--text); }
+  .tabs button.active { background:var(--accent); color:#fff; }
+  button, .btn { border:0; border-radius:7px; padding:8px 14px; background:var(--accent); color:#fff; cursor:pointer; font-size:14px; font-family:inherit; }
+  button.secondary { background:#e6ebf1; color:var(--text); }
+  button.danger { background:var(--danger); }
+  button.small { padding:4px 9px; font-size:13px; }
+  button:disabled { opacity:.5; cursor:default; }
+  input[type=text], input[type=password], input[type=number], input[type=url] { padding:8px 10px; border:1px solid var(--line); border-radius:7px; font-size:14px; font-family:inherit; width:100%; }
+  label { display:block; margin:10px 0 4px; font-weight:bold; font-size:14px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .crumbs { font-size:15px; margin-bottom:10px; }
+  .crumbs a { color:var(--accent); cursor:pointer; text-decoration:none; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); font-size:14px; }
+  th { color:var(--dim); font-weight:normal; }
+  td.name a { cursor:pointer; color:var(--text); font-weight:bold; text-decoration:none; }
+  td.actions { white-space:nowrap; text-align:right; }
+  .drop { border:2px dashed var(--line); border-radius:10px; padding:14px; text-align:center; color:var(--dim); margin-top:12px; }
+  .drop.over { border-color:var(--accent); background:#eef4ff; }
+  .msg { padding:10px 12px; border-radius:7px; margin:8px 0; font-size:14px; white-space:pre-wrap; }
+  .msg.err { background:#fde8e8; color:#8c1d1d; }
+  .msg.ok { background:#e5f6ec; color:#14663d; }
+  .msg.warn { background:#fff4dc; color:#7a5300; }
+  .progress { height:8px; background:#e6ebf1; border-radius:4px; overflow:hidden; margin-top:4px; }
+  .progress div { height:100%; background:var(--accent); width:0; }
+  .uploads div.item { font-size:13px; margin:6px 0; }
+  code, pre { background:#f0f3f7; border-radius:5px; font-family: Consolas, monospace; font-size:13px; }
+  pre { padding:10px; overflow:auto; white-space:pre; }
+  .hidden { display:none !important; }
+  .login { max-width:380px; margin:80px auto; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:0 16px; }
+  @media (max-width:700px) { .grid2 { grid-template-columns:1fr; } td.mod, th.mod { display:none; } }
+  .hint { color:var(--dim); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TV 대시보드 관리</h1>
+  <div class="meta" id="meta"></div>
+  <button class="secondary small hidden" id="logoutBtn">로그아웃</button>
+</header>
+
+<!-- 로그인 -->
+<div class="card login hidden" id="loginView">
+  <h2 style="margin-top:0">관리자 로그인</h2>
+  <form id="loginForm">
+    <label for="pw">비밀번호</label>
+    <input type="password" id="pw" autocomplete="current-password" autofocus>
+    <div class="hint" style="margin-top:6px">초기 비밀번호는 TV 화면의 ⚙ 설정 → '관리자 비밀번호'에 표시됩니다.</div>
+    <div id="loginMsg"></div>
+    <button style="margin-top:12px;width:100%">로그인</button>
+  </form>
+</div>
+
+<main class="hidden" id="appView">
+  <div id="globalMsg"></div>
+  <div class="tabs">
+    <button data-tab="files" class="active">파일 관리</button>
+    <button data-tab="settings">설정</button>
+    <button data-tab="update">앱 업데이트</button>
+    <button data-tab="api">API 안내</button>
+  </div>
+
+  <!-- 파일 -->
+  <section id="tab-files">
+    <div class="card">
+      <div class="crumbs" id="crumbs"></div>
+      <div class="row">
+        <button id="mkdirBtn">새 폴더</button>
+        <button id="uploadBtn">파일 업로드</button>
+        <button id="uploadDirBtn" class="secondary">폴더째 업로드</button>
+        <button id="sampleBtn" class="secondary">예제 대시보드 만들기</button>
+        <button id="reloadTvBtn" class="secondary">TV 화면 새로고침</button>
+        <input type="file" id="fileInput" multiple class="hidden">
+        <input type="file" id="dirInput" webkitdirectory multiple class="hidden">
+        <input type="file" id="replaceInput" class="hidden">
+      </div>
+      <div class="drop" id="drop">여기에 파일을 끌어다 놓으면 현재 폴더에 업로드됩니다. (같은 이름은 교체)</div>
+      <div class="uploads" id="uploads"></div>
+      <table style="margin-top:10px">
+        <thead><tr><th>이름</th><th>크기</th><th class="mod">수정 시각</th><th></th></tr></thead>
+        <tbody id="list"></tbody>
+      </table>
+    </div>
+    <div class="card hint">
+      <b>메뉴 규칙</b> — 자료 폴더 바로 아래의 폴더 1개가 TV 왼쪽 버튼 1개가 됩니다.
+      버튼 이름 = 폴더명(앞의 정렬 번호 <code>01_</code> 등은 숨김), 대표 이미지 = 폴더 안 <code>대표이미지.png/jpg</code>
+      (없으면 루트의 <code>폴더명.png</code>, 그것도 없으면 폴더의 첫 이미지). 버튼을 누르면 폴더의 <code>index.html</code>이 오른쪽에 표시됩니다.
+      <br>대기 화면 동영상은 <b>자료 폴더 루트</b>에 mp4 등의 동영상을 올리면 됩니다.
+      '.' 또는 '_' 로 시작하는 폴더는 메뉴에 나오지 않습니다.
+    </div>
+  </section>
+
+  <!-- 설정 -->
+  <section id="tab-settings" class="hidden">
+    <div class="card">
+      <h3 style="margin-top:0">대기 화면 (루트 동영상 + 멘트)</h3>
+      <form id="settingsForm">
+        <label><input type="checkbox" name="idle_enabled"> 대기 화면 사용</label>
+        <div class="grid2">
+          <div><label>대기 시간(초)</label><input type="number" min="10" name="idle_seconds"></div>
+          <div><label>멘트</label><input type="text" name="idle_message"></div>
+          <div><label>멘트 표시 시간(초, 0 = 계속 표시)</label><input type="number" min="0" name="idle_msg_show_sec"></div>
+          <div><label>멘트 숨김 시간(초, 깜빡임 간격)</label><input type="number" min="0" name="idle_msg_hide_sec"></div>
+        </div>
+        <label><input type="checkbox" name="idle_video_sound"> 동영상 소리 켜기</label>
+        <h3>화면</h3>
+        <label><input type="checkbox" name="auto_refresh"> 자료 변경 시 화면 자동 새로고침</label>
+        <label><input type="checkbox" name="keep_screen_on"> 앱 실행 중 화면 꺼짐 방지</label>
+        <div class="grid2">
+          <div><label>TV 설정 잠금 PIN (숫자, 비우면 잠금 없음)</label><input type="text" name="settings_pin" inputmode="numeric"></div>
+          <div><label>업데이트 주소 (update.json)</label><input type="url" name="update_url"></div>
+        </div>
+        <div id="settingsMsg"></div>
+        <button style="margin-top:12px">저장</button>
+      </form>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">관리자 비밀번호 변경</h3>
+      <form id="pwForm" class="grid2">
+        <div><label>현재 비밀번호</label><input type="password" name="current" autocomplete="current-password"></div>
+        <div><label>새 비밀번호 (8자 이상)</label><input type="password" name="new" autocomplete="new-password"></div>
+        <div><button style="margin-top:12px">변경</button></div>
+      </form>
+      <div id="pwMsg"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">API 토큰 (자동 업로드 프로그램용)</h3>
+      <div class="row"><code id="token" style="padding:6px 8px">********</code>
+        <button class="secondary small" id="showTokenBtn">표시</button>
+        <button class="danger small" id="regenTokenBtn">새로 발급</button></div>
+      <div class="hint" style="margin-top:6px">새로 발급하면 기존 토큰을 쓰는 프로그램은 더 이상 접속할 수 없습니다.</div>
+    </div>
+  </section>
+
+  <!-- 업데이트 -->
+  <section id="tab-update" class="hidden">
+    <div class="card">
+      <h3 style="margin-top:0">APK 업로드로 업데이트</h3>
+      <p class="hint">GitHub Releases 에서 받은 서명된 APK 를 여기서 올리면 TV 에 설치 확인 창이 뜹니다.
+        TV 앞에서 '설치' → Android 설치 화면에서 '업데이트'를 눌러야 설치됩니다 (무인 자동 설치는 Android 정책상 불가).
+        자료와 설정은 유지되며, 설치를 취소하거나 실패해도 기존 버전을 계속 사용합니다.</p>
+      <div class="row"><input type="file" id="apkInput" accept=".apk"><button id="apkBtn">업로드</button></div>
+      <div id="apkMsg"></div>
+    </div>
+    <div class="card hint">
+      또는 TV 의 ⚙ 설정 → <b>업데이트 확인</b> 을 누르면 업데이트 주소(update.json)에서 새 버전을 확인해 내려받습니다.
+    </div>
+  </section>
+
+  <!-- API -->
+  <section id="tab-api" class="hidden">
+    <div class="card">
+      <h3 style="margin-top:0">PC 프로그램에서 JSON 주기 업로드</h3>
+      <p class="hint">모든 요청에 <code>Authorization: Bearer &lt;API 토큰&gt;</code> 헤더가 필요합니다. 업로드는 임시 파일에 저장된 뒤 완료 시 한 번에 교체되므로 TV 화면에 불완전한 파일이 보이지 않습니다.</p>
+      <b>curl (Windows 10+ 기본 포함)</b>
+      <pre id="curlEx"></pre>
+      <b>PowerShell</b>
+      <pre id="psEx"></pre>
+      <b>API 목록</b>
+      <pre>GET    /api/status                      상태
+GET    /api/menu                        TV 메뉴 구성
+GET    /api/list?path=폴더               목록
+GET    /api/file?path=폴더/파일          다운로드
+PUT    /api/file?path=폴더/파일          업로드/교체 (본문 = 파일 내용, &amp;overwrite=0 이면 덮어쓰기 금지)
+DELETE /api/file?path=경로[&amp;recursive=1]  삭제
+POST   /api/mkdir?path=폴더              폴더 생성
+POST   /api/rename?path=원래경로&amp;to=새경로  이름 변경/이동
+POST   /api/reload                      TV 화면 새로고침
+GET|PUT /api/settings                   설정 (JSON)
+PUT    /api/update/apk                  APK 업로드 (TV 에서 설치 승인)</pre>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  let token = sessionStorage.getItem('tvd_token') || '';
+  let cwd = '';
+  let replaceTarget = null;
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function join(a, b) { return a ? a + '/' + b : b; }
+  function size(n) { if (n < 1024) return n + ' B'; if (n < 1048576) return (n/1024).toFixed(1) + ' KB'; if (n < 1073741824) return (n/1048576).toFixed(1) + ' MB'; return (n/1073741824).toFixed(2) + ' GB'; }
+  function msg(el, text, kind) { el.innerHTML = text ? `<div class="msg ${kind||'ok'}">${esc(text)}</div>` : ''; }
+
+  async function api(method, url, body, raw) {
+    const opt = { method, headers: { 'Authorization': 'Bearer ' + token } };
+    if (body !== undefined) {
+      if (raw) opt.body = body; else { opt.body = JSON.stringify(body); opt.headers['Content-Type'] = 'application/json'; }
+    }
+    const r = await fetch(url, opt);
+    if (r.status === 401 && url !== '/api/login') { logout(); throw new Error('다시 로그인하세요.'); }
+    const ct = r.headers.get('content-type') || '';
+    const data = ct.includes('json') ? await r.json() : await r.blob();
+    if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+    return data;
+  }
+
+  // ── 로그인 ──
+  $('#loginForm').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: $('#pw').value }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || '로그인 실패');
+      token = d.token; sessionStorage.setItem('tvd_token', token);
+      $('#pw').value = '';
+      start(d.mustChange);
+    } catch (err) { msg($('#loginMsg'), err.message, 'err'); }
+  };
+  function logout() {
+    if (token) fetch('/api/logout', { method:'POST', headers:{ 'Authorization':'Bearer ' + token } }).catch(()=>{});
+    token = ''; sessionStorage.removeItem('tvd_token');
+    $('#appView').classList.add('hidden'); $('#logoutBtn').classList.add('hidden'); $('#loginView').classList.remove('hidden');
+  }
+  $('#logoutBtn').onclick = logout;
+
+  async function start(mustChange) {
+    try { await loadStatus(); } catch (e) { logout(); return; }
+    $('#loginView').classList.add('hidden'); $('#appView').classList.remove('hidden'); $('#logoutBtn').classList.remove('hidden');
+    if (mustChange) msg($('#globalMsg'), '초기 비밀번호를 사용 중입니다. [설정] 탭에서 비밀번호를 변경하세요.', 'warn');
+    load(cwd);
+    loadSettings();
+    fillApiExamples();
+  }
+
+  async function loadStatus() {
+    const s = await api('GET', '/api/status');
+    const where = s.storageMode === 'app' ? '앱 전용 폴더 (앱 삭제 시 자료도 삭제)' : '공용 폴더 (앱 삭제 후에도 유지)';
+    $('#meta').textContent = `v${s.versionName} · ${where} · 남은 공간 ${size(s.freeBytes)}`;
+    return s;
+  }
+
+  // ── 탭 ──
+  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('active', x === b));
+    document.querySelectorAll('main > section').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + b.dataset.tab));
+  });
+
+  // ── 파일 목록 ──
+  async function load(path) {
+    try {
+      const d = await api('GET', '/api/list?path=' + encodeURIComponent(path));
+      cwd = d.path;
+      renderCrumbs();
+      const rows = d.entries.map(e => {
+        const p = join(cwd, e.name);
+        const isDir = e.type === 'dir';
+        return `<tr>
+          <td class="name">${isDir ? `📁 <a data-open="${esc(p)}">${esc(e.name)}</a>` : '📄 ' + esc(e.name)}</td>
+          <td>${isDir ? '' : size(e.size)}</td>
+          <td class="mod">${new Date(e.modified).toLocaleString('ko-KR')}</td>
+          <td class="actions">
+            ${isDir ? '' : `<button class="secondary small" data-dl="${esc(p)}">다운로드</button>
+            <button class="secondary small" data-replace="${esc(p)}">교체</button>`}
+            <button class="secondary small" data-rename="${esc(p)}">이름 변경</button>
+            <button class="danger small" data-del="${esc(p)}" data-dir="${isDir}">삭제</button>
+          </td></tr>`;
+      });
+      $('#list').innerHTML = rows.join('') || '<tr><td colspan="4" class="hint">비어 있습니다.</td></tr>';
+    } catch (e) { msg($('#globalMsg'), e.message, 'err'); }
+  }
+  function renderCrumbs() {
+    const parts = cwd ? cwd.split('/') : [];
+    let html = '<a data-open="">자료</a>';
+    parts.forEach((p, i) => { html += ' / <a data-open="' + esc(parts.slice(0, i+1).join('/')) + '">' + esc(p) + '</a>'; });
+    $('#crumbs').innerHTML = html;
+  }
+  document.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-open],[data-dl],[data-del],[data-rename],[data-replace]');
+    if (!t) return;
+    if (t.dataset.open !== undefined) return load(t.dataset.open);
+    if (t.dataset.dl) return download(t.dataset.dl);
+    if (t.dataset.replace) { replaceTarget = t.dataset.replace; $('#replaceInput').value = ''; return $('#replaceInput').click(); }
+    if (t.dataset.rename) {
+      const old = t.dataset.rename; const base = old.split('/').pop();
+      const name = prompt('새 이름', base); if (!name || name === base) return;
+      const to = join(old.split('/').slice(0, -1).join('/'), name);
+      try { await api('POST', `/api/rename?path=${encodeURIComponent(old)}&to=${encodeURIComponent(to)}`); load(cwd); }
+      catch (err) { alert(err.message); }
+    }
+    if (t.dataset.del) {
+      const isDir = t.dataset.dir === 'true';
+      if (!confirm(`'${t.dataset.del}' ${isDir ? '폴더와 안의 모든 파일을' : '파일을'} 삭제할까요?`)) return;
+      try { await api('DELETE', `/api/file?path=${encodeURIComponent(t.dataset.del)}${isDir ? '&recursive=1' : ''}`); load(cwd); }
+      catch (err) { alert(err.message); }
+    }
+  });
+  async function download(path) {
+    try {
+      const blob = await api('GET', '/api/file?path=' + encodeURIComponent(path));
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = path.split('/').pop();
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) { alert(e.message); }
+  }
+
+  $('#mkdirBtn').onclick = async () => {
+    const name = prompt('새 폴더 이름 (TV 메뉴 버튼 이름이 됩니다)'); if (!name) return;
+    try { await api('POST', '/api/mkdir?path=' + encodeURIComponent(join(cwd, name.trim()))); load(cwd); }
+    catch (e) { alert(e.message); }
+  };
+  $('#reloadTvBtn').onclick = async () => { try { await api('POST', '/api/reload'); msg($('#globalMsg'), 'TV 화면을 새로고침했습니다.'); } catch (e) { alert(e.message); } };
+
+  // ── 업로드 (진행률 표시, 서버에서 임시 저장 후 교체) ──
+  function uploadOne(path, file) {
+    return new Promise((resolve, reject) => {
+      const item = document.createElement('div'); item.className = 'item';
+      item.innerHTML = `${esc(path)} <span></span><div class="progress"><div></div></div>`;
+      $('#uploads').appendChild(item);
+      const bar = item.querySelector('.progress div'), st = item.querySelector('span');
+      const x = new XMLHttpRequest();
+      x.open('PUT', '/api/file?path=' + encodeURIComponent(path));
+      x.setRequestHeader('Authorization', 'Bearer ' + token);
+      x.upload.onprogress = (e) => { if (e.lengthComputable) bar.style.width = (e.loaded / e.total * 100) + '%'; };
+      x.onload = () => {
+        if (x.status >= 200 && x.status < 300) { bar.style.width = '100%'; st.textContent = '완료'; setTimeout(() => item.remove(), 2500); resolve(); }
+        else { let m = 'HTTP ' + x.status; try { m = JSON.parse(x.responseText).error; } catch (_) {} st.textContent = '실패: ' + m; st.style.color = 'var(--danger)'; reject(new Error(m)); }
+      };
+      x.onerror = () => { st.textContent = '실패: 연결 오류'; reject(new Error('연결 오류')); };
+      x.send(file);
+    });
+  }
+  async function uploadMany(list) {
+    for (const [path, file] of list) { try { await uploadOne(path, file); } catch (_) {} }
+    load(cwd);
+  }
+  $('#uploadBtn').onclick = () => { $('#fileInput').value = ''; $('#fileInput').click(); };
+  $('#uploadDirBtn').onclick = () => { $('#dirInput').value = ''; $('#dirInput').click(); };
+  $('#fileInput').onchange = (e) => uploadMany([...e.target.files].map(f => [join(cwd, f.name), f]));
+  $('#dirInput').onchange = (e) => uploadMany([...e.target.files].filter(f => !f.name.startsWith('.')).map(f => [join(cwd, f.webkitRelativePath), f]));
+  $('#replaceInput').onchange = (e) => { const f = e.target.files[0]; if (f && replaceTarget) uploadMany([[replaceTarget, f]]); };
+  const drop = $('#drop');
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); uploadMany([...e.dataTransfer.files].map(f => [join(cwd, f.name), f])); };
+
+  // ── 예제 대시보드 (폴더 생성 → 파일 업로드 → TV 메뉴 자동 생성 확인용) ──
+  $('#sampleBtn').onclick = async () => {
+    const name = prompt('만들 폴더 이름', '생산팀'); if (!name) return;
+    const dir = name.trim();
+    try {
+      await api('POST', '/api/mkdir?path=' + encodeURIComponent(dir));
+      const data = { title: dir + ' 현황', updated: new Date().toLocaleString('ko-KR'),
+        kpi: [ { label: '금일 생산', value: 1280, unit: 'EA' }, { label: '목표 달성률', value: 92.5, unit: '%' }, { label: '불량률', value: 0.8, unit: '%' } ] };
+      await uploadOne(dir + '/data.json', new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      await uploadOne(dir + '/index.html', new Blob([SAMPLE_HTML], { type: 'text/html' }));
+      await uploadOne(dir + '/대표이미지.png', await coverPng(dir));
+      msg($('#globalMsg'), `'${dir}' 폴더를 만들었습니다. TV 왼쪽 메뉴에 버튼이 나타나고, 누르면 index.html 이 표시됩니다.`);
+      load(cwd);
+    } catch (e) { alert(e.message); }
+  };
+  function coverPng(text) {
+    return new Promise(res => {
+      const c = document.createElement('canvas'); c.width = c.height = 360;
+      const g = c.getContext('2d');
+      const grd = g.createLinearGradient(0, 0, 360, 360); grd.addColorStop(0, '#1f6fe0'); grd.addColorStop(1, '#0b2c5c');
+      g.fillStyle = grd; g.fillRect(0, 0, 360, 360);
+      g.fillStyle = 'rgba(255,255,255,.9)';
+      [[70,200,40,90],[130,160,40,130],[190,120,40,170],[250,80,40,210]].forEach(([x,y,w,h]) => g.fillRect(x, y, w, h));
+      c.toBlob(res, 'image/png');
+    });
+  }
+  const SAMPLE_HTML = `<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>대시보드</title>
+<style>
+ body{margin:0;font-family:"Noto Sans KR",sans-serif;background:#0f141a;color:#eaf0f6;padding:4vh 4vw}
+ h1{font-size:4vh;margin:0 0 1vh} .upd{color:#9aa8b8;font-size:2vh;margin-bottom:4vh}
+ .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(28vh,1fr));gap:3vh}
+ .kpi{background:#1b2532;border-radius:2vh;padding:4vh 3vh}
+ .kpi .l{font-size:2.4vh;color:#9aa8b8} .kpi .v{font-size:8vh;font-weight:bold;margin-top:1vh}
+ .kpi .u{font-size:3vh;color:#9cc8ff;margin-left:1vh}
+</style></head>
+<body>
+<h1 id="title">로딩 중…</h1><div class="upd" id="upd"></div>
+<div class="kpis" id="kpis"></div>
+<script>
+// 같은 폴더의 data.json 을 읽어 표시 (30초마다 다시 읽음)
+async function load(){
+  try{
+    const d = await (await fetch('data.json?t=' + Date.now())).json();
+    document.getElementById('title').textContent = d.title;
+    document.getElementById('upd').textContent = '갱신: ' + d.updated;
+    document.getElementById('kpis').innerHTML = d.kpi.map(k =>
+      '<div class="kpi"><div class="l">' + k.label + '</div><div class="v">' + k.value.toLocaleString() + '<span class="u">' + k.unit + '</span></div></div>').join('');
+  }catch(e){ document.getElementById('upd').textContent = '데이터를 읽지 못했습니다: ' + e; }
+}
+load(); setInterval(load, 30000);
+<\/script>
+</body></html>`;
+
+  // ── 설정 ──
+  async function loadSettings() {
+    try {
+      const s = await api('GET', '/api/settings');
+      const f = $('#settingsForm');
+      for (const [k, v] of Object.entries(s)) {
+        const el = f.elements[k]; if (!el) continue;
+        if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+      }
+    } catch (e) { msg($('#settingsMsg'), e.message, 'err'); }
+  }
+  $('#settingsForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target, body = {};
+    for (const el of f.elements) {
+      if (!el.name) continue;
+      body[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+    }
+    if (body.settings_pin && !/^\d+$/.test(body.settings_pin)) return msg($('#settingsMsg'), 'PIN 은 숫자만 사용할 수 있습니다.', 'err');
+    try { await api('PUT', '/api/settings', body); msg($('#settingsMsg'), '저장했습니다. TV 에 바로 적용됩니다.'); }
+    catch (err) { msg($('#settingsMsg'), err.message, 'err'); }
+  };
+  $('#pwForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api('POST', '/api/password', { current: f.current.value, new: f.new.value });
+      f.reset(); msg($('#pwMsg'), '비밀번호를 변경했습니다. TV 설정 화면에는 더 이상 표시되지 않습니다.'); msg($('#globalMsg'), '');
+    } catch (err) { msg($('#pwMsg'), err.message, 'err'); }
+  };
+  $('#showTokenBtn').onclick = async () => { try { $('#token').textContent = (await api('GET', '/api/token')).token; fillApiExamples(); } catch (e) { alert(e.message); } };
+  $('#regenTokenBtn').onclick = async () => {
+    if (!confirm('API 토큰을 새로 발급할까요? 기존 토큰은 즉시 사용할 수 없게 됩니다.')) return;
+    try { $('#token').textContent = (await api('POST', '/api/token/regenerate')).token; fillApiExamples(); } catch (e) { alert(e.message); }
+  };
+
+  // ── APK 업로드 ──
+  $('#apkBtn').onclick = async () => {
+    const f = $('#apkInput').files[0]; if (!f) return msg($('#apkMsg'), 'APK 파일을 선택하세요.', 'err');
+    msg($('#apkMsg'), '업로드 중…', 'warn');
+    try {
+      const r = await api('PUT', '/api/update/apk', f, true);
+      msg($('#apkMsg'), `v${r.versionName} 업로드 완료.\n${r.message}`);
+    } catch (e) { msg($('#apkMsg'), e.message, 'err'); }
+  };
+
+  // ── API 예시 ──
+  function fillApiExamples() {
+    const host = location.host;
+    const tk = /^[0-9a-f]{20,}$/.test($('#token').textContent) ? $('#token').textContent : '<API 토큰>';
+    $('#curlEx').textContent =
+`curl -X PUT -H "Authorization: Bearer ${tk}" --data-binary "@data.json" ^
+  "http://${host}/api/file?path=%EC%83%9D%EC%82%B0%ED%8C%80/data.json"
+(경로는 URL 인코딩: 생산팀 → %EC%83%9D%EC%82%B0%ED%8C%80)`;
+    $('#psEx').textContent =
+`$tv    = "http://${host}"
+$token = "${tk}"
+$path  = [uri]::EscapeDataString("생산팀/data.json")
+Invoke-RestMethod -Method Put -Uri "$tv/api/file?path=$path" \`
+  -Headers @{ Authorization = "Bearer $token" } -InFile "C:\\data\\data.json" -ContentType "application/json"`;
+  }
+
+  if (token) start(false); else $('#loginView').classList.remove('hidden');
+})();
+</script>
+</body>
+</html>

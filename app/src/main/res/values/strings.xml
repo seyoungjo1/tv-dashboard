@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TV 대시보드</string>
+    <string name="settings">설정</string>
+    <string name="fullscreen">전체 화면</string>
+    <string name="exit_fullscreen">메뉴 보기</string>
+    <string name="no_index">이 폴더에 index.html 이 없습니다.</string>
+    <string name="empty_title">표시할 자료가 없습니다</string>
+    <string name="press_back_again">뒤로 버튼을 한 번 더 누르면 앱이 종료됩니다.</string>
+    <string name="server_channel">관리 서버</string>
+    <string name="server_running">파일 관리 서버 실행 중</string>
+    <string name="pin_title">설정 잠금 PIN 입력</string>
+    <string name="pin_wrong">PIN 이 올바르지 않습니다.</string>
+    <string name="ok">확인</string>
+    <string name="cancel">취소</string>
+</resources>

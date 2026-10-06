@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="원격 파일 관리 서버">
+        <Preference app:key="server_info" app:title="접속 주소" app:summary="-" />
+        <Preference app:key="admin_password" app:title="관리자 비밀번호" app:summary="-" />
+        <Preference app:key="api_token" app:title="API 토큰 (자동 업로드 프로그램용)" app:summary="눌러서 표시" />
+        <EditTextPreference app:key="port" app:title="서버 포트" app:defaultValue="8080"
+            app:useSimpleSummaryProvider="true" />
+        <SwitchPreferenceCompat app:key="tailscale_only" app:defaultValue="false"
+            app:title="Tailscale 주소(100.x)에서만 접속 허용"
+            app:summary="켜면 같은 공유기의 PC도 Tailscale 을 통해서만 접속할 수 있습니다." />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="대기 화면 (동영상 + 멘트)">
+        <SwitchPreferenceCompat app:key="idle_enabled" app:defaultValue="true"
+            app:title="대기 화면 사용"
+            app:summary="일정 시간 입력이 없으면 자료 폴더 루트의 동영상과 멘트를 표시합니다." />
+        <EditTextPreference app:key="idle_seconds" app:defaultValue="300"
+            app:dependency="idle_enabled" app:title="대기 시간(초)" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="idle_message" app:defaultValue="오산공장 dashboard 터치시 접속됩니다"
+            app:dependency="idle_enabled" app:title="멘트" app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="idle_msg_show_sec" app:defaultValue="0"
+            app:dependency="idle_enabled" app:title="멘트 표시 시간(초, 0=계속 표시)"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference app:key="idle_msg_hide_sec" app:defaultValue="0"
+            app:dependency="idle_enabled" app:title="멘트 숨김 시간(초, 깜빡임 간격)"
+            app:useSimpleSummaryProvider="true" />
+        <SwitchPreferenceCompat app:key="idle_video_sound" app:defaultValue="false"
+            app:dependency="idle_enabled" app:title="동영상 소리 켜기" />
+        <Preference app:key="idle_preview" app:dependency="idle_enabled" app:title="대기 화면 미리보기" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="화면">
+        <SwitchPreferenceCompat app:key="auto_refresh" app:defaultValue="true"
+            app:title="자료 변경 시 화면 자동 새로고침" />
+        <SwitchPreferenceCompat app:key="keep_screen_on" app:defaultValue="true"
+            app:title="앱 실행 중 화면 꺼짐 방지" />
+        <EditTextPreference app:key="settings_pin" app:defaultValue=""
+            app:title="설정 잠금 PIN (비우면 잠금 없음)"
+            app:summary="터치 화면에서 누구나 설정을 열지 못하도록 숫자 PIN 을 지정합니다." />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="자동 실행 / 저장 위치">
+        <SwitchPreferenceCompat app:key="auto_start" app:defaultValue="true"
+            app:title="재부팅 후 자동 실행"
+            app:summary="부팅 시 서버를 시작하고, '다른 앱 위에 표시' 권한이 있으면 화면도 엽니다." />
+        <Preference app:key="overlay_permission" app:title="'다른 앱 위에 표시' 권한" />
+        <ListPreference app:key="storage_mode" app:defaultValue="app"
+            app:entries="@array/storage_mode_entries" app:entryValues="@array/storage_mode_values"
+            app:title="자료 저장 위치" />
+        <Preference app:key="storage_info" app:title="현재 자료 폴더" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="앱 업데이트">
+        <Preference app:key="check_update" app:title="업데이트 확인" />
+        <EditTextPreference app:key="update_url" app:title="업데이트 주소(update.json)"
+            app:useSimpleSummaryProvider="true" />
+        <Preference app:key="install_unknown" app:title="'출처를 알 수 없는 앱 설치' 허용 설정" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="기타">
+        <Preference app:key="android_settings" app:title="Android 시스템 설정 열기" />
+        <Preference app:key="uninstall_notice" app:title="앱 삭제 시 자료 안내" />
+    </PreferenceCategory>
+</PreferenceScreen>

@@ -1,0 +1,549 @@
+package com.seyoungjo.tvdashboard.ui
+
+import android.annotation.SuppressLint
+import android.content.Intent
+import android.graphics.Color
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.TextView
+import android.widget.Toast
+import android.widget.VideoView
+import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import androidx.webkit.WebViewAssetLoader
+import com.seyoungjo.tvdashboard.BuildConfig
+import com.seyoungjo.tvdashboard.R
+import com.seyoungjo.tvdashboard.data.AppEvent
+import com.seyoungjo.tvdashboard.data.AppSettings
+import com.seyoungjo.tvdashboard.data.ChangeBus
+import com.seyoungjo.tvdashboard.data.ContentStore
+import com.seyoungjo.tvdashboard.data.MenuEntry
+import com.seyoungjo.tvdashboard.data.MenuScanner
+import com.seyoungjo.tvdashboard.server.NetInfo
+import com.seyoungjo.tvdashboard.server.ServerService
+import com.seyoungjo.tvdashboard.update.UpdateManager
+import java.io.File
+import java.util.concurrent.Executors
+
+/**
+ * 메인 화면: 왼쪽 = 정사각형 아이콘 메뉴, 오른쪽 = 선택한 폴더의 index.html (대시보드)
+ */
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var menuPanel: View
+    private lateinit var menuList: RecyclerView
+    private lateinit var webContainer: FrameLayout
+    private lateinit var emptyView: View
+    private lateinit var emptyText: TextView
+    private lateinit var fullscreenButton: ImageButton
+    private lateinit var settingsButton: ImageButton
+    private lateinit var idleOverlay: View
+    private lateinit var idleVideo: VideoView
+    private lateinit var idleMessage: TextView
+    private var webView: WebView? = null
+
+    private val adapter = MenuAdapter { openEntry(it, userAction = true) }
+    private val handler = Handler(Looper.getMainLooper())
+    private val io = Executors.newSingleThreadExecutor()
+    private lateinit var assetLoader: WebViewAssetLoader
+
+    private var entries: List<MenuEntry> = emptyList()
+    private var signature: String? = null
+    private var current: MenuEntry? = null
+    private var fullscreen = false
+    private var resumed = false
+    private var lastBack = 0L
+    private var swallowGesture = false
+    private var clearHistoryPending = false
+    private var idleVideos: List<File> = emptyList()
+    private var idleVideoIndex = 0
+    private var idleVideoErrors = 0
+    private var msgVisible = true
+    private var previewIdleRequested = false
+
+    private val busListener: (AppEvent) -> Unit = { onEvent(it) }
+    private val idleRunnable = Runnable { showIdle() }
+    private val reloadRunnable = Runnable { reloadCurrent() }
+    private val menuRefreshRunnable = Runnable { refreshMenu() }
+    private val scanRunnable = object : Runnable {
+        override fun run() {
+            refreshMenu()
+            handler.postDelayed(this, SCAN_MS)
+        }
+    }
+    private val blinkRunnable = object : Runnable {
+        override fun run() {
+            if (idleOverlay.visibility != View.VISIBLE) return
+            if (msgVisible) {
+                idleMessage.visibility = View.INVISIBLE
+                msgVisible = false
+                val hide = AppSettings.idleMsgHideSec
+                if (hide > 0) handler.postDelayed(this, hide * 1000L)
+            } else {
+                idleMessage.visibility = View.VISIBLE
+                msgVisible = true
+                val show = AppSettings.idleMsgShowSec
+                if (show > 0) handler.postDelayed(this, show * 1000L)
+            }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+        menuPanel = findViewById(R.id.menuPanel)
+        menuList = findViewById(R.id.menuList)
+        webContainer = findViewById(R.id.webContainer)
+        emptyView = findViewById(R.id.emptyView)
+        emptyText = findViewById(R.id.emptyText)
+        fullscreenButton = findViewById(R.id.fullscreenButton)
+        settingsButton = findViewById(R.id.settingsButton)
+        idleOverlay = findViewById(R.id.idleOverlay)
+        idleVideo = findViewById(R.id.idleVideo)
+        idleMessage = findViewById(R.id.idleMessage)
+
+        assetLoader = WebViewAssetLoader.Builder()
+            .setDomain(ContentStore.WEB_HOST)
+            .addPathHandler(ContentStore.WEB_PREFIX, DataPathHandler(applicationContext))
+            .build()
+
+        menuList.layoutManager = LinearLayoutManager(this)
+        menuList.adapter = adapter
+        menuList.itemAnimator = null
+
+        createWebView()
+
+        settingsButton.setOnClickListener { openSettings() }
+        fullscreenButton.setOnClickListener { setFullscreen(!fullscreen) }
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = onBack()
+        })
+
+        ServerService.start(this)
+        ChangeBus.add(busListener)
+        hideSystemBars()
+        previewIdleRequested = intent?.getBooleanExtra(EXTRA_PREVIEW_IDLE, false) == true
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_PREVIEW_IDLE, false)) previewIdleRequested = true
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        applyKeepScreenOn()
+        hideSystemBars()
+        refreshMenu(force = true)
+        handler.removeCallbacks(scanRunnable)
+        handler.postDelayed(scanRunnable, SCAN_MS)
+        if (previewIdleRequested) {
+            previewIdleRequested = false
+            handler.postDelayed({ showIdle() }, 600)
+        } else {
+            resetIdle()
+        }
+        checkPendingUploadedApk()
+    }
+
+    override fun onPause() {
+        resumed = false
+        handler.removeCallbacks(scanRunnable)
+        handler.removeCallbacks(idleRunnable)
+        if (idleOverlay.visibility == View.VISIBLE) hideIdle()
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        ChangeBus.remove(busListener)
+        handler.removeCallbacksAndMessages(null)
+        webView?.destroy()
+        webView = null
+        io.shutdown()
+        super.onDestroy()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
+    }
+
+    // ── WebView ───────────────────────────────────────────────────────────
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun createWebView() {
+        webView?.let { old ->
+            webContainer.removeView(old)
+            old.destroy()
+        }
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        val wv = WebView(this)
+        wv.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+        )
+        wv.isFocusable = true
+        wv.isFocusableInTouchMode = true
+        wv.setBackgroundColor(ContextCompat.getColor(this, R.color.bg))
+        with(wv.settings) {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = false
+            allowContentAccess = false
+            mediaPlaybackRequiresUserGesture = false
+            cacheMode = WebSettings.LOAD_NO_CACHE
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            textZoom = 100
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
+        }
+        wv.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                assetLoader.shouldInterceptRequest(request.url)
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                if (clearHistoryPending) {
+                    view.clearHistory()
+                    clearHistoryPending = false
+                }
+            }
+
+            override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                // 장시간 표시 중 WebView 렌더러가 종료되면 새로 만들어 다시 표시
+                if (view === webView) {
+                    webView = null
+                    handler.post {
+                        webContainer.removeView(view)
+                        view.destroy()
+                        createWebView()
+                        current?.let { openEntry(it, userAction = false) }
+                    }
+                }
+                return true
+            }
+        }
+        wv.webChromeClient = WebChromeClient()
+        webContainer.addView(wv, 0)
+        webView = wv
+    }
+
+    private fun openEntry(e: MenuEntry, userAction: Boolean) {
+        current = e
+        adapter.selectedFolder = e.folder
+        AppSettings.lastFolder = e.folder
+        val index = e.indexFile
+        if (index == null) {
+            webView?.visibility = View.INVISIBLE
+            showMessage("「${e.title}」\n\n${getString(R.string.no_index)}\n관리 웹에서 index.html 을 업로드하면 자동으로 표시됩니다.")
+            return
+        }
+        emptyView.visibility = View.GONE
+        webView?.visibility = View.VISIBLE
+        clearHistoryPending = true
+        webView?.loadUrl(ContentStore.webUrl(e.folder, index))
+        if (userAction) webView?.requestFocus()
+    }
+
+    private fun reloadCurrent() {
+        val c = current ?: return
+        if (c.indexFile == null) return
+        webView?.reload()
+    }
+
+    private fun showMessage(text: String) {
+        emptyText.text = text
+        emptyView.visibility = View.VISIBLE
+    }
+
+    private fun showGuide() {
+        webView?.visibility = View.INVISIBLE
+        val port = AppSettings.port
+        val addrs = NetInfo.addresses()
+        val urls = if (addrs.isEmpty()) "  (네트워크 연결 없음)" else addrs.joinToString("\n") {
+            "  http://${it.ip}:$port" + if (it.tailscale) "   ← Tailscale" else ""
+        }
+        val err = ServerService.lastError?.let { "\n\n⚠ $it" } ?: ""
+        showMessage(
+            "${getString(R.string.empty_title)}\n\n" +
+                "관리자 PC 브라우저에서 아래 주소로 접속해 폴더를 만들고\n" +
+                "index.html · 이미지 · JSON 을 업로드하세요.\n\n$urls\n\n" +
+                "관리자 비밀번호: 이 화면 왼쪽 아래 ⚙ 설정 → '관리자 비밀번호'\n\n" +
+                "자료 폴더: ${ContentStore.root(this).path}$err"
+        )
+    }
+
+    // ── 메뉴 ──────────────────────────────────────────────────────────────
+    private fun refreshMenu(force: Boolean = false) {
+        val app = applicationContext
+        if (io.isShutdown) return
+        io.execute {
+            val root = ContentStore.root(app)
+            val list = MenuScanner.scan(root)
+            val videos = MenuScanner.idleVideos(root)
+            val sig = MenuScanner.signature(list)
+            handler.post { applyMenu(list, sig, videos, force) }
+        }
+    }
+
+    private fun applyMenu(list: List<MenuEntry>, sig: String, videos: List<File>, force: Boolean) {
+        if (isDestroyed) return
+        idleVideos = videos
+        if (!force && sig == signature) return
+        signature = sig
+        entries = list
+        adapter.submit(list)
+        if (list.isEmpty()) {
+            current = null
+            adapter.selectedFolder = null
+            showGuide()
+            return
+        }
+        val cur = current
+        val keep = cur?.let { c -> list.firstOrNull { it.folder == c.folder } }
+        if (keep == null || cur.indexFile != keep.indexFile) {
+            val target = keep ?: list.firstOrNull { it.folder == AppSettings.lastFolder } ?: list.first()
+            openEntry(target, userAction = false)
+        } else {
+            current = keep
+            adapter.selectedFolder = keep.folder
+            if (keep.stamp != cur.stamp && AppSettings.autoRefresh) scheduleReload()
+        }
+        if (currentFocus == null) focusSelectedTile()
+    }
+
+    private fun focusSelectedTile() {
+        if (entries.isEmpty()) { settingsButton.requestFocus(); return }
+        val idx = entries.indexOfFirst { it.folder == current?.folder }.coerceAtLeast(0)
+        menuList.scrollToPosition(idx)
+        menuList.post { menuList.findViewHolderForAdapterPosition(idx)?.itemView?.requestFocus() }
+    }
+
+    private fun scheduleReload() {
+        handler.removeCallbacks(reloadRunnable)
+        handler.postDelayed(reloadRunnable, 800)
+    }
+
+    private fun onEvent(e: AppEvent) {
+        when (e) {
+            is AppEvent.Changed -> {
+                handler.removeCallbacks(menuRefreshRunnable)
+                handler.postDelayed(menuRefreshRunnable, 400)
+                val c = current
+                if (c != null && AppSettings.autoRefresh &&
+                    (e.path == c.folder || e.path.startsWith(c.folder + "/"))
+                ) scheduleReload()
+            }
+            AppEvent.Reload -> {
+                refreshMenu(force = true)
+                scheduleReload()
+            }
+            AppEvent.SettingsChanged -> {
+                applyKeepScreenOn()
+                if (idleOverlay.visibility == View.VISIBLE) {
+                    idleMessage.text = AppSettings.idleMessage
+                } else resetIdle()
+            }
+            is AppEvent.UpdateUploaded -> if (resumed) checkPendingUploadedApk()
+        }
+    }
+
+    // ── 전체 화면 / 뒤로 ──────────────────────────────────────────────────
+    private fun setFullscreen(on: Boolean) {
+        fullscreen = on
+        menuPanel.visibility = if (on) View.GONE else View.VISIBLE
+        fullscreenButton.setImageResource(if (on) R.drawable.ic_menu else R.drawable.ic_fullscreen)
+        fullscreenButton.contentDescription = getString(if (on) R.string.exit_fullscreen else R.string.fullscreen)
+        if (!on) focusSelectedTile()
+    }
+
+    private fun onBack() {
+        val wv = webView
+        when {
+            idleOverlay.visibility == View.VISIBLE -> hideIdle()
+            fullscreen -> setFullscreen(false)
+            wv != null && wv.canGoBack() -> wv.goBack()
+            !menuList.hasFocus() && entries.isNotEmpty() -> focusSelectedTile()
+            else -> {
+                val now = System.currentTimeMillis()
+                if (now - lastBack < 2000) finish()
+                else {
+                    lastBack = now
+                    Toast.makeText(this, R.string.press_back_again, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // ── 대기 화면 (루트 동영상 + 멘트) ────────────────────────────────────
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            if (idleOverlay.visibility == View.VISIBLE) {
+                swallowGesture = true
+                hideIdle()
+                return true
+            }
+            resetIdle()
+        }
+        if (swallowGesture) {
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) {
+                swallowGesture = false
+            }
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val volume = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
+            event.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE
+        if (!volume && idleOverlay.visibility == View.VISIBLE) {
+            if (event.action == KeyEvent.ACTION_UP) hideIdle()
+            return true
+        }
+        if (event.action == KeyEvent.ACTION_DOWN) resetIdle()
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        resetIdle()
+        return super.dispatchGenericMotionEvent(ev)
+    }
+
+    private fun resetIdle() {
+        handler.removeCallbacks(idleRunnable)
+        if (resumed && AppSettings.idleEnabled && idleOverlay.visibility != View.VISIBLE) {
+            handler.postDelayed(idleRunnable, AppSettings.idleSeconds * 1000L)
+        }
+    }
+
+    private fun showIdle() {
+        if (!resumed) return
+        handler.removeCallbacks(idleRunnable)
+        idleOverlay.visibility = View.VISIBLE
+        idleOverlay.bringToFront()
+        val msg = AppSettings.idleMessage.trim()
+        idleMessage.text = msg
+        msgVisible = true
+        idleMessage.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
+        handler.removeCallbacks(blinkRunnable)
+        val show = AppSettings.idleMsgShowSec
+        if (msg.isNotEmpty() && show > 0) handler.postDelayed(blinkRunnable, show * 1000L)
+        idleVideoIndex = 0
+        idleVideoErrors = 0
+        playIdleVideo()
+    }
+
+    private fun playIdleVideo() {
+        val vids = idleVideos
+        if (vids.isEmpty() || idleOverlay.visibility != View.VISIBLE) {
+            idleVideo.visibility = View.GONE
+            return
+        }
+        idleVideo.visibility = View.VISIBLE
+        val f = vids[idleVideoIndex % vids.size]
+        idleVideo.setOnPreparedListener { mp ->
+            mp.isLooping = vids.size == 1
+            val vol = if (AppSettings.prefs.getBoolean("idle_video_sound", false)) 1f else 0f
+            mp.setVolume(vol, vol)
+            idleVideo.start()
+        }
+        idleVideo.setOnCompletionListener {
+            idleVideoIndex++
+            playIdleVideo()
+        }
+        idleVideo.setOnErrorListener { _, _, _ ->
+            idleVideoErrors++
+            idleVideoIndex++
+            if (idleVideoErrors < vids.size * 2) handler.postDelayed({ playIdleVideo() }, 1000)
+            else idleVideo.visibility = View.GONE
+            true
+        }
+        idleVideo.setVideoPath(f.path)
+    }
+
+    private fun hideIdle() {
+        handler.removeCallbacks(blinkRunnable)
+        try { idleVideo.stopPlayback() } catch (_: Exception) {}
+        idleVideo.visibility = View.GONE
+        idleOverlay.visibility = View.GONE
+        resetIdle()
+        if (!fullscreen) focusSelectedTile()
+    }
+
+    // ── 설정 / 업데이트 ──────────────────────────────────────────────────
+    private fun openSettings() {
+        val pin = AppSettings.settingsPin
+        if (pin.isEmpty()) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.pin_title)
+            .setView(input)
+            .setPositiveButton(R.string.ok) { _, _ ->
+                if (input.text.toString() == pin) startActivity(Intent(this, SettingsActivity::class.java))
+                else Toast.makeText(this, R.string.pin_wrong, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun checkPendingUploadedApk() {
+        val app = applicationContext
+        if (io.isShutdown) return
+        io.execute {
+            val p = UpdateManager.pendingUploaded(app)
+            handler.post {
+                if (p != null && resumed && !isFinishing) {
+                    UpdateUi.promptInstall(this, p.first, p.second.versionName, "관리 웹에서 업로드된 새 버전입니다.")
+                }
+            }
+        }
+    }
+
+    private fun applyKeepScreenOn() {
+        if (AppSettings.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun hideSystemBars() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val c = WindowInsetsControllerCompat(window, window.decorView)
+        c.hide(WindowInsetsCompat.Type.systemBars())
+        c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        window.decorView.setBackgroundColor(Color.BLACK)
+    }
+
+    companion object {
+        const val EXTRA_PREVIEW_IDLE = "preview_idle"
+        private const val SCAN_MS = 15_000L
+    }
+}

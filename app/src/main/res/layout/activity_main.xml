@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal">
+
+        <!-- 왼쪽: 정사각형 아이콘 메뉴 -->
+        <LinearLayout
+            android:id="@+id/menuPanel"
+            android:layout_width="@dimen/menu_panel_width"
+            android:layout_height="match_parent"
+            android:background="@color/panel"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/titleText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="2"
+                android:paddingHorizontal="8dp"
+                android:paddingTop="14dp"
+                android:paddingBottom="6dp"
+                android:text="@string/app_name"
+                android:textColor="@color/text"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/menuList"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:clipToPadding="false"
+                android:descendantFocusability="afterDescendants"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="6dp"
+                android:scrollbars="none" />
+
+            <ImageButton
+                android:id="@+id/settingsButton"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginVertical="10dp"
+                android:background="@drawable/round_button_bg"
+                android:contentDescription="@string/settings"
+                android:focusable="true"
+                android:padding="12dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_settings" />
+        </LinearLayout>
+
+        <!-- 오른쪽: 대시보드(index.html) -->
+        <FrameLayout
+            android:id="@+id/contentPanel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1">
+
+            <!-- WebView 는 코드에서 생성 (렌더러 종료 시 재생성) -->
+            <FrameLayout
+                android:id="@+id/webContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <ScrollView
+                android:id="@+id/emptyView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@color/bg"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/emptyText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:lineSpacingExtra="6dp"
+                    android:padding="40dp"
+                    android:textColor="@color/text"
+                    android:textIsSelectable="false"
+                    android:textSize="20sp" />
+            </ScrollView>
+
+            <ImageButton
+                android:id="@+id/fullscreenButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="top|end"
+                android:layout_margin="10dp"
+                android:alpha="0.75"
+                android:background="@drawable/round_button_bg"
+                android:contentDescription="@string/fullscreen"
+                android:focusable="true"
+                android:padding="11dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_fullscreen" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- 일정 시간 무입력 시: 루트 동영상 + 멘트 오버레이 -->
+    <FrameLayout
+        android:id="@+id/idleOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <VideoView
+            android:id="@+id/idleVideo"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center" />
+
+        <TextView
+            android:id="@+id/idleMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="64dp"
+            android:background="#B3000000"
+            android:gravity="center"
+            android:paddingHorizontal="36dp"
+            android:paddingVertical="18dp"
+            android:textColor="#FFFFFFFF"
+            android:textSize="40sp"
+            android:textStyle="bold" />
+    </FrameLayout>
+</FrameLayout>
