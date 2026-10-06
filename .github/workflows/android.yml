@@ -184,9 +184,12 @@ jobs:
           if [[ -f "release-notes/v$VERSION.md" ]]; then
             cp "release-notes/v$VERSION.md" dist/notes.md
           else
-            PREV=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
-            RANGE=${PREV:+$PREV..HEAD}
-            git log --no-merges --pretty='- %s' ${RANGE:-HEAD~20..HEAD} 2>/dev/null > dist/notes.md || true
+            PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null || true)
+            if [[ -n "$PREV" ]]; then
+              git log --no-merges --pretty='- %s' "$PREV..HEAD" > dist/notes.md || true
+            else
+              git log --no-merges --pretty='- %s' -n 20 > dist/notes.md || true
+            fi
             [[ -s dist/notes.md ]] || echo "- v$VERSION" > dist/notes.md
           fi
 
