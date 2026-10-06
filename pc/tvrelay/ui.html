@@ -59,6 +59,29 @@
   .tile:hover { border-color:var(--accent); }
   .tile .ic { font-size:34px; }
   .loading { color:var(--dim); padding:30px; text-align:center; }
+  /* ── TV 화면 미리보기 (1920×1080 을 줄여서 그대로) ── */
+  #tvpane { width:46%; min-width:360px; border-left:1px solid var(--line); background:#d9dee4; display:flex; flex-direction:column; }
+  #tvpane.collapsed { display:none; }
+  .tvwrap { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:14px; overflow:hidden; }
+  .tvbox { position:relative; width:100%; aspect-ratio:16/9; background:#000; border:10px solid #111; border-radius:12px; overflow:hidden; box-shadow:0 6px 24px rgba(0,0,0,.25); }
+  .tvinner { position:absolute; left:0; top:0; width:1920px; height:1080px; transform-origin:0 0; display:flex; flex-direction:column; background:#eef1f4; }
+  .tvh { height:96px; flex:none; background:#1e2125; display:flex; align-items:center; padding:0 36px 0 18px; color:#fff; }
+  .tvh .mn { width:72px; height:72px; border-radius:50%; background:rgba(0,0,0,.5); color:#fff; font-size:38px; display:flex; align-items:center; justify-content:center; margin-right:16px; cursor:pointer; }
+  .tvh img { height:72px; }
+  .tvh .t { flex:1; margin-left:24px; font-size:42px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tvh .c { font-size:30px; color:#c9d1d9; }
+  .tvm { flex:1; display:flex; min-height:0; }
+  .tvs { width:186px; flex:none; background:#2b2f34; display:flex; flex-direction:column; overflow:hidden; }
+  .tvs.hide { display:none; }
+  .tvi { display:flex; flex-direction:column; align-items:center; padding:18px 9px; color:#d5dae0; font-size:22px; cursor:pointer; }
+  .tvi .b { width:96px; height:96px; border-radius:21px; background:#3f454d; display:flex; align-items:center; justify-content:center; color:#fff; font-size:44px; font-weight:800; overflow:hidden; }
+  .tvi .b img { width:100%; height:100%; object-fit:contain; padding:18px; box-sizing:border-box; }
+  .tvi.sel { background:#3a4047; box-shadow:inset 6px 0 #0bb5e8; } .tvi.sel .b { background:#0bb5e8; }
+  .tvi span { margin-top:9px; text-align:center; word-break:break-all; }
+  .tvset { margin-top:auto; border-top:1px solid #3c4147; padding:18px 0; text-align:center; color:#d5dae0; font-size:22px; }
+  .tvc { flex:1; position:relative; min-width:0; }
+  .tvc iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:#eef1f4; }
+  .tvc .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:34px; color:#6b7785; text-align:center; padding:60px; }
   #jobsBar { position:fixed; right:14px; bottom:14px; width:360px; max-height:40vh; overflow:auto; background:#fff; border:1px solid var(--line); border-radius:10px; box-shadow:0 4px 18px rgba(0,0,0,.12); font-size:13px; }
   #jobsBar .jh { padding:8px 12px; font-weight:800; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; }
   .job { padding:7px 12px; border-bottom:1px solid #f0f2f5; display:flex; gap:8px; justify-content:space-between; }
@@ -121,8 +144,20 @@
       <span class="path" id="pPath">자료</span>
       <span class="hint" id="pInfo"></span>
       <span id="pActions"></span>
+      <button class="icon" id="toggleTv" title="TV 화면 미리보기 숨기기/열기">📺</button>
     </div>
     <div class="pbody" id="pBody"></div>
+  </section>
+  <section id="tvpane">
+    <div class="phead">
+      <span class="path">TV 화면 미리보기</span>
+      <span class="hint" id="tvInfo"></span>
+      <button class="secondary" id="tvReload" title="미리보기 다시 받기">⟳</button>
+    </div>
+    <div class="tvwrap"><div class="tvbox" id="tvbox"><div class="tvinner" id="tvinner">
+      <div class="tvh"><div class="mn" id="tvMenuBtn">☰</div><img id="tvLogo" src="/static/logo.png" alt=""><div class="t" id="tvTitle"></div><div class="c" id="tvClock"></div></div>
+      <div class="tvm"><div class="tvs" id="tvSide"></div><div class="tvc" id="tvContent"></div></div>
+    </div></div></div>
   </section>
 </div>
 
@@ -257,7 +292,7 @@
         pill.textContent = (state.online ? 'TV 온라인' : 'TV 오프라인') + ` · ${ago} 전 · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}`;
       }
       renderTree(); fillSettings();
-      if (tab === 'explorer') renderPane(false);
+      if (tab === 'explorer') { renderPane(false); renderTv(false); }
     } catch (e) { $('#tvPill').className = 'pill off'; $('#tvPill').textContent = e.message; }
   }
   setInterval(() => { if (info?.configured && !document.hidden) loadState(); }, 20000);
@@ -292,7 +327,12 @@
     if (n.dataset.dir && p) open.add(p);
     select(p);
   });
-  function select(p) { sel = p; let q = parent(p); while (q) { open.add(q); q = parent(q); } renderTree(); renderPane(true); }
+  function select(p) {
+    sel = p; let q = parent(p); while (q) { open.add(q); q = parent(q); }
+    renderTree(); renderPane(true);
+    const top = p.split('/')[0];
+    if (top && menuItems().find(i => i.folder === top) && top !== tvFolder) { tvFolder = top; renderTv(true); }
+  }
 
   // 끌어다 놓기: 트리의 폴더 위 · 오른쪽 미리보기 영역(= 선택한 폴더)
   const targetDir = () => { const e = entry(sel); return !sel ? '' : e && !e.d ? parent(sel) : sel; };
@@ -340,26 +380,16 @@
     pb.dataset.for = sel;
     const seq = ++previewSeq;
     if (e.d) {
-      const index = kids(e.p).find(k => !k.d && ['index.html', 'index.htm'].includes(base(k.p).toLowerCase()));
-      if (index) {
-        // 대시보드 미리보기: 폴더의 파일을 받아 와서 TV 와 같은 상대 경로로 띄운다
-        const files = entries().filter(x => !x.d && x.p.startsWith(e.p + '/') && x.p.split('/').length - e.p.split('/').length <= 2);
-        if (!await ensure(files.map(f => f.p), seq)) return;
-        pb.innerHTML = `<iframe src="${prevUrl(index.p)}?t=${Date.now()}"></iframe>`;
-      } else {
-        pb.innerHTML = '<div class="tiles">' + kids(e.p).map(k => `<div class="tile" data-go="${esc(k.p)}"><div class="ic">${k.d ? '📁' : icon(k.p)}</div>${esc(base(k.p))}</div>`).join('') +
-          '</div>' + (kids(e.p).length ? '' : '<div class="loading">비어 있습니다. 파일을 여기로 끌어다 놓으세요.</div>');
-      }
+      pb.innerHTML = '<div class="tiles">' + kids(e.p).map(k => `<div class="tile" data-go="${esc(k.p)}"><div class="ic">${k.d ? '📁' : icon(k.p)}</div>${esc(base(k.p))}<div class="hint">${k.d ? '' : size(k.s)}</div></div>`).join('') +
+        '</div>' + (kids(e.p).length ? '' : '<div class="loading">비어 있습니다. 파일을 여기로 끌어다 놓으세요.</div>');
       return;
     }
     const x = ext(e.p);
     if (!IMG.includes(x) && !VID.includes(x) && !TXT.includes(x)) { pb.innerHTML = '<div class="loading">미리보기를 지원하지 않는 형식입니다. [다운로드]로 받으세요.</div>'; return; }
     if (e.s > 60 * 1048576) { pb.innerHTML = '<div class="loading">파일이 커서 미리보기를 생략합니다. [다운로드]로 받으세요.</div>'; return; }
-    const need = ['html', 'htm'].includes(x) ? entries().filter(f => !f.d && parent(f.p) === parent(e.p)).map(f => f.p) : [e.p];
-    if (!await ensure(need, seq)) return;
+    if (!await ensure([e.p], () => seq === previewSeq, (t) => pb.innerHTML = `<div class="loading">${esc(t)}</div>`)) return;
     if (IMG.includes(x)) pb.innerHTML = `<img src="${prevUrl(e.p)}?t=${Date.now()}">`;
     else if (VID.includes(x)) pb.innerHTML = `<video src="${prevUrl(e.p)}" controls autoplay muted loop></video>`;
-    else if (['html', 'htm'].includes(x)) pb.innerHTML = `<iframe src="${prevUrl(e.p)}?t=${Date.now()}"></iframe>`;
     else {
       let t = await (await fetch(prevUrl(e.p))).text();
       if (x === 'json') { try { t = JSON.stringify(JSON.parse(t), null, 2); } catch (_) {} }
@@ -368,22 +398,62 @@
   }
   pb.addEventListener('click', (e) => { const t = e.target.closest('[data-go]'); if (t) select(t.dataset.go); });
 
-  /** 미리보기 파일이 PC 에 없으면 TV 에서 받아 온다 (TV 확인 주기만큼 걸림) */
-  async function ensure(paths, seq) {
+  /** 미리보기 파일이 PC 에 없으면 TV 에서 받아 온다 (TV 확인 주기만큼 걸림). alive() 가 false 가 되면 그만 기다린다 */
+  async function ensure(paths, alive, say) {
     try {
       const r = await api('POST', '/api/preview', { paths });
       if (r.ready) return true;
-      pb.innerHTML = `<div class="loading">TV 에서 미리보기 파일 ${r.count}개를 받는 중… (보통 10~20초)</div>`;
-      for (let i = 0; i < 100; i++) {
+      say(`TV 에서 파일 ${r.count}개를 받는 중… (보통 10~20초)`);
+      const waiting = new Set(r.ids);
+      for (let i = 0; i < 100 && waiting.size; i++) {
         await new Promise(res => setTimeout(res, 3000));
-        if (seq !== previewSeq) return false;
-        const x = await api('GET', '/api/result?id=' + encodeURIComponent(r.id));
-        if (!x.pending) return seq === previewSeq;
+        if (!alive()) return false;
+        for (const id of [...waiting]) {
+          const x = await api('GET', '/api/result?id=' + encodeURIComponent(id));
+          if (!x.pending) waiting.delete(id);
+        }
       }
-      pb.innerHTML = '<div class="loading">TV 응답이 없습니다 (TV 가 꺼져 있거나 인터넷이 끊겼을 수 있습니다).</div>';
-      return false;
-    } catch (e) { pb.innerHTML = `<div class="loading">${esc(e.message)}</div>`; return false; }
+      if (waiting.size) { say('TV 응답이 없습니다 (TV 가 꺼져 있거나 인터넷이 끊겼을 수 있습니다).'); return false; }
+      return alive();
+    } catch (e) { say(e.message); return false; }
   }
+
+  // ── 오른쪽: TV 화면 미리보기 (상단 로고·제목·시계 + 왼쪽 아이콘 메뉴 + 대시보드) ──
+  let tvFolder = null, tvSeq = 0, tvSideOpen = true;
+  const menuItems = () => state?.menu?.items || [];
+  const tvInner = $('#tvinner'), tvBox = $('#tvbox');
+  new ResizeObserver(() => { tvInner.style.transform = `scale(${tvBox.clientWidth / 1920})`; }).observe(tvBox);
+  const tick = () => { const d = new Date(), z = (n) => String(n).padStart(2, '0'); $('#tvClock').textContent = `${d.getFullYear()}.${z(d.getMonth() + 1)}.${z(d.getDate())} (${'일월화수목금토'[d.getDay()]})  ${z(d.getHours())}:${z(d.getMinutes())}`; };
+  tick(); setInterval(tick, 10000);
+
+  async function renderTv(fresh) {
+    const items = menuItems();
+    if (!items.find(i => i.folder === tvFolder)) tvFolder = items[0]?.folder ?? null;
+    $('#tvTitle').textContent = state?.settings?.header_title || '대상 오산공장 Dashboard';
+    const content = $('#tvContent');
+    const side = (iconsReady) => items.map((it, n) => `<div class="tvi ${it.folder === tvFolder ? 'sel' : ''}" data-tvf="${esc(it.folder)}"><div class="b">${it.image && iconsReady ? `<img src="${prevUrl(it.image)}">` : esc((it.title || '?').slice(0, 1))}</div><span>${esc(it.title)}</span></div>`).join('') + '<div class="tvset">⚙<br>설정</div>';
+    $('#tvSide').innerHTML = side(false);
+    $('#tvInfo').textContent = tvFolder ? `메뉴 ${items.length}개 · ${tvFolder}` : '';
+    if (!fresh && content.dataset.for === tvFolder) { $('#tvSide').innerHTML = side(true); return; }
+    content.dataset.for = tvFolder ?? '';
+    const seq = ++tvSeq;
+    const cur = items.find(i => i.folder === tvFolder);
+    const logo = entry('logo.png');
+    const need = items.filter(i => i.image).map(i => i.image).concat(logo ? ['logo.png'] : []);
+    if (cur && cur.index) need.push(...entries().filter(x => !x.d && x.p.startsWith(cur.folder + '/') && x.p.split('/').length <= 3).map(x => x.p));
+    if (!items.length) { content.innerHTML = '<div class="empty">표시할 자료가 없습니다<br><br>왼쪽 폴더 창에 폴더를 만들고 index.html 을 올리세요</div>'; return; }
+    const say = (t) => { if (seq === tvSeq) content.innerHTML = `<div class="empty">${esc(t)}</div>`; };
+    if (!await ensure([...new Set(need)], () => seq === tvSeq, say)) return;
+    $('#tvSide').innerHTML = side(true);
+    $('#tvLogo').src = logo ? prevUrl('logo.png') + '?t=' + logo.t : '/static/logo.png';
+    content.innerHTML = cur.index ? `<iframe src="${prevUrl(cur.folder + '/' + cur.index)}?t=${Date.now()}"></iframe>`
+      : `<div class="empty">「${esc(cur.title)}」<br><br>이 폴더에 index.html 이 없습니다</div>`;
+  }
+  $('#tvSide').addEventListener('click', (e) => { const t = e.target.closest('[data-tvf]'); if (!t) return; tvFolder = t.dataset.tvf; select(tvFolder); });
+  $('#tvMenuBtn').onclick = () => { tvSideOpen = !tvSideOpen; $('#tvSide').classList.toggle('hide', !tvSideOpen); };
+  $('#tvReload').onclick = () => renderTv(true);
+  $('#toggleTv').onclick = () => { $('#tvpane').classList.toggle('collapsed'); try { localStorage.setItem('tvHidden', $('#tvpane').classList.contains('collapsed') ? '1' : ''); } catch (_) {} };
+  try { if (localStorage.getItem('tvHidden')) $('#tvpane').classList.add('collapsed'); } catch (_) {}
 
   // 오른쪽 위 동작 버튼
   $('#pActions').addEventListener('click', (e) => {
@@ -426,7 +496,7 @@
         j.note = r.ok ? '완료' : '실패: ' + fails.map(x => `${x.path || x.op} (${x.error})`).join(', ');
         (r.results || []).filter(x => x.file).forEach(x => { const a = document.createElement('a'); a.href = x.file; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); j.note += ' · 저장: ' + x.saved; });
         (r.results || []).filter(x => x.message).forEach(x => j.note += ' · ' + x.message);
-        renderJobs(); setTimeout(() => { pb.dataset.for = '\u0000'; loadState(); }, 1500);
+        renderJobs(); setTimeout(async () => { pb.dataset.for = '\u0000'; await loadState(); renderTv(true); }, 1500);
         return;
       } catch (e) { j.note = e.message; renderJobs(); }
     }

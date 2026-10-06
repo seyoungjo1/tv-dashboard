@@ -57,7 +57,9 @@ class Api:
         self.stage.mkdir(parents=True, exist_ok=True)
         self.downloads.mkdir(parents=True, exist_ok=True)
         self.preview.mkdir(parents=True, exist_ok=True)
-        self.preview_jobs: set[str] = set()
+        self.preview_jobs: dict[str, list[str]] = {}     # 미리보기 작업 id → 받는 경로들
+        self.preview_done: set[str] = set()
+        self.pending_paths: dict[str, str] = {}           # 받는 중인 경로 → 작업 id (같은 파일을 두 번 받지 않게)
         self.tree: dict[str, dict[str, Any]] = {}
         self._relay: Relay | None = None
         self.lock = threading.Lock()
@@ -138,13 +140,20 @@ class Api:
             raise ValueError("미리보기로 받기에는 너무 큽니다 (%.0f MB). 필요한 파일만 '다운로드' 하세요." % (total / 1048576))
         if not need:
             return {"ready": True}
-        job = Job()
-        for p in need:
-            job.op("get", path=p)
-        id_ = self.relay().submit(job)
-        self.preview_jobs.add(id_)
-        echo("미리보기용으로 TV 에서 %d개 받는 중… (%s)" % (len(need), id_))
-        return {"id": id_, "count": len(need)}
+        with self.lock:
+            ids = {self.pending_paths[p] for p in need if p in self.pending_paths}
+            new = [p for p in need if p not in self.pending_paths]
+            if new:
+                job = Job()
+                for p in new:
+                    job.op("get", path=p)
+                id_ = self.relay().submit(job)
+                self.preview_jobs[id_] = new
+                for p in new:
+                    self.pending_paths[p] = id_
+                ids.add(id_)
+                echo("미리보기용으로 TV 에서 %d개 받는 중… (%s)" % (len(new), id_))
+        return {"ids": sorted(ids), "count": len(need)}
 
     def put_stage(self, data: bytes) -> dict[str, Any]:
         sid = uuid.uuid4().hex
@@ -189,15 +198,21 @@ class Api:
         return {"id": id_}
 
     def result(self, id_: str) -> dict[str, Any]:
+        if id_ in self.preview_done:
+            return {"ok": True, "results": [], "cached": True}
         r = self.relay().result(id_)
         if r is None:
             return {"pending": True}
         if id_ in self.preview_jobs:
-            self.preview_jobs.discard(id_)
             for item in r.get("results", []):
                 if "data" in item:
                     p = str(item.get("path"))
                     self._cache_put(p, item.pop("data"), t=(self.tree.get(p) or {}).get("t"))
+            with self.lock:
+                for p in self.preview_jobs.pop(id_, []):
+                    if self.pending_paths.get(p) == id_:
+                        self.pending_paths.pop(p, None)
+                self.preview_done.add(id_)
             return r
         for item in r.get("results", []):
             if "data" in item:
@@ -282,6 +297,12 @@ def make_handler(api: Api):
                 return self._send(403, {"error": "forbidden"})
             if method == "GET" and u.path in ("/", "/index.html"):
                 return self._send(200, (HERE / "ui.html").read_bytes(), "text/html; charset=utf-8")
+            if method == "GET" and u.path.startswith("/static/"):
+                name = Path(u.path).name
+                f = HERE / "static" / name
+                if not f.is_file():
+                    return self._send(404, {"error": "없음"})
+                return self._send(200, f.read_bytes(), MIME.get(f.suffix.lower().lstrip("."), "application/octet-stream"))
             if method == "GET" and u.path.startswith("/preview/"):
                 from urllib.parse import unquote
                 rel = unquote(u.path[len("/preview/"):])
