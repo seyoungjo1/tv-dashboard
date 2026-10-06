@@ -4,6 +4,7 @@
   python -m tvrelay update [--check]         프로그램 업데이트
   python -m tvrelay setup --token T [--repo R] [--tv NAME]   처음 설정(키 자동 생성)
   python -m tvrelay put LOCAL REMOTE [--wait 120]            파일 하나 올리기 (tvupload.bat · 작업 스케줄러용)
+  python -m tvrelay sync PC폴더 --to TV폴더   폴더 스캔 → 바뀐 파일만 올리기 (자동 업로드 .bat 용)
   python -m tvrelay status                   TV 상태
   python -m tvrelay pair K7QM-4PXD           TV 화면의 연결 코드로 연결
 """
@@ -118,6 +119,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("local")
     s.add_argument("remote")
     s.add_argument("--wait", type=int, default=120, help="TV 결과를 기다릴 초 (0 = 기다리지 않음)")
+    s = sub.add_parser("sync", help="PC 폴더를 스캔해 TV 폴더로 바뀐 파일만 올리기")
+    s.add_argument("src")
+    s.add_argument("--to", default="", help="TV 폴더 (예: 원가)")
+    s.add_argument("--to-hex", default="", help=argparse.SUPPRESS)        # bat 은 ASCII 만 → 한글 폴더 이름을 16진수로
+    s.add_argument("--wait", type=int, default=180)
+    s.add_argument("--force", action="store_true", help="같은 파일도 다시 보내기")
     sub.add_parser("status", help="TV 상태")
     s = sub.add_parser("pair", help="TV 화면의 연결 코드로 TV 연결 (TV 에서는 설정할 것 없음)")
     s.add_argument("code")
@@ -147,6 +154,11 @@ def main(argv: list[str] | None = None) -> int:
         for item in res.get("results", []):
             print(("성공" if item.get("ok") else "실패") + ": %s %s" % (item.get("path"), item.get("error", "")))
         return 0 if res.get("ok") else 1
+    if a.cmd == "sync":
+        from . import syncbat
+        if not (a.to or a.to_hex):
+            raise SystemExit("--to 로 TV 폴더를 정하세요")
+        return syncbat.main_sync(ROOT, _relay(), a.src, a.to, a.to_hex, a.wait, a.force)
     if a.cmd == "pair":
         from .relay import pair, pair_done
         import time as _t

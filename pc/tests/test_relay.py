@@ -100,16 +100,97 @@ class ToolTest(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         cfg = config.setup("github_pat_main", "o/relay", "osan", tmp)
         g = grants.new_grant("원가")
-        html = grants.bake(cfg, g)
+        html = grants.bake(cfg, g, "pw1234")
         self.assertNotIn("/*__CONFIG__*/null", html)
-        self.assertIn(g["key"], html)
+        self.assertNotIn(g["key"], html)                   # 폴더 열쇠·토큰도 비밀번호로 잠겨 있다
+        self.assertNotIn("github_pat_main", html)
         self.assertIn('"folder": "원가"', html)
         self.assertNotIn(cfg.key, html)                    # 관리자 키는 절대 들어가지 않는다
         self.assertIn('"maxUpload": %d' % (30 * 1024 * 1024), html)
         self.assertEqual(grants.grant_op(g)["types"], ["png", "js", "json", "html", "htm"])
+        conf = json.loads(html.split("const CFG = ", 1)[1].split(";\n", 1)[0])
+        self.assertEqual(grants.unlock(conf["lock"], "pw1234", g["gid"]), {"key": g["key"], "token": "github_pat_main"})
+        with self.assertRaises(CryptoError):
+            grants.unlock(conf["lock"], "wrong", g["gid"])
+        with self.assertRaises(ValueError):
+            grants.bake(cfg, g, "123")                     # 너무 짧은 비밀번호
         cfg2 = config.setup("", "", "", tmp, tool_token="github_pat_tool")
-        self.assertIn("github_pat_tool", grants.bake(cfg2, g, cfg2.tool_token))
+        conf2 = json.loads(grants.bake(cfg2, g, "pw1234", cfg2.tool_token).split("const CFG = ", 1)[1].split(";\n", 1)[0])
+        self.assertEqual(grants.unlock(conf2["lock"], "pw1234", g["gid"])["token"], "github_pat_tool")
         self.assertNotIn("toolToken", json.dumps(cfg2.to_json(for_tv=True)))
+
+    def test_send_skips_unchanged(self):
+        from tvrelay import ui
+        tmp = Path(tempfile.mkdtemp())
+        api = ui.Api(tmp)
+        data = b'{"v":1}'
+        api.tree = {"a/data.json": {"p": "a/data.json", "d": False, "s": len(data), "h": hashlib.sha256(data).hexdigest()},
+                    "a/old.json": {"p": "a/old.json", "d": False, "s": len(data), "h": "00" * 32},
+                    "a/noh.json": {"p": "a/noh.json", "d": False, "s": len(data)}}
+        self.assertTrue(api.unchanged("a/data.json", data, {}))
+        self.assertFalse(api.unchanged("a/old.json", data, {}))            # TV 버전이 다르면 보낸다
+        self.assertFalse(api.unchanged("a/new.json", data, {}))            # TV 에 없으면 보낸다
+        self.assertFalse(api.unchanged("a/data.json", b'{"v":2}', {}))
+        v = {"a/noh.json": {"h": hashlib.sha256(data).hexdigest(), "s": len(data)}}
+        self.assertTrue(api.unchanged("a/noh.json", data, v))              # TV 가 버전을 모르면 내 기록으로
+        api.state = lambda: None
+        sid = api.put_stage(data)["id"]
+        r = api.send({"ops": [{"op": "put", "path": "a/data.json", "stage": sid}]})
+        self.assertIsNone(r["id"])
+        self.assertEqual(r["skipped"], ["a/data.json"])
+
+
+class SyncTest(unittest.TestCase):
+    def test_bat_is_ascii_and_movable(self):
+        from tvrelay import syncbat
+        name, data = syncbat.make(Path(tempfile.mkdtemp()), "원가")
+        self.assertEqual(name, "원가_자동업로드.bat")
+        text = data.decode("ascii")                        # bat 은 ASCII 만
+        self.assertIn('set "SRC=%~dp0."', text)            # 어느 폴더로 옮겨도 그 폴더를 스캔
+        self.assertIn("원가".encode().hex(), text)
+        self.assertIn("\r\n", text)
+        self.assertNotIn("token", text.lower().replace("tokens", ""))
+
+    def test_sync_sends_only_changed(self):
+        from tvrelay import syncbat
+        fake = FakeGitHub()
+        try:
+            root = Path(tempfile.mkdtemp())
+            cfg = config.setup("tok", "o/relay", "osan", root)
+            gh = GitHub(cfg.repo, cfg.token, base=fake.base)
+            relay, box = Relay(cfg, gh), Box(cfg.key)
+            src = Path(tempfile.mkdtemp())
+            (src / "data.json").write_bytes(b'{"v":1}')
+            (src / "sub").mkdir()
+            (src / "sub" / "a.png").write_bytes(b"png")
+            (src / "원가_자동업로드.bat").write_bytes(b"@echo off")
+            (src / "desktop.ini").write_bytes(b"x")
+            store: dict[str, bytes] = {}
+
+            def publish():
+                tree = [{"p": p, "d": False, "s": len(d), "t": 1, "h": hashlib.sha256(d).hexdigest()} for p, d in store.items()]
+                m = box.seal(json.dumps({"v": 1, "time": 0, "tree": tree}).encode(), aad(cfg.tv, "state", "state", "m"))
+                gh.delete_branch("relay/osan/state")
+                gh.create_branch("relay/osan/state", gh.create_orphan_commit({"m": m}, "state"))
+
+            def sync():
+                publish()
+                out: list[str] = []
+                rc = syncbat.run(root, relay, src, "원가", wait=0, echo=out.append)
+                fake_tv_process(gh, box, cfg.tv, store)
+                return rc, out
+
+            rc, out = sync()
+            self.assertEqual(rc, 0)
+            self.assertEqual(sorted(store), ["원가/data.json", "원가/sub/a.png"])   # bat·desktop.ini 는 올리지 않음
+            rc, out = sync()
+            self.assertIn("바뀐 파일이 없습니다", out[-1])
+            (src / "data.json").write_bytes(b'{"v":2}')
+            rc, out = sync()
+            self.assertEqual([x for x in out if "올림" in x], ["  올림: data.json"])
+            self.assertEqual(store["원가/data.json"], b'{"v":2}')
+        finally:
+            fake.close()
 
 
 class PairTest(unittest.TestCase):

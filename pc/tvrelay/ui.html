@@ -18,6 +18,8 @@
   nav button.active { color:#fff; border-bottom-color:var(--accent); }
   button { border:0; border-radius:7px; padding:7px 12px; background:var(--accent); color:#fff; cursor:pointer; font-size:13px; font-family:inherit; font-weight:700; }
   button.secondary { background:#e6ebf1; color:var(--text); } button.danger { background:var(--danger); }
+  a.btn { display:inline-block; border-radius:7px; padding:7px 12px; font-size:13px; font-weight:700; text-decoration:none; background:var(--accent); color:#fff; }
+  a.btn.secondary { background:#e6ebf1; color:var(--text); }
   button.icon { background:transparent; color:inherit; padding:4px 8px; font-size:18px; }
   button:disabled { opacity:.5; cursor:default; }
   input[type=text], input[type=password], input[type=number], input[type=url] { padding:8px 10px; border:1px solid var(--line); border-radius:7px; font-size:14px; font-family:inherit; width:100%; }
@@ -87,6 +89,13 @@
   #jobsBar .jh { padding:8px 12px; font-weight:800; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; }
   .job { padding:7px 12px; border-bottom:1px solid #f0f2f5; display:flex; gap:8px; justify-content:space-between; }
   .st.wait { color:#b07800; } .st.ok { color:var(--ok); } .st.bad { color:var(--danger); }
+  #pwModal { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:50; }
+  #pwModal.hidden { display:none; }
+  #pwModal .box { background:#fff; border-radius:12px; padding:22px 24px; width:min(380px, calc(100vw - 32px)); box-shadow:0 10px 40px rgba(0,0,0,.3); }
+  #pwModal h3 { margin:0 0 6px; font-size:17px; }
+  #pwModal p { margin:0 0 14px; font-size:13px; color:#666; line-height:1.5; }
+  #pwModal input { width:100%; box-sizing:border-box; margin-bottom:8px; }
+  #pwModal .err { color:var(--danger); font-size:13px; min-height:18px; }
 </style>
 </head>
 <body>
@@ -216,6 +225,14 @@
   </div>
 </div>
 
+<div id="pwModal" class="hidden"><form class="box" id="pwForm">
+  <h3 id="pwTitle">업로드 비밀번호 정하기</h3>
+  <p>직원이 이 HTML 로 올릴 때 입력할 비밀번호입니다. 비밀번호가 없으면 HTML 을 가져가도 올릴 수 없습니다.<br>HTML 과 비밀번호는 따로 전달하세요.</p>
+  <input type="password" id="pw1" placeholder="비밀번호 (4자 이상)" autocomplete="new-password">
+  <input type="password" id="pw2" placeholder="비밀번호 확인 (한 번 더)" autocomplete="new-password">
+  <div class="err" id="pwErr"></div>
+  <div style="text-align:right;margin-top:8px"><button type="button" class="secondary" id="pwCancel">취소</button> <button type="submit">HTML 내려받기</button></div>
+</form></div>
 <div id="jobsBar" class="hidden"><div class="jh"><span>진행 중인 작업</span><button class="icon" id="jobsClose" style="font-size:14px">✕</button></div><div id="jobsMini"></div></div>
 
 <script>
@@ -326,15 +343,41 @@
          <button class="danger" data-gt="revoke" data-f="${esc(g.folder)}">폐기</button></td></tr>`).join('') + '</table>' : '발급된 도구가 없습니다.';
     } catch (_) {}
   }
-  function downloadTool(folder) {
-    const a = document.createElement('a'); a.href = '/api/tool?folder=' + encodeURIComponent(folder); a.download = '';
-    document.body.appendChild(a); a.click(); a.remove();
+  // 업로드 비밀번호 2번 입력 → 그 비밀번호로 잠근 HTML 을 내려받는다
+  function askPassword(folder) {
+    return new Promise((resolve) => {
+      const m = $('#pwModal'); $('#pwTitle').textContent = `'${folder}' 업로드 비밀번호 정하기`;
+      $('#pw1').value = ''; $('#pw2').value = ''; $('#pwErr').textContent = '';
+      m.classList.remove('hidden'); setTimeout(() => $('#pw1').focus(), 0);
+      const done = (v) => { m.classList.add('hidden'); $('#pwForm').onsubmit = null; $('#pwCancel').onclick = null; resolve(v); };
+      $('#pwCancel').onclick = () => done(null);
+      $('#pwForm').onsubmit = (e) => {
+        e.preventDefault();
+        const a = $('#pw1').value, b = $('#pw2').value;
+        if (a.length < 4) { $('#pwErr').textContent = '4자 이상으로 정하세요.'; return; }
+        if (a !== b) { $('#pwErr').textContent = '두 비밀번호가 서로 다릅니다. 다시 입력하세요.'; $('#pw2').value = ''; $('#pw2').focus(); return; }
+        done(a);
+      };
+    });
+  }
+  async function downloadTool(folder, pw) {
+    try {
+      const r = await fetch('/api/tool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, password: pw, password2: pw }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
+      const cd = r.headers.get('Content-Disposition') || '';
+      const name = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || folder + '_업로드.html');
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a'); a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { alert('내려받지 못했습니다: ' + e.message); }
   }
   async function getTool(folder, renew) {
     try {
       if (renew && !confirm(`'${folder}' 업로드 도구를 새로 발급할까요?\n지금 나눠 준 HTML 은 더 이상 동작하지 않습니다.`)) return;
+      const pw = await askPassword(folder);
+      if (pw === null) return;
       const r = await api('POST', '/api/grant', { folder, renew: !!renew });
-      if (r.ready) { downloadTool(folder); return; }
+      if (r.ready) { downloadTool(folder, pw); return; }
       jobs.unshift({ id: r.id, desc: `업로드 도구 ${renew ? '새로 발급' : '등록'}: ${folder}`, st: 'wait', note: 'TV 가 등록하기를 기다리는 중… (보통 10~20초)' });
       renderJobs();
       for (let i = 0; i < 100; i++) {
@@ -344,7 +387,7 @@
         const j = jobs.find(q => q.id === r.id);
         j.st = x.grantOk ? 'ok' : 'bad'; j.note = x.grantOk ? '등록 완료 — HTML 을 내려받았습니다' : '등록 실패: ' + ((x.results || []).find(q => !q.ok)?.error || '');
         renderJobs(); await loadGrants(); renderTree();
-        if (x.grantOk) downloadTool(folder);
+        if (x.grantOk) downloadTool(folder, pw);
         return;
       }
     } catch (e) { alert(e.message); }
@@ -442,7 +485,8 @@
     $('#pInfo').textContent = e.d ? `폴더 · 항목 ${kids(e.p).length}개` : `${size(e.s)} · ${new Date(e.t).toLocaleString('ko-KR')}`;
     $('#pActions').innerHTML = e.d
       ? (sel ? `<button data-gt="get" data-f="${esc(sel)}" title="이 폴더에만 올릴 수 있는 직원용 HTML">업로드 도구 받기</button> ` +
-               (grantMap[sel] ? `<button class="secondary" data-gt="renew" data-f="${esc(sel)}">새로 발급</button> ` : '') : '') +
+               (grantMap[sel] ? `<button class="secondary" data-gt="renew" data-f="${esc(sel)}">새로 발급</button> ` : '') +
+               `<a class="btn secondary" href="/api/syncbat?folder=${encodeURIComponent(sel)}" download title="PC 의 아무 폴더에 넣고 실행하면 그 폴더의 파일을 이 TV 폴더로 올립니다 (바뀐 파일만)">자동 업로드 .bat 받기</a> ` : '') +
         `<button class="secondary" data-a="sample">예제 대시보드 만들기</button> <button class="secondary" data-a="reload">TV 새로고침</button>` + (sel ? ` <button class="secondary" data-a="rename">이름 변경</button> <button class="danger" data-a="delete">삭제</button>` : '')
       : `<button class="secondary" data-a="download">다운로드</button> <button class="secondary" data-a="replace">교체</button> <button class="secondary" data-a="rename">이름 변경</button> <button class="danger" data-a="delete">삭제</button>`;
     if (!fresh && pb.dataset.for === sel) return;      // 목록만 갱신될 때는 미리보기를 다시 받지 않는다
@@ -549,7 +593,12 @@
   async function send(ops, desc) {
     try {
       const r = await api('POST', '/api/send', { ops });
-      jobs.unshift({ id: r.id, desc, st: 'wait', note: 'TV 가 가져가기를 기다리는 중…' });
+      const sk = (r.skipped || []).length;
+      if (!r.id) {   // 모두 TV 와 같은 버전 → 보낼 것이 없음
+        jobs.unshift({ id: 'skip-' + Date.now(), desc, st: 'ok', note: `바뀐 파일이 없습니다 — ${sk}개 모두 TV 와 같은 버전이라 보내지 않았습니다` });
+        renderJobs(); return null;
+      }
+      jobs.unshift({ id: r.id, desc: desc + (sk ? ` (바뀌지 않은 ${sk}개 건너뜀)` : ''), st: 'wait', note: 'TV 가 가져가기를 기다리는 중…' });
       renderJobs(); poll(r.id); return r.id;
     } catch (e) { alert(e.message); }
   }

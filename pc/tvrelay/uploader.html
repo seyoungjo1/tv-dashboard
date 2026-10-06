@@ -32,6 +32,8 @@
   .msg.err { background:#fde8e8; color:#8c1d1d; } .msg.ok { background:#e5f6ec; color:#14663d; } .msg.wait { background:#fff4dc; color:#7a5300; }
   .hint { color:var(--dim); font-size:13px; }
   .hidden { display:none; }
+  .pw { border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:15px; font-family:inherit; width:190px; }
+  .pw.bad { border-color:var(--danger); }
 </style>
 </head>
 <body>
@@ -51,6 +53,7 @@
       <div class="bar"><div id="prog"></div></div>
       <span class="hint" id="total"></span>
       <button class="secondary" id="clear">비우기</button>
+      <input type="password" class="pw" id="pw" placeholder="업로드 비밀번호" autocomplete="current-password">
       <button id="send" disabled>TV 로 올리기</button>
     </div>
     <div id="msg"></div>
@@ -58,7 +61,7 @@
   <div class="card hint">
     · 같은 이름의 파일은 새 파일로 바뀝니다(덮어쓰기). 다른 폴더나 다른 형식은 올라가지 않습니다.<br>
     · TV 가 10~20초 안에 받아 반영합니다. 결과가 이 화면에 표시될 때까지 창을 닫지 마세요.<br>
-    · 이 파일에는 이 폴더 전용 열쇠가 들어 있습니다. 다른 사람에게 함부로 보내지 마세요.
+    · 올릴 때 관리자에게 받은 <b>업로드 비밀번호</b>를 입력하세요. 열쇠는 비밀번호로 잠겨 있어 비밀번호 없이는 올릴 수 없습니다.
   </div>
 </main>
 <script>
@@ -68,6 +71,7 @@ const CFG = /*__CONFIG__*/null;
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const size = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
   const msg = (t, k) => $('#msg').innerHTML = t ? `<div class="msg ${k}">${esc(t)}</div>` : '';
+  if (CFG && !CFG.lock) { document.body.innerHTML = '<p style="padding:30px">예전 도구입니다. 관리자에게 새 업로드 도구를 받으세요.</p>'; return; }
   if (!CFG) { document.body.innerHTML = '<p style="padding:30px">관리자 PC 프로그램의 [업로드 도구 받기]로 만든 파일이 아닙니다.</p>'; return; }
   document.title = CFG.title + ' 업로드';
   $('#h1').textContent = `${CFG.title} 폴더 업로드`;
@@ -102,6 +106,7 @@ const CFG = /*__CONFIG__*/null;
   }
   $('#list').onclick = (e) => { const i = e.target.dataset.x; if (i !== undefined) { e.preventDefault(); files.splice(+i, 1); render(); } };
   $('#clear').onclick = () => { files = []; render(); };
+  $('#pw').onkeydown = (e) => { $('#pw').classList.remove('bad'); if (e.key === 'Enter' && !$('#send').disabled) $('#send').click(); };
   const drop = $('#drop');
   drop.onclick = () => { $('#pick').value = ''; $('#pick').click(); };
   $('#pick').onchange = (e) => add([...e.target.files].map(f => ({ rel: f.name, file: f })));
@@ -124,8 +129,22 @@ const CFG = /*__CONFIG__*/null;
   const b64urlToBytes = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
   const toB64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
   const enc = new TextEncoder(), dec = new TextDecoder();
-  let keyP = null;
-  const key = () => keyP || (keyP = crypto.subtle.importKey('raw', b64urlToBytes(CFG.key), 'AES-GCM', false, ['encrypt', 'decrypt']));
+  // ── 업로드 비밀번호로 열쇠·토큰 풀기 (PBKDF2-SHA256 → AES-256-GCM, 관리자 PC 의 grants.lock 과 같은 방식) ──
+  let SECRET = null, keyP = null;
+  const fromB64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  async function unlock(pw) {
+    const L = CFG.lock;
+    const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']);
+    const k = await crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(L.salt), iterations: L.iter },
+                                            base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    const box = fromB64(L.data);
+    if (dec.decode(box.subarray(0, 4)) !== 'TVR1') throw new Error('도구 파일이 손상되었습니다');
+    try {
+      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: box.subarray(4, 16), additionalData: enc.encode(`tvtool/${CFG.gid}/lock`), tagLength: 128 }, k, box.subarray(16));
+      return JSON.parse(dec.decode(plain));
+    } catch (_) { throw new Error('업로드 비밀번호가 틀렸습니다.'); }
+  }
+  const key = () => keyP || (keyP = crypto.subtle.importKey('raw', b64urlToBytes(SECRET.key), 'AES-GCM', false, ['encrypt', 'decrypt']));
   const aad = (kind, id, name) => enc.encode(`${CFG.tv}/${kind}/${id}/${name}`);
   async function seal(plain, ad) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -143,7 +162,7 @@ const CFG = /*__CONFIG__*/null;
   // ── GitHub (우체통 역할만) ──
   async function gh(method, path, body, raw) {
     const r = await fetch(`${CFG.api}/repos/${CFG.repo}/${path}`, {
-      method, headers: { 'Authorization': 'Bearer ' + CFG.token, 'Accept': raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json',
+      method, headers: { 'Authorization': 'Bearer ' + SECRET.token, 'Accept': raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json',
                          'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
     if (r.status === 404 && method === 'GET') return null;
@@ -161,6 +180,13 @@ const CFG = /*__CONFIG__*/null;
     const btn = $('#send'); btn.disabled = true; $('#clear').disabled = true;
     const prog = (p) => $('#prog').style.width = Math.round(p * 100) + '%';
     try {
+      if (!SECRET) {
+        const pw = $('#pw').value;
+        if (!pw) { $('#pw').classList.add('bad'); $('#pw').focus(); throw new Error('업로드 비밀번호를 입력하세요.'); }
+        msg('비밀번호 확인 중…', 'wait');
+        try { SECRET = await unlock(pw); } catch (e) { $('#pw').classList.add('bad'); $('#pw').select(); throw e; }
+        $('#pw').classList.remove('bad'); $('#pw').value = ''; $('#pw').placeholder = '비밀번호 확인됨 ✓'; $('#pw').disabled = true;
+      }
       const id = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('')}`;
       const kind = `up/${CFG.gid}`;
       const tree = [], ops = [];
@@ -205,7 +231,7 @@ const CFG = /*__CONFIG__*/null;
       }
       msg('TV 응답이 없습니다. TV 가 꺼져 있거나 인터넷이 끊겼을 수 있습니다. (보낸 파일은 TV 가 켜지면 반영됩니다)', 'err');
     } catch (e) {
-      msg('올리지 못했습니다: ' + e.message, 'err');
+      msg(/비밀번호/.test(e.message) ? e.message : '올리지 못했습니다: ' + e.message, 'err');
     } finally {
       btn.disabled = !files.length; $('#clear').disabled = false;
     }

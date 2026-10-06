@@ -51,23 +51,26 @@ class FileOps(private val ctx: Context) {
         checkPut(path, overwrite, length)
         val tmp = newTmp()
         try {
-            receive(input, length, tmp)
-            return commitTmp(tmp, path, overwrite, null)
+            val sha = receive(input, length, tmp)
+            return commitTmp(tmp, path, overwrite, null, sha)
         } finally {
             if (tmp.exists()) tmp.delete()
         }
     }
 
     /** 이미 다 받은 임시 파일을 path 로 원자적으로 옮긴다 (sha256 이 있으면 먼저 검증) */
-    fun commitTmp(tmp: File, path: String?, overwrite: Boolean = true, sha256: String? = null): String {
+    fun commitTmp(tmp: File, path: String?, overwrite: Boolean = true, sha256: String? = null, known: String? = null): String {
         val rel = checkPut(path, overwrite, 0)
-        if (sha256 != null && !sha256(tmp).equals(sha256, ignoreCase = true)) {
+        val actual = known ?: sha256(tmp)
+        if (sha256 != null && !actual.equals(sha256, ignoreCase = true)) {
             throw OpError(400, "파일 검증(SHA-256)에 실패했습니다: $rel")
         }
         val target = guard().resolve(rel)
         val parent = target.parentFile!!
         if (!parent.exists() && !parent.mkdirs()) throw OpError(500, "폴더를 만들 수 없습니다.")
         atomicReplace(tmp, target)
+        HashCache.record(ctx, target, actual)
+        HashCache.flush(ctx)
         ChangeBus.post(AppEvent.Changed(rel))
         return rel
     }
@@ -136,25 +139,30 @@ class FileOps(private val ctx: Context) {
         return JSONObject().put("path", rel).put("entries", arr)
     }
 
-    /** 자료 폴더 전체 목록 (원격 PC 화면용): [{p:경로, d:폴더여부, s:크기, t:수정시각}] */
+    /** 자료 폴더 전체 목록 (원격 PC 화면용): [{p:경로, d:폴더여부, s:크기, t:수정시각, h:버전(SHA-256)}] */
     fun tree(limit: Int = 20000): JSONArray {
         val g = guard()
         val root = g.root.canonicalFile
         val out = JSONArray()
+        val seen = HashSet<String>()
         fun walk(dir: File, prefix: String) {
             val kids = (dir.listFiles() ?: return).filter { !it.name.startsWith(".") }
                 .sortedWith(compareBy<File> { !it.isDirectory }.thenComparator { a, b -> MenuScanner.naturalCompare(a.name, b.name) })
             for (k in kids) {
                 if (out.length() >= limit) return
                 val p = if (prefix.isEmpty()) k.name else "$prefix/${k.name}"
-                out.put(
-                    JSONObject().put("p", p).put("d", k.isDirectory)
-                        .put("s", if (k.isFile) k.length() else 0).put("t", k.lastModified())
-                )
+                val o = JSONObject().put("p", p).put("d", k.isDirectory)
+                    .put("s", if (k.isFile) k.length() else 0).put("t", k.lastModified())
+                if (k.isFile) {
+                    seen.add(HashCache.key(k))
+                    HashCache.get(ctx, k)?.let { o.put("h", it) }
+                }
+                out.put(o)
                 if (k.isDirectory && !java.nio.file.Files.isSymbolicLink(k.toPath())) walk(k, p)
             }
         }
         walk(root, "")
+        HashCache.flush(ctx, if (out.length() < limit) seen else null)
         return out
     }
 

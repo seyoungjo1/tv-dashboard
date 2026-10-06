@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, config, grants, update
+from . import __version__, config, grants, syncbat, update, versions
 from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
@@ -160,12 +160,15 @@ class Api:
         echo("업로드 도구 폐기: '%s' (%s)" % (folder, id_))
         return {"id": id_}
 
-    def tool_html(self, folder: str) -> tuple[str, bytes]:
+    def tool_html(self, folder: str, password: str, password2: str) -> tuple[str, bytes]:
         g = grants.load(self.root).get(folder.strip().strip("/"))
         if not g or g.get("status") != "active":
             raise ValueError("아직 TV 에 등록되지 않은 도구입니다. [업로드 도구 받기]를 먼저 누르세요.")
+        if password != password2:
+            raise ValueError("두 비밀번호가 서로 다릅니다")
         cfg = config.load(self.root)
-        html = grants.bake(cfg, g, cfg.tool_token)
+        html = grants.bake(cfg, g, password, cfg.tool_token)
+        echo("업로드 도구 내려받음: '%s' (비밀번호 잠금)" % g["folder"])
         return "%s_업로드.html" % g["name"], html.encode("utf-8")
 
     def state(self) -> dict[str, Any]:
@@ -251,9 +254,20 @@ class Api:
         (self.stage / sid).write_bytes(data)
         return {"id": sid, "size": len(data)}
 
+    def unchanged(self, path: str, data: bytes, v: dict[str, dict[str, Any]]) -> bool:
+        return versions.unchanged(self.tree, path, data, v)
+
     def send(self, body: dict[str, Any]) -> dict[str, Any]:
         job = Job()
         used: list[Path] = []
+        skipped: list[str] = []
+        force = bool(body.get("force"))
+        vers = versions.load(self.root)
+        if not force and any(op.get("op") == "put" for op in body.get("ops") or []):
+            try:
+                self.state()                                   # 최신 TV 목록·버전으로 비교
+            except Exception:
+                pass
         for op in body.get("ops") or []:
             kind = op.get("op")
             if kind in ("put", "apk"):
@@ -263,7 +277,11 @@ class Api:
                 f = self.stage / sid
                 data = f.read_bytes()
                 used.append(f)
+                if kind == "put" and not force and self.unchanged(str(op["path"]), data, vers):
+                    skipped.append(str(op["path"]))         # 바뀌지 않은 파일은 보내지 않는다
+                    continue
                 if kind == "put":
+                    versions.remember(vers, str(op["path"]), data)
                     job.put(str(op["path"]), data, bool(op.get("overwrite", True)))
                     try:
                         self._cache_put(str(op["path"]), data, local=True)   # 방금 올린 파일은 바로 미리보기
@@ -276,7 +294,15 @@ class Api:
             else:
                 raise ValueError("알 수 없는 작업: %s" % kind)
         if not job.ops:
+            for f in used:
+                f.unlink(missing_ok=True)
+            if skipped:
+                echo("바뀐 파일이 없어 보내지 않았습니다 (%d개 그대로)" % len(skipped))
+                return {"id": None, "skipped": skipped}
             raise ValueError("보낼 작업이 없습니다")
+        if skipped:
+            echo("바뀌지 않은 %d개는 건너뜀" % len(skipped))
+        versions.save(self.root, vers)
         mb = job.size / 1048576
         echo("TV 로 작업 보내는 중… (%d개, %.1f MB)" % (len(job.ops), mb))
         id_ = self.relay().submit(job)
@@ -286,7 +312,7 @@ class Api:
             except OSError:
                 pass
         echo("보냄: %s — TV 가 가져가면 결과가 표시됩니다" % id_)
-        return {"id": id_}
+        return {"id": id_, "skipped": skipped}
 
     def result(self, id_: str) -> dict[str, Any]:
         if id_ in self.preview_done:
@@ -454,13 +480,6 @@ def make_handler(api: Api):
                 if ctype.startswith("text/") or ctype in ("application/json", "application/javascript"):
                     ctype += "; charset=utf-8"
                 return self._send(200, f.read_bytes(), ctype)
-            if method == "GET" and u.path == "/api/tool":     # 폴더 전용 업로드 HTML 내려받기
-                try:
-                    name, data = api.tool_html((parse_qs(u.query).get("folder") or [""])[0])
-                except (ValueError, config.ConfigError) as e:
-                    return self._send(400, {"error": str(e)})
-                return self._send(200, data, "text/html; charset=utf-8",
-                                  {"Content-Disposition": "attachment; filename*=UTF-8''" + quote(name)})
             if method == "GET" and u.path == "/api/download":
                 name = Path((parse_qs(u.query).get("f") or [""])[0]).name
                 f = api.downloads / name
@@ -476,6 +495,21 @@ def make_handler(api: Api):
                     body = json.loads(raw.decode("utf-8"))
                 except ValueError:
                     return self._send(400, {"error": "JSON 형식이 아닙니다"})
+            if method == "GET" and u.path == "/api/syncbat":   # 관리자용 폴더 자동 업로드 .bat
+                try:
+                    name, data = syncbat.make(api.root, (parse_qs(u.query).get("folder") or [""])[0])
+                except ValueError as e:
+                    return self._send(400, {"error": str(e)})
+                return self._send(200, data, "application/octet-stream",
+                                  {"Content-Disposition": "attachment; filename*=UTF-8''" + quote(name)})
+            if method == "POST" and u.path == "/api/tool":    # 폴더 전용 업로드 HTML 내려받기 (비밀번호 2번)
+                try:
+                    name, data = api.tool_html(str(body.get("folder", "")), str(body.get("password", "")),
+                                               str(body.get("password2", "")))
+                except (ValueError, config.ConfigError) as e:
+                    return self._send(400, {"error": str(e)})
+                return self._send(200, data, "text/html; charset=utf-8",
+                                  {"Content-Disposition": "attachment; filename*=UTF-8''" + quote(name)})
             try:
                 code, out = api.dispatch(method, u.path, parse_qs(u.query), body, raw)
             except (ValueError, KeyError, config.ConfigError) as e:

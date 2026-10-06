@@ -254,7 +254,7 @@ object RelayWorker {
                         c.readChunks(job, files, op.optJSONArray("chunks") ?: JSONArray(), out).also { out.fd.sync() }
                     }
                     if (n != size || !sha.equals(op.optString("sha256"), true)) throw FileOps.OpError(400, "받은 파일이 손상되었습니다.")
-                    r.put("path", ops.commitTmp(tmp, op.getString("path"), op.optBoolean("overwrite", true), sha))
+                    r.put("path", ops.commitTmp(tmp, op.getString("path"), op.optBoolean("overwrite", true), sha, known = sha))
                     r.put("size", n)
                 } finally {
                     if (tmp.exists()) tmp.delete()
