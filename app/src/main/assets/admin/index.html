@@ -153,6 +153,16 @@
         <button class="danger small" id="regenTokenBtn">새로 발급</button></div>
       <div class="hint" style="margin-top:6px">새로 발급하면 기존 토큰을 쓰는 프로그램은 더 이상 접속할 수 없습니다.</div>
     </div>
+
+    <div class="card" id="relayCard">
+      <h3 style="margin-top:0">원격 중계 (다른 망의 PC 에서 관리)</h3>
+      <p class="hint">PC 프로그램(tvrun.bat)을 처음 실행하면 PC 폴더에 <code>tvrelay.json</code> 이 만들어집니다. 그 파일을 여기서 한 번 불러오면
+        다른 공유기·다른 망에 있는 PC 에서도 GitHub 중계 레포를 거쳐 이 TV 를 관리할 수 있습니다. 모든 내용은 암호화되어 지나가고, 자료는 TV 에만 저장됩니다.</p>
+      <div class="row"><input type="file" id="relayFile" accept=".json"><button id="relayBtn">불러오기</button>
+        <label style="margin:0 0 0 12px;font-weight:600"><input type="checkbox" id="relayEnabled"> 사용</label></div>
+      <div id="relayMsg"></div>
+      <div class="hint" id="relayStatus" style="margin-top:6px"></div>
+    </div>
   </section>
 
   <!-- 업데이트 -->
@@ -245,6 +255,7 @@ PUT    /api/update/apk                  APK 업로드 (TV 에서 설치 승인)<
     if (mustChange) msg($('#globalMsg'), '초기 비밀번호를 사용 중입니다. [설정] 탭에서 비밀번호를 변경하세요.', 'warn');
     load(cwd);
     loadSettings();
+    loadRelay();
     fillApiExamples();
   }
 
@@ -404,6 +415,26 @@ PUT    /api/update/apk                  APK 업로드 (TV 에서 설치 승인)<
     if (!confirm('API 토큰을 새로 발급할까요? 기존 토큰은 즉시 사용할 수 없게 됩니다.')) return;
     try { $('#token').textContent = (await api('POST', '/api/token/regenerate')).token; fillApiExamples(); } catch (e) { alert(e.message); }
   };
+
+  // ── 원격 중계 ──
+  async function loadRelay() {
+    try {
+      const r = await api('GET', '/api/relay');
+      $('#relayEnabled').checked = !!r.enabled;
+      const t = r.lastSync ? new Date(r.lastSync).toLocaleString('ko-KR') : '-';
+      $('#relayStatus').textContent = `상태: ${r.status} · 레포 ${r.repo} · TV 이름 ${r.tv} · 키 ${r.hasKey ? '있음' : '없음'} · 토큰 ${r.hasToken ? '있음' : '없음'} · 마지막 확인 ${t}`;
+    } catch (e) { $('#relayStatus').textContent = e.message; }
+  }
+  $('#relayBtn').onclick = async () => {
+    const f = $('#relayFile').files[0]; if (!f) return msg($('#relayMsg'), 'tvrelay.json 파일을 선택하세요.', 'err');
+    try {
+      const o = JSON.parse((await f.text()).replace(/^\uFEFF/, ''));
+      await api('PUT', '/api/relay', o);
+      msg($('#relayMsg'), '불러왔습니다. 몇 초 뒤 상태가 "연결됨"으로 바뀌는지 확인하세요.');
+      setTimeout(loadRelay, 4000);
+    } catch (e) { msg($('#relayMsg'), e.message, 'err'); }
+  };
+  $('#relayEnabled').onchange = async (e) => { try { await api('PUT', '/api/relay', { enabled: e.target.checked }); loadRelay(); } catch (err) { alert(err.message); } };
 
   // ── APK 업로드 ──
   $('#apkBtn').onclick = async () => {

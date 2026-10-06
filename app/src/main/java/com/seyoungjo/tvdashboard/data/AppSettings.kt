@@ -62,4 +62,36 @@ object AppSettings {
         "update_url" to String::class,
         "settings_pin" to String::class,
     )
+
+    /** 관리 웹 · 원격 PC 에 보여 주는 설정값 */
+    fun remoteJson(): org.json.JSONObject {
+        val o = org.json.JSONObject()
+        REMOTE_KEYS.forEach { (k, type) ->
+            when (type) {
+                Boolean::class -> o.put(k, prefs.getBoolean(k, false))
+                else -> o.put(k, prefs.getString(k, "") ?: "")
+            }
+        }
+        return o
+    }
+
+    /** 원격에서 받은 설정 저장 (잘못된 값이면 IllegalArgumentException) */
+    fun applyRemote(body: org.json.JSONObject) {
+        val e = prefs.edit()
+        REMOTE_KEYS.forEach { (k, type) ->
+            if (!body.has(k)) return@forEach
+            when (type) {
+                Boolean::class -> e.putBoolean(k, body.getBoolean(k))
+                Int::class -> {
+                    val v = body.get(k).toString().trim().toIntOrNull()
+                        ?: throw IllegalArgumentException("$k 는 숫자여야 합니다.")
+                    require(v >= 0) { "$k 는 0 이상이어야 합니다." }
+                    e.putString(k, v.toString())
+                }
+                else -> e.putString(k, body.getString(k))
+            }
+        }
+        e.apply()
+        ChangeBus.post(AppEvent.SettingsChanged)
+    }
 }

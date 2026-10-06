@@ -1,0 +1,10 @@
+# PC 사용자 것 — 레포에 올리지 않는다 (tvrelay.json 에는 암호키·토큰이 들어 있다)
+tvrelay.json
+token.txt
+venv/
+out/
+backup/
+downloads/
+__pycache__/
+*_v*.bat
+.update.lock

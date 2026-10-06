@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.EditTextPreference
@@ -22,7 +23,10 @@ import com.seyoungjo.tvdashboard.data.ContentStore
 import com.seyoungjo.tvdashboard.server.Auth
 import com.seyoungjo.tvdashboard.server.NetInfo
 import com.seyoungjo.tvdashboard.server.ServerService
+import com.seyoungjo.tvdashboard.relay.RelaySettings
+import com.seyoungjo.tvdashboard.relay.RelayWorker
 import com.seyoungjo.tvdashboard.update.UpdateManager
+import org.json.JSONObject
 
 class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,6 +43,20 @@ class SettingsActivity : AppCompatActivity() {
 }
 
 class SettingsFragment : PreferenceFragmentCompat() {
+
+    /** tvrelay.json 고르기 (저장소 권한 없이 시스템 파일 선택기 사용) */
+    private val pickRelay = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            val text = requireContext().contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+            RelaySettings.apply(JSONObject(text.trim().removePrefix("\uFEFF")))
+            RelayWorker.kick()
+            toast("중계 설정을 불러왔습니다 (${RelaySettings.repo} · ${RelaySettings.tv}). 잠시 후 '중계 상태'를 확인하세요.")
+        } catch (e: Exception) {
+            toast("불러오기 실패: ${e.message}")
+        }
+        refresh()
+    }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.preferences, rootKey)
@@ -105,6 +123,15 @@ class SettingsFragment : PreferenceFragmentCompat() {
             true
         }
         click("storage_info") { showUninstallNotice() }
+        click("relay_import") { pickRelay.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")) }
+        click("relay_info") { refresh() }
+        numeric("relay_interval")
+        findPreference<Preference>("relay_enabled")?.setOnPreferenceChangeListener { _, _ ->
+            view?.post { RelayWorker.kick(); refresh() }; true
+        }
+        findPreference<Preference>("relay_interval")?.setOnPreferenceChangeListener { _, _ ->
+            view?.post { RelayWorker.kick() }; true
+        }
         click("check_update") { UpdateUi.checkForUpdate(requireActivity()) }
         click("install_unknown") { UpdateUi.openUnknownSources(requireActivity()) }
         click("android_settings") { open(Intent(Settings.ACTION_SETTINGS)) }
@@ -137,6 +164,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("storage_info")?.summary = ContentStore.root(ctx).path +
             (if (pending) "\n(공용 폴더 권한이 없어 앱 전용 폴더 사용 중)" else "") +
             (if (mode == "app") "\n⚠ 앱을 삭제하면 이 폴더의 자료도 삭제됩니다." else "\n앱을 삭제해도 자료는 남습니다.")
+        findPreference<Preference>("relay_info")?.summary =
+            "${RelayWorker.status}\n레포: ${RelaySettings.repo} · TV 이름: ${RelaySettings.tv}" +
+                (if (RelayWorker.lastSync > 0) "\n마지막 확인: " + java.text.DateFormat.getTimeInstance().format(java.util.Date(RelayWorker.lastSync)) else "")
         findPreference<Preference>("check_update")?.summary =
             "현재 버전 ${UpdateManager.currentVersionName(ctx)} (${UpdateManager.currentVersionCode(ctx)})"
         findPreference<Preference>("install_unknown")?.summary =

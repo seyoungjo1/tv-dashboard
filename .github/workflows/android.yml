@@ -5,7 +5,7 @@ name: Android APK
 # - Actions 화면 수동 실행: 버전을 입력하면 서명된 Release APK 빌드, 'publish' 선택 시 Releases 게시
 on:
   push:
-    branches: ["**"]
+    branches: ["**", "!relay/**"]      # relay/** = 원격 중계 작업용 브랜치 (빌드하지 않음)
     tags: ["v*.*.*"]
   pull_request:
   workflow_dispatch:
@@ -82,6 +82,12 @@ jobs:
 
       - name: 단위 테스트 + 디버그 APK
         run: ./gradlew --stacktrace testDebugUnitTest assembleDebug -PappVersion=${{ steps.mode.outputs.version }}
+
+      - name: PC 프로그램(tvrelay) 시험
+        working-directory: pc
+        run: |
+          python3 -m pip install -q -r requirements.txt
+          python3 -m unittest discover -s tests -t . -v
 
       - name: 디버그 APK 보관
         uses: actions/upload-artifact@v4
@@ -199,6 +205,8 @@ jobs:
           json.dump(info, open("dist/update.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
           PY
           cat dist/update.json
+          # PC 원격 관리 프로그램 압축본 (tvrun.bat · tvupload.bat · tvrelay/)
+          (cd pc && zip -qr "../dist/tvrelay-pc-v$VERSION.zip" tvrelay tvrun.bat tvupload.bat requirements.txt README.md -x '*/__pycache__/*')
           echo "apk=dist/$APK" >> "$GITHUB_OUTPUT"
 
       - name: Release APK 보관
@@ -218,6 +226,6 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete unsigned-build --cleanup-tag -y >/dev/null 2>&1 || true
-          gh release create "v$VERSION" "${{ steps.out.outputs.apk }}" dist/update.json \
+          gh release create "v$VERSION" "${{ steps.out.outputs.apk }}" dist/update.json dist/tvrelay-pc-v*.zip \
             --target "$GITHUB_SHA" --title "v$VERSION" --notes-file dist/notes.md
           echo "게시 완료: https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"

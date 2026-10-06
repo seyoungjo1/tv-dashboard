@@ -208,6 +208,13 @@ PowerShell 예시와 작업 스케줄러용 스크립트: [`scripts/upload-json.
   - 같은 화면에서 TV 항목 ⋯ → **Disable key expiry** (기본 180일 후 재로그인 요구를 없앰)
 - 같은 공유기 안에서 내부 IP(192.168.x.x)를 고정하려면: 공유기 관리 화면의 **DHCP 고정 할당(MAC 주소 예약)** 또는 TV `설정 > 네트워크 > IP 설정 > 고정` 사용.
 
+### Tailscale 없이: GitHub 중계 + PC 프로그램 (추천)
+TV 와 PC 에 별도 앱을 깔지 않고 **GitHub 공개 레포를 우체통으로만** 써서 어느 망에서든 관리할 수 있습니다.
+- PC: `pc/` 폴더(또는 Releases 의 `tvrelay-pc-vX.Y.Z.zip`)의 `tvrun.bat` 실행 → 브라우저 화면에서 파일·설정·APK 를 보냄
+- 레포에는 **암호화된 작업이 잠깐** 지나가고 TV 가 가져가면 바로 지워집니다. 자료는 **TV 에만** 저장됩니다.
+- 암호키는 PC 프로그램이 처음 실행될 때 자동으로 만들어 `tvrelay.json` 에 보관하고, TV 는 그 파일을 한 번 불러옵니다.
+- 설정 방법: [`pc/README.md`](pc/README.md)
+
 ## 8. 절전 · 화면 꺼짐 · 재부팅 시 동작
 
 | 상황 | 동작 |
@@ -336,6 +343,8 @@ app/src/main/java/com/seyoungjo/tvdashboard/
          SettingsActivity.kt   TV 설정 화면
 app/src/main/assets/admin/index.html   관리 웹 페이지
 app/src/main/assets/sample/            '예제 대시보드 만들기'에 쓰는 vDesk 스타일 예제
+app/.../relay/                         원격 중계 (GitHub 경유, 암호화) — TV 쪽
+pc/                                    원격 관리 PC 프로그램 (Python + 브라우저 화면, tvrun.bat)
 sample/자료/                           예제 자료 (폴더째 업로드 가능)
 scripts/                               서명 키 생성, JSON 자동 업로드 예시
 ```

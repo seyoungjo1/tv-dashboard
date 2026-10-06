@@ -18,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.seyoungjo.tvdashboard.R
 import com.seyoungjo.tvdashboard.data.AppSettings
+import com.seyoungjo.tvdashboard.relay.RelayWorker
 import com.seyoungjo.tvdashboard.ui.MainActivity
 
 /**
@@ -37,6 +38,7 @@ class ServerService : Service() {
         super.onCreate()
         createChannel()
         acquireLocks()
+        RelayWorker.start(this)     // GitHub 원격 중계 (설정돼 있을 때만 동작)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

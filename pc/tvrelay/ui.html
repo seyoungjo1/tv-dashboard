@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV 대시보드 원격 관리</title>
+<style>
+  :root { --bg:#eef1f4; --card:#fff; --line:#dde3ea; --text:#2b3440; --dim:#6b7785; --accent:#0bb5e8; --danger:#e5534b; --ok:#19b394; --dark:#1e2125; --side:#2b2f34; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Pretendard","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif; font-weight:600; background:var(--bg); color:var(--text); font-size:15px; }
+  header { background:var(--dark); color:#fff; padding:12px 22px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:20px; font-weight:800; flex:1; }
+  .pill { padding:5px 12px; border-radius:20px; font-size:13px; background:#3a4047; color:#cfd6dd; }
+  .pill.on { background:var(--ok); color:#fff; } .pill.off { background:var(--danger); color:#fff; }
+  main { max-width:1150px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
+  .tabs button { background:#dfe5eb; color:var(--text); }
+  .tabs button.active { background:var(--accent); color:#fff; }
+  button { border:0; border-radius:7px; padding:8px 14px; background:var(--accent); color:#fff; cursor:pointer; font-size:14px; font-family:inherit; font-weight:700; }
+  button.secondary { background:#e6ebf1; color:var(--text); } button.danger { background:var(--danger); }
+  button.small { padding:4px 9px; font-size:13px; } button:disabled { opacity:.5; cursor:default; }
+  input[type=text], input[type=password], input[type=number], input[type=url] { padding:8px 10px; border:1px solid var(--line); border-radius:7px; font-size:14px; font-family:inherit; width:100%; }
+  label { display:block; margin:10px 0 4px; font-weight:700; font-size:14px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 16px; }
+  @media (max-width:700px) { .grid2 { grid-template-columns:1fr; } .mod { display:none; } }
+  table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); font-size:14px; }
+  th { color:var(--dim); font-weight:600; } td.actions { white-space:nowrap; text-align:right; }
+  td.name a { cursor:pointer; font-weight:800; color:var(--text); }
+  .crumbs a { color:var(--accent); cursor:pointer; }
+  .drop { border:2px dashed var(--line); border-radius:10px; padding:14px; text-align:center; color:var(--dim); margin-top:12px; }
+  .drop.over { border-color:var(--accent); background:#e8f7fd; }
+  .msg { padding:10px 12px; border-radius:7px; margin:8px 0; font-size:14px; white-space:pre-wrap; }
+  .msg.err { background:#fde8e8; color:#8c1d1d; } .msg.ok { background:#e5f6ec; color:#14663d; } .msg.warn { background:#fff4dc; color:#7a5300; }
+  .hint { color:var(--dim); font-size:13px; font-weight:600; }
+  code, pre { background:#f0f3f7; border-radius:5px; font-family:Consolas,monospace; font-size:13px; padding:1px 5px; }
+  .hidden { display:none !important; }
+  .job { display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .job .st { white-space:nowrap; } .job .st.wait { color:#b07800; } .job .st.ok { color:var(--ok); } .job .st.bad { color:var(--danger); }
+</style>
+</head>
+<body>
+<header>
+  <h1>대상 오산공장 Dashboard · 원격 관리</h1>
+  <span class="pill" id="tvPill">TV 확인 중…</span>
+  <span class="pill" id="verPill"></span>
+  <button class="secondary small" id="updBtn">프로그램 업데이트</button>
+</header>
+<main>
+  <div id="globalMsg"></div>
+
+  <!-- 처음 설정 -->
+  <section id="setupView" class="card hidden">
+    <h2 style="margin-top:0">처음 설정</h2>
+    <p class="hint">GitHub 중계 레포(공개)를 우체통으로 써서 다른 망에 있는 TV 와 주고받습니다. 내용은 모두 암호화되고, 암호키는 자동으로 만들어져 이 PC 폴더의 <code>tvrelay.json</code> 에만 저장됩니다. 자료는 TV 에만 저장됩니다.</p>
+    <div class="grid2">
+      <div><label>GitHub 토큰 (중계 레포 Contents 읽기·쓰기)</label><input type="password" id="sToken" placeholder="github_pat_…"></div>
+      <div><label>중계 레포</label><input type="text" id="sRepo"></div>
+      <div><label>TV 이름 (영문)</label><input type="text" id="sTv"></div>
+    </div>
+    <div id="setupMsg"></div>
+    <button style="margin-top:12px" id="setupBtn">저장</button>
+    <div class="msg warn" style="margin-top:14px">저장한 뒤 <b id="cfgPath"></b> 파일을 USB 로 TV 에 옮겨
+      TV 의 ⚙ 설정 → <b>중계 설정 파일(tvrelay.json) 불러오기</b> 로 한 번 불러오세요. (같은 망이면 TV 관리 웹 &gt; 설정 &gt; 원격 중계 에서도 가능)
+      이 파일을 가진 사람은 TV 를 관리할 수 있으니 공유하지 마세요.</div>
+  </section>
+
+  <section id="appView" class="hidden">
+    <div class="tabs">
+      <button data-tab="files" class="active">파일 관리</button>
+      <button data-tab="settings">TV 설정</button>
+      <button data-tab="update">앱 업데이트</button>
+      <button data-tab="jobs">작업 기록</button>
+      <button data-tab="setup2">연결 설정</button>
+    </div>
+
+    <div id="tab-files">
+      <div class="card">
+        <div class="crumbs" id="crumbs"></div>
+        <div class="row" style="margin-top:10px">
+          <button id="mkdirBtn">새 폴더</button>
+          <button id="uploadBtn">파일 업로드</button>
+          <button id="uploadDirBtn" class="secondary">폴더째 업로드</button>
+          <button id="sampleBtn" class="secondary">예제 대시보드 만들기</button>
+          <button id="reloadBtn" class="secondary">TV 화면 새로고침</button>
+          <button id="refreshBtn" class="secondary">목록 새로고침</button>
+          <input type="file" id="fileInput" multiple class="hidden">
+          <input type="file" id="dirInput" webkitdirectory multiple class="hidden">
+          <input type="file" id="replaceInput" class="hidden">
+        </div>
+        <div class="drop" id="drop">여기에 파일을 끌어다 놓으면 현재 폴더로 보냅니다 (같은 이름은 교체). 여러 파일은 한 번에 묶어 보냅니다.</div>
+        <table style="margin-top:10px">
+          <thead><tr><th>이름</th><th>크기</th><th class="mod">수정 시각</th><th></th></tr></thead>
+          <tbody id="list"></tbody>
+        </table>
+        <div class="hint" id="treeInfo" style="margin-top:8px"></div>
+      </div>
+      <div class="card hint">
+        메뉴 규칙: 자료 폴더 바로 아래 폴더 1개 = TV 왼쪽 버튼 1개, 아이콘 = 폴더 안 <code>icon.png</code>(흰색·투명 배경), 화면 = 폴더의 <code>index.html</code>.
+        대기 화면 동영상은 루트에, 상단 로고는 루트 <code>logo.png</code>.
+        보낸 작업은 TV 가 다음 확인 주기(기본 10초)에 가져가 반영합니다.
+      </div>
+    </div>
+
+    <div id="tab-settings" class="hidden">
+      <div class="card">
+        <form id="settingsForm">
+          <label>상단 제목</label><input type="text" name="header_title">
+          <h3>대기 화면 (루트 동영상 + 멘트)</h3>
+          <label><input type="checkbox" name="idle_enabled"> 대기 화면 사용</label>
+          <div class="grid2">
+            <div><label>대기 시간(초)</label><input type="number" min="10" name="idle_seconds"></div>
+            <div><label>멘트</label><input type="text" name="idle_message"></div>
+            <div><label>멘트 표시 시간(초, 0 = 계속)</label><input type="number" min="0" name="idle_msg_show_sec"></div>
+            <div><label>멘트 숨김 시간(초)</label><input type="number" min="0" name="idle_msg_hide_sec"></div>
+          </div>
+          <label><input type="checkbox" name="idle_video_sound"> 동영상 소리 켜기</label>
+          <h3>화면</h3>
+          <label><input type="checkbox" name="auto_refresh"> 자료 변경 시 화면 자동 새로고침</label>
+          <label><input type="checkbox" name="keep_screen_on"> 앱 실행 중 화면 꺼짐 방지</label>
+          <div class="grid2">
+            <div><label>TV 설정 잠금 PIN (숫자, 비우면 없음)</label><input type="text" name="settings_pin"></div>
+            <div><label>업데이트 주소 (update.json)</label><input type="url" name="update_url"></div>
+          </div>
+          <div id="settingsMsg"></div>
+          <button style="margin-top:12px">TV 로 보내기</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="tab-update" class="hidden">
+      <div class="card">
+        <h3 style="margin-top:0">APK 보내서 TV 앱 업데이트</h3>
+        <p class="hint">서명된 APK 를 보내면 TV 에 설치 확인 창이 뜹니다. TV 앞에서 '설치' → '업데이트'를 눌러야 설치됩니다(무인 설치는 Android 정책상 불가). 자료와 설정은 유지되고, 실패하면 기존 버전을 그대로 씁니다.</p>
+        <div class="row"><input type="file" id="apkInput" accept=".apk"><button id="apkBtn">보내기</button></div>
+        <div id="apkMsg"></div>
+      </div>
+    </div>
+
+    <div id="tab-jobs" class="hidden">
+      <div class="card"><h3 style="margin-top:0">보낸 작업</h3><div id="jobs" class="hint">아직 없습니다.</div></div>
+      <div class="card"><h3 style="margin-top:0">기록</h3><pre id="log" style="white-space:pre-wrap;max-height:300px;overflow:auto"></pre></div>
+    </div>
+
+    <div id="tab-setup2" class="hidden">
+      <div class="card">
+        <div id="connInfo" class="hint"></div>
+        <button class="secondary" id="reSetupBtn" style="margin-top:10px">토큰·레포·TV 이름 바꾸기</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const join = (a, b) => a ? a + '/' + b : b;
+  const size = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n/1024).toFixed(1) + ' KB' : n < 1073741824 ? (n/1048576).toFixed(1) + ' MB' : (n/1073741824).toFixed(2) + ' GB';
+  const msg = (el, t, k) => el.innerHTML = t ? `<div class="msg ${k||'ok'}">${esc(t)}</div>` : '';
+  let info = null, state = null, cwd = '', replaceTarget = null;
+  const jobs = [];
+
+  async function api(method, url, body, raw) {
+    const opt = { method, headers: {} };
+    if (body !== undefined) { if (raw) opt.body = body; else { opt.body = JSON.stringify(body); opt.headers['Content-Type'] = 'application/json'; } }
+    const r = await fetch(url, opt);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    return d;
+  }
+
+  // ── 시작 · 처음 설정 ──
+  async function start() {
+    info = await api('GET', '/api/info');
+    $('#verPill').textContent = 'PC 프로그램 v' + info.version;
+    $('#cfgPath').textContent = info.cfgPath;
+    $('#sRepo').value = info.repo; $('#sTv').value = info.tv;
+    if (info.error) msg($('#globalMsg'), info.error, 'err');
+    $('#setupView').classList.toggle('hidden', info.configured);
+    $('#appView').classList.toggle('hidden', !info.configured);
+    $('#connInfo').innerHTML = `중계 레포 <b>${esc(info.repo)}</b> · TV 이름 <b>${esc(info.tv)}</b><br>설정 파일: <code>${esc(info.cfgPath)}</code> — TV 에 불러온 파일과 같아야 합니다.`;
+    if (info.configured) { loadState(); }
+  }
+  $('#setupBtn').onclick = async () => {
+    try {
+      info = await api('POST', '/api/setup', { token: $('#sToken').value, repo: $('#sRepo').value, tv: $('#sTv').value });
+      $('#sToken').value = '';
+      msg($('#setupMsg'), '저장했습니다. 이제 tvrelay.json 을 TV 에 한 번 불러오세요.');
+      setTimeout(start, 1500);
+    } catch (e) { msg($('#setupMsg'), e.message, 'err'); }
+  };
+  $('#reSetupBtn').onclick = () => { $('#setupView').classList.remove('hidden'); $('#appView').classList.add('hidden'); };
+
+  // ── TV 상태 ──
+  async function loadState() {
+    try {
+      state = await api('GET', '/api/state');
+      const pill = $('#tvPill');
+      if (state.none) { pill.className = 'pill off'; pill.textContent = 'TV 응답 없음 — TV 에 tvrelay.json 을 불러왔는지 확인'; }
+      else {
+        pill.className = 'pill ' + (state.online ? 'on' : 'off');
+        const ago = state.age_sec < 60 ? state.age_sec + '초' : Math.round(state.age_sec / 60) + '분';
+        pill.textContent = (state.online ? 'TV 온라인' : 'TV 오프라인') + ` · ${ago} 전 · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}`;
+      }
+      renderList(); fillSettings();
+    } catch (e) { $('#tvPill').className = 'pill off'; $('#tvPill').textContent = e.message; }
+  }
+  setInterval(() => { if (info?.configured) loadState(); }, 15000);
+
+  // ── 탭 ──
+  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('active', x === b));
+    ['files','settings','update','jobs','setup2'].forEach(t => $('#tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+    if (b.dataset.tab === 'jobs') loadLog();
+  });
+
+  // ── 파일 목록 (TV 가 올린 목록) ──
+  function renderList() {
+    const tree = state?.tree || [];
+    const parts = cwd ? cwd.split('/') : [];
+    let c = '<a data-open="">자료</a>';
+    parts.forEach((p, i) => c += ' / <a data-open="' + esc(parts.slice(0, i+1).join('/')) + '">' + esc(p) + '</a>');
+    $('#crumbs').innerHTML = c;
+    const pre = cwd ? cwd + '/' : '';
+    const kids = tree.filter(e => e.p.startsWith(pre) && !e.p.slice(pre.length).includes('/') && e.p !== cwd);
+    $('#list').innerHTML = kids.map(e => {
+      const name = e.p.slice(pre.length);
+      return `<tr><td class="name">${e.d ? `📁 <a data-open="${esc(e.p)}">${esc(name)}</a>` : '📄 ' + esc(name)}</td>
+        <td>${e.d ? '' : size(e.s)}</td><td class="mod">${new Date(e.t).toLocaleString('ko-KR')}</td>
+        <td class="actions">${e.d ? '' : `<button class="secondary small" data-dl="${esc(e.p)}">다운로드</button>
+          <button class="secondary small" data-replace="${esc(e.p)}">교체</button>`}
+          <button class="secondary small" data-rename="${esc(e.p)}">이름 변경</button>
+          <button class="danger small" data-del="${esc(e.p)}" data-dir="${e.d}">삭제</button></td></tr>`;
+    }).join('') || '<tr><td colspan="4" class="hint">' + (state?.none ? 'TV 상태를 아직 받지 못했습니다.' : '비어 있습니다.') + '</td></tr>';
+    $('#treeInfo').textContent = state && !state.none ? `TV 가 ${state.age_sec}초 전에 보낸 목록입니다 (파일 ${tree.filter(e => !e.d).length}개).` : '';
+  }
+  document.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-open],[data-dl],[data-del],[data-rename],[data-replace]');
+    if (!t) return;
+    if (t.dataset.open !== undefined) { cwd = t.dataset.open; return renderList(); }
+    if (t.dataset.dl) return send([{ op: 'get', path: t.dataset.dl }], '다운로드 요청: ' + t.dataset.dl);
+    if (t.dataset.replace) { replaceTarget = t.dataset.replace; $('#replaceInput').value = ''; return $('#replaceInput').click(); }
+    if (t.dataset.rename) {
+      const old = t.dataset.rename, base = old.split('/').pop();
+      const name = prompt('새 이름', base); if (!name || name === base) return;
+      return send([{ op: 'rename', path: old, to: join(old.split('/').slice(0, -1).join('/'), name.trim()) }], '이름 변경: ' + old + ' → ' + name);
+    }
+    if (t.dataset.del) {
+      const dir = t.dataset.dir === 'true';
+      if (!confirm(`'${t.dataset.del}' ${dir ? '폴더와 안의 모든 파일을' : '파일을'} 삭제할까요?`)) return;
+      return send([{ op: 'delete', path: t.dataset.del, recursive: dir }], '삭제: ' + t.dataset.del);
+    }
+  });
+
+  // ── 작업 보내기 · 결과 추적 ──
+  async function send(ops, desc) {
+    try {
+      const r = await api('POST', '/api/send', { ops });
+      jobs.unshift({ id: r.id, desc, st: 'wait', note: 'TV 가 가져가기를 기다리는 중…' });
+      renderJobs(); msg($('#globalMsg'), desc + ' — 보냈습니다. TV 가 가져가면 반영됩니다.', 'warn');
+      poll(r.id);
+      return r.id;
+    } catch (e) { msg($('#globalMsg'), e.message, 'err'); }
+  }
+  async function poll(id) {
+    const j = jobs.find(x => x.id === id);
+    for (let i = 0; i < 400; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const r = await api('GET', '/api/result?id=' + encodeURIComponent(id));
+        if (r.pending) continue;
+        j.st = r.ok ? 'ok' : 'bad';
+        const fails = (r.results || []).filter(x => !x.ok);
+        j.note = r.ok ? '완료' : '일부 실패: ' + fails.map(x => `${x.path || x.op} (${x.error})`).join(', ');
+        (r.results || []).filter(x => x.file).forEach(x => {
+          const a = document.createElement('a'); a.href = x.file; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
+          j.note += ' · 저장: ' + x.saved;
+        });
+        (r.results || []).filter(x => x.message).forEach(x => j.note += ' · ' + x.message);
+        msg($('#globalMsg'), j.desc + ' — ' + j.note, r.ok ? 'ok' : 'err');
+        renderJobs(); setTimeout(loadState, 1500);
+        return;
+      } catch (e) { j.note = e.message; renderJobs(); }
+    }
+    j.note = 'TV 응답이 없습니다 (TV 가 켜지면 처리됩니다)'; renderJobs();
+  }
+  function renderJobs() {
+    $('#jobs').innerHTML = jobs.map(j => `<div class="job"><span>${esc(j.desc)}<br><span class="hint">${esc(j.note)}</span></span>
+      <span class="st ${j.st}">${j.st === 'wait' ? '대기' : j.st === 'ok' ? '완료' : '실패'}</span></div>`).join('') || '아직 없습니다.';
+  }
+  async function loadLog() { try { $('#log').textContent = (await api('GET', '/api/log')).lines.join('\n'); } catch (_) {} }
+
+  async function stageAndSend(list, desc) {     // list: [[원격 경로, File]]
+    if (!list.length) return;
+    try {
+      msg($('#globalMsg'), `파일 ${list.length}개 준비 중…`, 'warn');
+      const ops = [];
+      for (const [path, f] of list) {
+        const s = await api('PUT', '/api/stage', f, true);
+        ops.push({ op: 'put', path, stage: s.id });
+      }
+      await send(ops, desc || `업로드 ${list.length}개 → ${cwd || '자료'}`);
+    } catch (e) { msg($('#globalMsg'), e.message, 'err'); }
+  }
+  $('#uploadBtn').onclick = () => { $('#fileInput').value = ''; $('#fileInput').click(); };
+  $('#uploadDirBtn').onclick = () => { $('#dirInput').value = ''; $('#dirInput').click(); };
+  $('#fileInput').onchange = (e) => stageAndSend([...e.target.files].map(f => [join(cwd, f.name), f]));
+  $('#dirInput').onchange = (e) => stageAndSend([...e.target.files].filter(f => !f.name.startsWith('.')).map(f => [join(cwd, f.webkitRelativePath), f]));
+  $('#replaceInput').onchange = (e) => { const f = e.target.files[0]; if (f && replaceTarget) stageAndSend([[replaceTarget, f]], '교체: ' + replaceTarget); };
+  const drop = $('#drop');
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); stageAndSend([...e.dataTransfer.files].map(f => [join(cwd, f.name), f])); };
+  $('#mkdirBtn').onclick = () => { const n = prompt('새 폴더 이름 (TV 메뉴 버튼 이름이 됩니다)'); if (n) send([{ op: 'mkdir', path: join(cwd, n.trim()) }], '새 폴더: ' + join(cwd, n.trim())); };
+  $('#sampleBtn').onclick = () => { const n = prompt('만들 폴더 이름', '생산팀'); if (n) send([{ op: 'sample', path: join(cwd, n.trim()) }], '예제 대시보드: ' + n); };
+  $('#reloadBtn').onclick = () => send([{ op: 'reload' }], 'TV 화면 새로고침');
+  $('#refreshBtn').onclick = loadState;
+
+  // ── 설정 ──
+  function fillSettings() {
+    const s = state?.settings; if (!s) return;
+    const f = $('#settingsForm');
+    if (f.dataset.filled) return;
+    for (const [k, v] of Object.entries(s)) { const el = f.elements[k]; if (!el) continue; if (el.type === 'checkbox') el.checked = !!v; else el.value = v; }
+    f.dataset.filled = '1';
+  }
+  $('#settingsForm').onsubmit = (e) => {
+    e.preventDefault();
+    const values = {};
+    for (const el of e.target.elements) { if (el.name) values[el.name] = el.type === 'checkbox' ? el.checked : el.value; }
+    if (values.settings_pin && !/^\d+$/.test(values.settings_pin)) return msg($('#settingsMsg'), 'PIN 은 숫자만 가능합니다.', 'err');
+    send([{ op: 'settings', values }], 'TV 설정 변경');
+    msg($('#settingsMsg'), '보냈습니다. TV 가 가져가면 바로 적용됩니다.', 'warn');
+  };
+
+  // ── APK ──
+  $('#apkBtn').onclick = async () => {
+    const f = $('#apkInput').files[0]; if (!f) return msg($('#apkMsg'), 'APK 파일을 선택하세요.', 'err');
+    try {
+      msg($('#apkMsg'), '준비 중…', 'warn');
+      const s = await api('PUT', '/api/stage', f, true);
+      await send([{ op: 'apk', stage: s.id }], 'APK 보내기: ' + f.name);
+      msg($('#apkMsg'), '보냈습니다. TV 가 받으면 TV 화면에 설치 확인 창이 뜹니다.', 'warn');
+    } catch (e) { msg($('#apkMsg'), e.message, 'err'); }
+  };
+
+  // ── 프로그램 업데이트 ──
+  $('#updBtn').onclick = async () => {
+    try {
+      msg($('#globalMsg'), '업데이트 확인 중…', 'warn');
+      const r = await api('POST', '/api/update');
+      msg($('#globalMsg'), r.lines.join('\n') + (r.restart ? '\n\n검은 창을 닫고 tvrun.bat 을 다시 실행하면 새 버전이 적용됩니다.' : ''), r.code ? 'err' : 'ok');
+    } catch (e) { msg($('#globalMsg'), e.message, 'err'); }
+  };
+
+  start().catch(e => msg($('#globalMsg'), e.message, 'err'));
+})();
+</script>
+</body>
+</html>
