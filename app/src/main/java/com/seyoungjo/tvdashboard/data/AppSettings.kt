@@ -11,7 +11,8 @@ object AppSettings {
     lateinit var prefs: SharedPreferences
         private set
 
-    const val DEFAULT_TITLE = "대상 오산공장 Dashboard"
+    const val DEFAULT_TITLE = "오산공장 스마트 현황판"
+    private const val OLD_DEFAULT_TITLE = "대상 오산공장 Dashboard"
     const val DEFAULT_MESSAGE = "화면을 터치하면 대시보드로 들어갑니다"
     private const val OLD_DEFAULT_MESSAGE = "오산공장 dashboard 터치시 접속됩니다"
 
@@ -36,7 +37,9 @@ object AppSettings {
     val updateUrl: String get() = prefs.getString("update_url", null)?.trim().orEmpty()
         .ifEmpty { BuildConfig.DEFAULT_UPDATE_URL }
 
+    /** 상단 제목 — 메인 화면 상단바와 화면보호기가 같은 문구를 쓴다 */
     val headerTitle: String get() = prefs.getString("header_title", null)?.trim().orEmpty()
+        .let { if (it == OLD_DEFAULT_TITLE) "" else it }                  // 예전 기본 제목은 새 기본값으로
         .ifEmpty { DEFAULT_TITLE }
 
     val idleEnabled get() = prefs.getBoolean("idle_enabled", true)

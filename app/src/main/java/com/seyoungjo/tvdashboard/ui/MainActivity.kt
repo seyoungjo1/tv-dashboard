@@ -63,6 +63,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var header: View
     private lateinit var headerTitle: TextView
     private lateinit var headerClock: TextView
+    private lateinit var headerDate: TextView
     private lateinit var headerLogo: ImageView
     private lateinit var menuPanel: View
     private lateinit var menuList: RecyclerView
@@ -102,10 +103,13 @@ class MainActivity : AppCompatActivity() {
     private val idleRunnable = Runnable { showIdle() }
     private val reloadRunnable = Runnable { reloadCurrent() }
     private val menuRefreshRunnable = Runnable { refreshMenu() }
-    private val clockFormat = SimpleDateFormat("yyyy.MM.dd (E)  HH:mm", Locale.KOREA)
+    private val dateFormat = SimpleDateFormat("yyyy.MM.dd", Locale.KOREA)
+    private val clockFormat = SimpleDateFormat("HH:mm", Locale.KOREA)
     private val clockRunnable = object : Runnable {
         override fun run() {
-            headerClock.text = clockFormat.format(Date())
+            val now = Date()
+            headerDate.text = dateFormat.format(now)
+            headerClock.text = clockFormat.format(now)
             handler.postDelayed(this, 60_000L - System.currentTimeMillis() % 60_000L + 50)
         }
     }
@@ -138,6 +142,7 @@ class MainActivity : AppCompatActivity() {
         header = findViewById(R.id.header)
         headerTitle = findViewById(R.id.headerTitle)
         headerClock = findViewById(R.id.headerClock)
+        headerDate = findViewById(R.id.headerDate)
         headerLogo = findViewById(R.id.headerLogo)
         menuPanel = findViewById(R.id.menuPanel)
         menuList = findViewById(R.id.menuList)
@@ -431,13 +436,23 @@ class MainActivity : AppCompatActivity() {
         sidebarOpen = open
         if (!fullscreen) menuPanel.visibility = if (open) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.sidebarToggle).text = if (open) "◁" else "▷"
+        placeHandle()
         if (save) AppSettings.prefs.edit().putBoolean("sidebar_open", open).apply()
         if (open && !fullscreen) focusSelectedTile()
+    }
+
+    /** 손잡이는 대시보드 위에 겹쳐 있으므로 사이드바가 보이면 그 오른쪽, 아니면 화면 왼쪽 끝에 붙인다 */
+    private fun placeHandle() {
+        val h = findViewById<View>(R.id.sidebarToggle)
+        val lp = h.layoutParams as FrameLayout.LayoutParams
+        lp.marginStart = if (!fullscreen && sidebarOpen) resources.getDimensionPixelSize(R.dimen.sidebar_width) else 0
+        h.layoutParams = lp
     }
 
     private fun setFullscreen(on: Boolean) {
         fullscreen = on
         menuPanel.visibility = if (on || !sidebarOpen) View.GONE else View.VISIBLE
+        placeHandle()
         header.visibility = if (on) View.GONE else View.VISIBLE
         fullscreenButton.setImageResource(if (on) R.drawable.ic_menu else R.drawable.ic_fullscreen)
         fullscreenButton.contentDescription = getString(if (on) R.string.exit_fullscreen else R.string.fullscreen)

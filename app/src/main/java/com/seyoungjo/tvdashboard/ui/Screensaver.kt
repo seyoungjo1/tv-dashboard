@@ -208,6 +208,7 @@ class Screensaver(
             .put("blink", AppSettings.idleMsgHideSec > 0)
             .put("videos", videos.size)
             .put("folder", folder)
+            .put("title", AppSettings.headerTitle)
             .toString()
 
         /** 동영상 칸 위치 (CSS px) — 페이지 폭 vw 기준이라 WebView 실제 픽셀로 환산 */

@@ -238,7 +238,7 @@
 
   function config() {
     if (TV) { try { return JSON.parse(TV.config()); } catch (e) {} }
-    return { message: Q.get('message') || '화면을 터치하면 대시보드로 들어갑니다', videos: 0, folder: Q.get('folder') || 'main' };
+    return { message: Q.get('message') || '화면을 터치하면 대시보드로 들어갑니다', videos: 0, folder: Q.get('folder') || 'main', title: Q.get('title') || '' };
   }
 
   var lastKey = '', lastA = null, cfg = {};
@@ -246,7 +246,7 @@
     $('hint').textContent = cfg.message || '';
     $('hint').className = cfg.blink ? 'blink' : '';
     var title = (a[5] || '').split(/\r?\n/)[0].trim();
-    $('title').textContent = title || '오산공장 스마트 현황판';
+    $('title').textContent = title || cfg.title || '오산공장 스마트 현황판';   // 제목.txt → 설정의 상단 제목(메인 화면과 같음)
     var lines = override && override.notices ? override.notices
       : (a[4] || '').replace(/^\uFEFF/, '').split(/\r?\n/);
     lines = lines.map(function (s) { return String(s).trim(); }).filter(Boolean).slice(0, 5);

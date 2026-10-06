@@ -9,46 +9,69 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- 상단 헤더: 로고 + 제목 + 날짜/시각 -->
-        <LinearLayout
+        <!-- 상단 헤더: 화면보호기와 같은 배치 — 왼쪽 로고 · 가운데 제목 · 오른쪽 날짜 │ 시각 -->
+        <FrameLayout
             android:id="@+id/header"
             android:layout_width="match_parent"
             android:layout_height="@dimen/header_height"
             android:background="@color/header"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="18dp"
-            android:paddingEnd="24dp">
+            android:paddingStart="22dp"
+            android:paddingEnd="28dp">
 
             <ImageView
                 android:id="@+id/headerLogo"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="wrap_content"
+                android:layout_height="52dp"
+                android:layout_gravity="start|center_vertical"
                 android:adjustViewBounds="true"
                 android:contentDescription="@null"
+                android:maxWidth="200dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/logo_daesang_mark" />
 
             <TextView
                 android:id="@+id/headerTitle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:text="@string/default_header_title"
-                android:fontFamily="@font/pretendard_extrabold"
-                android:textColor="#FFFFFFFF"
-                android:textSize="28sp" />
-
-            <TextView
-                android:id="@+id/headerClock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#FFC9D1D9"
-                android:textSize="20sp" />
-        </LinearLayout>
+                android:layout_gravity="center"
+                android:ellipsize="end"
+                android:fontFamily="@font/pretendard_extrabold"
+                android:maxLines="1"
+                android:maxWidth="760dp"
+                android:text="@string/default_header_title"
+                android:textColor="#FFFFFFFF"
+                android:textSize="32sp" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|center_vertical"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/headerDate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/pretendard_bold"
+                    android:textColor="#FFAEB8C2"
+                    android:textSize="20sp" />
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="28dp"
+                    android:layout_marginHorizontal="18dp"
+                    android:background="#FF4A525B" />
+
+                <TextView
+                    android:id="@+id/headerClock"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/pretendard_extrabold"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="28sp" />
+            </LinearLayout>
+        </FrameLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -105,27 +128,6 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- 사이드바 오른쪽 아래에 붙은 숨기기/열기 손잡이 (◁ / ▷) -->
-            <FrameLayout
-                android:layout_width="@dimen/sidebar_handle_width"
-                android:layout_height="match_parent">
-
-                <TextView
-                    android:id="@+id/sidebarToggle"
-                    android:layout_width="match_parent"
-                    android:layout_height="@dimen/sidebar_handle_height"
-                    android:layout_gravity="bottom"
-                    android:layout_marginBottom="28dp"
-                    android:background="@drawable/sidebar_handle_bg"
-                    android:clickable="true"
-                    android:contentDescription="@string/toggle_sidebar"
-                    android:focusable="true"
-                    android:gravity="center"
-                    android:text="◁"
-                    android:textColor="@color/sidebar_text"
-                    android:textSize="18sp" />
-            </FrameLayout>
-
             <!-- 오른쪽: 대시보드(index.html) -->
             <FrameLayout
                 android:id="@+id/contentPanel"
@@ -176,6 +178,24 @@
             </FrameLayout>
         </LinearLayout>
     </LinearLayout>
+
+    <!-- 사이드바 오른쪽 아래에 붙은 숨기기/열기 손잡이 (◁ / ▷) — 대시보드 위에 반투명으로 겹쳐 표시.
+         왼쪽 여백은 코드가 사이드바 폭(열림) 또는 0(닫힘)으로 맞춘다 -->
+    <TextView
+        android:id="@+id/sidebarToggle"
+        android:layout_width="@dimen/sidebar_handle_width"
+        android:layout_height="@dimen/sidebar_handle_height"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="@dimen/sidebar_width"
+        android:layout_marginBottom="28dp"
+        android:background="@drawable/sidebar_handle_bg"
+        android:clickable="true"
+        android:contentDescription="@string/toggle_sidebar"
+        android:focusable="true"
+        android:gravity="center"
+        android:text="◁"
+        android:textColor="#CCFFFFFF"
+        android:textSize="14sp" />
 
     <!-- 일정 시간 무입력 시: 루트 동영상 + 멘트 오버레이 -->
     <FrameLayout

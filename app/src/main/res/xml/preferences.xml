@@ -47,7 +47,7 @@
     </PreferenceCategory>
 
     <PreferenceCategory app:title="화면">
-        <EditTextPreference app:key="header_title" app:defaultValue="대상 오산공장 Dashboard"
+        <EditTextPreference app:key="header_title" app:defaultValue="오산공장 스마트 현황판"
             app:title="상단 제목" app:useSimpleSummaryProvider="true" />
         <SwitchPreferenceCompat app:key="auto_refresh" app:defaultValue="true"
             app:title="자료 변경 시 화면 자동 새로고침" />
