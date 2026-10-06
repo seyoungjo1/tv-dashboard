@@ -44,6 +44,8 @@ import com.seyoungjo.tvdashboard.data.ChangeBus
 import com.seyoungjo.tvdashboard.data.ContentStore
 import com.seyoungjo.tvdashboard.data.MenuEntry
 import com.seyoungjo.tvdashboard.data.MenuScanner
+import com.seyoungjo.tvdashboard.relay.Pairing
+import com.seyoungjo.tvdashboard.relay.RelaySettings
 import com.seyoungjo.tvdashboard.server.NetInfo
 import com.seyoungjo.tvdashboard.server.ServerService
 import com.seyoungjo.tvdashboard.update.UpdateManager
@@ -83,6 +85,7 @@ class MainActivity : AppCompatActivity() {
     private var signature: String? = null
     private var current: MenuEntry? = null
     private var fullscreen = false
+    private var sidebarOpen = true
     private var resumed = false
     private var lastBack = 0L
     private var swallowGesture = false
@@ -159,6 +162,8 @@ class MainActivity : AppCompatActivity() {
         createWebView()
 
         settingsButton.setOnClickListener { openSettings() }
+        findViewById<View>(R.id.sidebarToggle).setOnClickListener { setSidebar(!sidebarOpen) }
+        setSidebar(AppSettings.prefs.getBoolean("sidebar_open", true), save = false)
         fullscreenButton.setOnClickListener { setFullscreen(!fullscreen) }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -319,6 +324,7 @@ class MainActivity : AppCompatActivity() {
                 "관리자 PC 브라우저에서 아래 주소로 접속해 폴더를 만들고\n" +
                 "index.html · 이미지 · JSON 을 업로드하세요.\n\n$urls\n\n" +
                 "관리자 비밀번호: 이 화면 왼쪽 아래 ⚙ 설정 → '관리자 비밀번호'\n\n" +
+                (if (!RelaySettings.configured) "다른 망의 PC 에서 관리: PC 프로그램(tvrun.bat)에 연결 코드  ${Pairing.code}  입력\n\n" else "") +
                 "자료 폴더: ${ContentStore.root(this).path}$err"
         )
     }
@@ -401,9 +407,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── 전체 화면 / 뒤로 ──────────────────────────────────────────────────
+    /** 왼쪽 사이드바 숨기기/열기 (상단 ☰ 버튼, 상태는 기억) */
+    private fun setSidebar(open: Boolean, save: Boolean = true) {
+        sidebarOpen = open
+        if (!fullscreen) menuPanel.visibility = if (open) View.VISIBLE else View.GONE
+        if (save) AppSettings.prefs.edit().putBoolean("sidebar_open", open).apply()
+        if (open && !fullscreen) focusSelectedTile()
+    }
+
     private fun setFullscreen(on: Boolean) {
         fullscreen = on
-        menuPanel.visibility = if (on) View.GONE else View.VISIBLE
+        menuPanel.visibility = if (on || !sidebarOpen) View.GONE else View.VISIBLE
         header.visibility = if (on) View.GONE else View.VISIBLE
         fullscreenButton.setImageResource(if (on) R.drawable.ic_menu else R.drawable.ic_fullscreen)
         fullscreenButton.contentDescription = getString(if (on) R.string.exit_fullscreen else R.string.fullscreen)
@@ -416,6 +430,7 @@ class MainActivity : AppCompatActivity() {
             idleOverlay.visibility == View.VISIBLE -> hideIdle()
             fullscreen -> setFullscreen(false)
             wv != null && wv.canGoBack() -> wv.goBack()
+            !sidebarOpen -> setSidebar(true)
             !menuList.hasFocus() && entries.isNotEmpty() -> focusSelectedTile()
             else -> {
                 val now = System.currentTimeMillis()

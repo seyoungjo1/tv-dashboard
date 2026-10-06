@@ -50,8 +50,14 @@ object RelaySettings {
         e.apply()
     }
 
+    /** 원격 연결 초기화 (다시 연결 코드로 연결) */
+    fun reset() {
+        p.edit().remove("relay_key").remove("relay_token").remove("pair_code").apply()
+    }
+
     fun publicJson(): JSONObject = JSONObject()
         .put("enabled", enabled).put("repo", repo).put("tv", tv).put("interval", intervalSec)
         .put("hasKey", key.isNotBlank()).put("hasToken", token.isNotBlank())
         .put("status", RelayWorker.status).put("lastSync", RelayWorker.lastSync)
+        .put("pairCode", if (configured) JSONObject.NULL else Pairing.code)
 }

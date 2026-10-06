@@ -23,13 +23,7 @@ if errorlevel 1 goto VENVFAIL
 
 :ACTIVATE
 call venv\Scripts\activate.bat
-
-python -c "import cryptography" >nul 2>&1
-if not errorlevel 1 goto UPDATE
-echo Installing libraries (cryptography)...
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-if errorlevel 1 goto INSTALLFAIL
+REM  libraries are checked and installed by the program itself (tvrelay\requirements.txt)
 
 :UPDATE
 python -m tvrelay update
@@ -64,10 +58,6 @@ goto END
 
 :VENVFAIL
 echo [ERROR] Could not create the virtual environment.
-goto END
-
-:INSTALLFAIL
-echo [ERROR] Library install failed. Check your internet / proxy settings.
 goto END
 
 :END

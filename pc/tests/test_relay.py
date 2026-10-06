@@ -10,7 +10,7 @@ from pathlib import Path
 from tvrelay import config
 from tvrelay.crypto import Box, CryptoError, aad, new_key
 from tvrelay.github import GitHub
-from tvrelay.relay import CHUNK, Job, Relay
+from tvrelay.relay import CHUNK, Job, Relay, pair, pair_done, pair_secrets
 
 from .fake_github import FakeGitHub
 
@@ -92,6 +92,30 @@ class RelayTest(unittest.TestCase):
         r2 = relay.result(id2)
         self.assertEqual(r2["results"][0]["data"], big)
         self.assertEqual(self.fake.refs, {})                       # 브랜치가 하나도 남지 않음
+
+
+class PairTest(unittest.TestCase):
+    def test_pair_roundtrip(self):
+        fake = FakeGitHub()
+        try:
+            tmp = Path(tempfile.mkdtemp())
+            cfg = config.setup("github_pat_x", "o/relay", "osan", tmp)
+            gh = GitHub(cfg.repo, cfg.token, base=fake.base)
+            branch = pair(cfg, "k7qm-4pxd", gh)
+            pid, key = pair_secrets("K7QM4PXD")
+            self.assertEqual(branch, "relay/pair/" + pid)
+            import base64
+            box = Box(base64.urlsafe_b64encode(key).decode().rstrip("="))
+            files = gh.commit_files(gh.ref_sha(branch))
+            got = json.loads(box.open(gh.blob(files["m"]), ("pair/%s/m" % pid).encode()))
+            self.assertEqual(got["key"], cfg.key)
+            self.assertFalse(pair_done(cfg, branch, gh))
+            gh.delete_branch(branch)                      # TV 가 가져간 뒤 지움
+            self.assertTrue(pair_done(cfg, branch, gh))
+            with self.assertRaises(ValueError):
+                pair_secrets("123")
+        finally:
+            fake.close()
 
 
 if __name__ == "__main__":

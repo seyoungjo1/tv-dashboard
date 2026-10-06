@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import time
 from pathlib import Path
@@ -16,7 +17,7 @@ from typing import Any, Callable
 
 from .config import RelayConfig
 from .crypto import Box, aad
-from .github import GitHub
+from .github import API, GitHub
 
 CHUNK = 8 * 1024 * 1024
 
@@ -62,7 +63,7 @@ class Relay:
     def __init__(self, cfg: RelayConfig, gh: GitHub | None = None):
         self.cfg = cfg
         self.tv = cfg.tv
-        self.gh = gh or GitHub(cfg.repo, cfg.token)
+        self.gh = gh or GitHub(cfg.repo, cfg.token, base=os.environ.get("TVRELAY_GITHUB_API") or API)
         self.box = Box(cfg.key)
 
     def _branch(self, kind: str, id_: str = "") -> str:
@@ -131,6 +132,40 @@ class Relay:
         interval = int(st.get("interval", 10) or 10)
         st["online"] = st["age_sec"] < max(6 * 60, interval * 3)    # TV 는 5분마다 상태를 다시 올린다
         return st
+
+
+# ── TV 무설정 연결 (연결 코드) — TV 앱 relay/Pairing.kt 와 짝 ──
+PAIR_ITER = 200_000
+
+
+def normalize_code(code: str) -> str:
+    return "".join(ch for ch in code.upper() if ch.isalnum())
+
+
+def pair_secrets(code: str) -> tuple[str, bytes]:
+    c = normalize_code(code)
+    if len(c) != 8:
+        raise ValueError("연결 코드는 TV 화면에 보이는 8글자(예: K7QM-4PXD)입니다")
+    pid = hashlib.pbkdf2_hmac("sha256", c.encode(), b"tvpair-id", PAIR_ITER, 8).hex()
+    key = hashlib.pbkdf2_hmac("sha256", c.encode(), b"tvpair-key", PAIR_ITER, 32)
+    return pid, key
+
+
+def pair(cfg: RelayConfig, code: str, gh: GitHub | None = None) -> str:
+    """연결 정보(레포·TV 이름·암호키·토큰)를 코드로 암호화해 relay/pair/<id> 에 올린다. TV 가 가져가면 브랜치가 사라진다."""
+    import base64
+    gh = gh or GitHub(cfg.repo, cfg.token, base=os.environ.get("TVRELAY_GITHUB_API") or API)
+    pid, key = pair_secrets(code)
+    box = Box(base64.urlsafe_b64encode(key).decode().rstrip("="))
+    sealed = box.seal(json.dumps(cfg.to_json(), ensure_ascii=False).encode("utf-8"), ("pair/%s/m" % pid).encode())
+    branch = "relay/pair/" + pid
+    gh.delete_branch(branch)
+    gh.create_branch(branch, gh.create_orphan_commit({"m": sealed}, "pair"))
+    return branch
+
+
+def pair_done(cfg: RelayConfig, branch: str, gh: GitHub | None = None) -> bool:
+    return (gh or GitHub(cfg.repo, cfg.token, base=os.environ.get("TVRELAY_GITHUB_API") or API)).ref_sha(branch) is None
 
 
 def read_local(path: str | Path) -> bytes:

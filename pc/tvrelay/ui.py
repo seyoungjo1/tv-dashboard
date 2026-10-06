@@ -11,10 +11,15 @@
   GET  /api/pending      TV 가 아직 가져가지 않은 작업
   POST /api/cancel       {id} 아직 안 가져간 작업 취소
   POST /api/update       프로그램 업데이트 확인·적용
+  POST /api/pair         {code} → TV 화면의 연결 코드로 TV 연결 (TV 에서는 설정할 것 없음)
+  GET  /api/pairdone?branch=  TV 가 연결 정보를 가져갔는가
+  POST /api/preview      {paths:[…]} → 미리보기용으로 TV 에서 파일 받아 오기 (이미 받아 둔 것은 건너뜀)
+  GET  /preview/<경로>    받아 둔 미리보기 파일 (index.html 의 상대 경로 css·js·json 도 그대로 동작)
 """
 from __future__ import annotations
 
 import json
+import mimetypes
 import shutil
 import threading
 import traceback
@@ -26,9 +31,14 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
 from . import __version__, config, update
-from .relay import Job, Relay
+from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
+# Windows 레지스트리에 따라 .js 가 text/plain 이 되는 일이 있어 자주 쓰는 형식은 고정
+MIME = {"html": "text/html", "htm": "text/html", "js": "text/javascript", "mjs": "text/javascript", "css": "text/css",
+        "json": "application/json", "svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "gif": "image/gif", "webp": "image/webp", "mp4": "video/mp4", "webm": "video/webm", "txt": "text/plain", "csv": "text/csv",
+        "woff2": "font/woff2", "woff": "font/woff", "ttf": "font/ttf"}
 LOG: list[str] = []
 
 
@@ -43,8 +53,12 @@ class Api:
         self.root = root
         self.stage = root / "out" / "stage"
         self.downloads = root / "downloads"
+        self.preview = root / "out" / "preview"
         self.stage.mkdir(parents=True, exist_ok=True)
         self.downloads.mkdir(parents=True, exist_ok=True)
+        self.preview.mkdir(parents=True, exist_ok=True)
+        self.preview_jobs: set[str] = set()
+        self.tree: dict[str, dict[str, Any]] = {}
         self._relay: Relay | None = None
         self.lock = threading.Lock()
 
@@ -76,7 +90,61 @@ class Api:
         st = self.relay().state()
         if st is None:
             return {"none": True, "online": False}
+        self.tree = {e["p"]: e for e in st.get("tree") or []}
         return st
+
+    # ── 미리보기 캐시 (out/preview/<경로>) ──
+    def _meta_path(self) -> Path:
+        return self.preview / ".meta.json"
+
+    def _meta(self) -> dict[str, Any]:
+        try:
+            return json.loads(self._meta_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _save_meta(self, m: dict[str, Any]) -> None:
+        self._meta_path().write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+
+    def _cache_file(self, rel: str) -> Path:
+        parts = [p for p in rel.replace("\\", "/").split("/") if p and p not in (".", "..")]
+        if not parts:
+            raise ValueError("잘못된 경로")
+        return self.preview.joinpath(*parts)
+
+    def _cache_put(self, rel: str, data: bytes, t: Any = None, local: bool = False) -> None:
+        f = self._cache_file(rel)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(data)
+        m = self._meta()
+        m[rel] = {"t": t, "s": len(data), "local": local}
+        self._save_meta(m)
+
+    def _cache_ok(self, rel: str, meta: dict[str, Any]) -> bool:
+        e = self.tree.get(rel)
+        c = meta.get(rel)
+        if not e or not c or not self._cache_file(rel).is_file():
+            return False
+        if c.get("t") is not None and c.get("t") == e.get("t"):
+            return True
+        return bool(c.get("local")) and c.get("s") == e.get("s")
+
+    def request_preview(self, body: dict[str, Any]) -> dict[str, Any]:
+        paths = [str(p) for p in body.get("paths") or [] if str(p) in self.tree and not self.tree[str(p)].get("d")]
+        meta = self._meta()
+        need = [p for p in paths if not self._cache_ok(p, meta)]
+        total = sum(int(self.tree[p].get("s") or 0) for p in need)
+        if total > 200 * 1024 * 1024:
+            raise ValueError("미리보기로 받기에는 너무 큽니다 (%.0f MB). 필요한 파일만 '다운로드' 하세요." % (total / 1048576))
+        if not need:
+            return {"ready": True}
+        job = Job()
+        for p in need:
+            job.op("get", path=p)
+        id_ = self.relay().submit(job)
+        self.preview_jobs.add(id_)
+        echo("미리보기용으로 TV 에서 %d개 받는 중… (%s)" % (len(need), id_))
+        return {"id": id_, "count": len(need)}
 
     def put_stage(self, data: bytes) -> dict[str, Any]:
         sid = uuid.uuid4().hex
@@ -97,6 +165,10 @@ class Api:
                 used.append(f)
                 if kind == "put":
                     job.put(str(op["path"]), data, bool(op.get("overwrite", True)))
+                    try:
+                        self._cache_put(str(op["path"]), data, local=True)   # 방금 올린 파일은 바로 미리보기
+                    except (OSError, ValueError):
+                        pass
                 else:
                     job.apk(data)
             elif kind in ("mkdir", "delete", "rename", "sample", "settings", "reload", "get", "ping", "list"):
@@ -120,6 +192,13 @@ class Api:
         r = self.relay().result(id_)
         if r is None:
             return {"pending": True}
+        if id_ in self.preview_jobs:
+            self.preview_jobs.discard(id_)
+            for item in r.get("results", []):
+                if "data" in item:
+                    p = str(item.get("path"))
+                    self._cache_put(p, item.pop("data"), t=(self.tree.get(p) or {}).get("t"))
+            return r
         for item in r.get("results", []):
             if "data" in item:
                 name = Path(str(item.get("name") or item.get("path") or "file")).name or "file"
@@ -161,6 +240,18 @@ class Api:
             return 200, {"ok": True}
         if method == "POST" and path == "/api/update":
             return 200, self.do_update()
+        if method == "POST" and path == "/api/pair":
+            cfg = config.load(self.root)
+            if cfg is None:
+                raise ValueError("먼저 GitHub 토큰을 저장하세요")
+            branch = pair(cfg, str(body.get("code", "")))
+            echo("TV 연결 정보를 보냈습니다 — TV 가 가져가기를 기다립니다")
+            return 200, {"branch": branch}
+        if method == "GET" and path == "/api/pairdone":
+            cfg = config.load(self.root)
+            return 200, {"done": bool(cfg) and pair_done(cfg, one("branch"))}
+        if method == "POST" and path == "/api/preview":
+            return 200, self.request_preview(body)
         if method == "GET" and path == "/api/log":
             return 200, {"lines": LOG[-100:]}
         return 404, {"error": "없는 주소: %s %s" % (method, path)}
@@ -191,6 +282,19 @@ def make_handler(api: Api):
                 return self._send(403, {"error": "forbidden"})
             if method == "GET" and u.path in ("/", "/index.html"):
                 return self._send(200, (HERE / "ui.html").read_bytes(), "text/html; charset=utf-8")
+            if method == "GET" and u.path.startswith("/preview/"):
+                from urllib.parse import unquote
+                rel = unquote(u.path[len("/preview/"):])
+                try:
+                    f = api._cache_file(rel)
+                except ValueError:
+                    return self._send(404, {"error": "없음"})
+                if not f.is_file() or api.preview.resolve() not in f.resolve().parents:
+                    return self._send(404, {"error": "아직 받지 않은 파일입니다"})
+                ctype = MIME.get(f.suffix.lower().lstrip(".")) or mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+                if ctype.startswith("text/") or ctype in ("application/json", "application/javascript"):
+                    ctype += "; charset=utf-8"
+                return self._send(200, f.read_bytes(), ctype)
             if method == "GET" and u.path == "/api/download":
                 name = Path((parse_qs(u.query).get("f") or [""])[0]).name
                 f = api.downloads / name

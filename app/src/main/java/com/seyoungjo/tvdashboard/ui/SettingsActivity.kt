@@ -125,6 +125,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
         click("storage_info") { showUninstallNotice() }
         click("relay_import") { pickRelay.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")) }
         click("relay_info") { refresh() }
+        click("relay_code") { RelayWorker.kick(); refresh() }
+        click("relay_reset") {
+            AlertDialog.Builder(requireContext())
+                .setTitle("원격 연결 초기화")
+                .setMessage("기존 원격 연결을 지우고 새 연결 코드를 만듭니다. PC 프로그램에서 새 코드로 다시 연결해야 합니다. 계속할까요?")
+                .setPositiveButton("초기화") { _, _ -> RelaySettings.reset(); RelayWorker.kick(); refresh() }
+                .setNegativeButton("취소", null).show()
+        }
         numeric("relay_interval")
         findPreference<Preference>("relay_enabled")?.setOnPreferenceChangeListener { _, _ ->
             view?.post { RelayWorker.kick(); refresh() }; true
@@ -164,6 +172,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("storage_info")?.summary = ContentStore.root(ctx).path +
             (if (pending) "\n(공용 폴더 권한이 없어 앱 전용 폴더 사용 중)" else "") +
             (if (mode == "app") "\n⚠ 앱을 삭제하면 이 폴더의 자료도 삭제됩니다." else "\n앱을 삭제해도 자료는 남습니다.")
+        findPreference<Preference>("relay_code")?.summary =
+            if (RelaySettings.configured) "연결됨 (${RelaySettings.repo} · ${RelaySettings.tv})"
+            else "${com.seyoungjo.tvdashboard.relay.Pairing.code}  ← PC 프로그램의 [TV 연결]에 입력하세요"
         findPreference<Preference>("relay_info")?.summary =
             "${RelayWorker.status}\n레포: ${RelaySettings.repo} · TV 이름: ${RelaySettings.tv}" +
                 (if (RelayWorker.lastSync > 0) "\n마지막 확인: " + java.text.DateFormat.getTimeInstance().format(java.util.Date(RelayWorker.lastSync)) else "")

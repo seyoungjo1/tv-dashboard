@@ -58,8 +58,14 @@ object RelayWorker {
             var wait = 30_000L
             try {
                 if (!RelaySettings.enabled) status = "꺼짐"
-                else if (!RelaySettings.configured) status = "설정 필요 (tvrelay.json 불러오기)"
-                else {
+                else if (!RelaySettings.configured) {
+                    // 아직 연결 전: PC 프로그램에 연결 코드를 넣으면 레포에서 연결 정보를 스스로 받아 온다
+                    status = "연결 대기 — PC 프로그램에 연결 코드 ${Pairing.code} 입력"
+                    if (Pairing.pollOnce(RelaySettings.repo)) {
+                        status = "연결됨 — 첫 동기화 중"
+                        wait = 500L
+                    } else wait = 15_000L
+                } else {
                     cycle(ctx)
                     wait = RelaySettings.intervalSec * 1000L
                 }

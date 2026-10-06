@@ -5,6 +5,7 @@
   python -m tvrelay setup --token T [--repo R] [--tv NAME]   처음 설정(키 자동 생성)
   python -m tvrelay put LOCAL REMOTE [--wait 120]            파일 하나 올리기 (tvupload.bat · 작업 스케줄러용)
   python -m tvrelay status                   TV 상태
+  python -m tvrelay pair K7QM-4PXD           TV 화면의 연결 코드로 연결
 """
 from __future__ import annotations
 
@@ -23,6 +24,47 @@ def _relay() -> Relay:
     if cfg is None:
         raise SystemExit("설정이 없습니다. tvrun.bat 을 실행해 [처음 설정]을 마치세요.")
     return Relay(cfg)
+
+
+def _ensure_deps(echo=print) -> None:
+    """tvrelay/requirements.txt 의 라이브러리가 없으면 지금 설치한다 (s4bridge/cli.py 와 같은 방식).
+    bat 이 아니라 프로그램이 실행 때마다 확인한다 — 옛 bat 으로 켜도 새 버전의 요구 사항이 채워진다."""
+    import importlib
+    import subprocess
+
+    req = Path(__file__).resolve().parent / "requirements.txt"
+    if not req.is_file():
+        return
+    for line in req.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        spec, _, cond = line.partition(";")
+        parts = spec.split()
+        if len(parts) < 2:
+            continue
+        pip_name, mod = parts[0], parts[1]
+        if cond.strip():
+            try:
+                if not eval(cond.strip(), {"__builtins__": {}}, {"sys_platform": sys.platform}):  # noqa: S307 — 우리 파일의 조건식뿐
+                    continue
+            except Exception:
+                continue
+        try:
+            importlib.import_module(mod)
+            continue
+        except ImportError:
+            pass
+        echo("라이브러리 %s 가 없어 설치합니다…" % pip_name)
+        try:
+            # 바이너리 휠만 받는다 — 소스 빌드(Rust 등)로 빠지면 회사망·새 Python 에서 실패하므로 그 경우는 건너뛴다
+            done = subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "--only-binary=:all:", pip_name],
+                                  capture_output=True, timeout=600)
+            if done.returncode != 0:
+                tail = (done.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-1:]
+                echo("  설치하지 못했습니다 (없어도 기본 기능은 동작합니다): %s" % (tail[0] if tail else ""))
+        except Exception as e:
+            echo("  설치하지 못했습니다: %s" % e)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,7 +90,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("remote")
     s.add_argument("--wait", type=int, default=120, help="TV 결과를 기다릴 초 (0 = 기다리지 않음)")
     sub.add_parser("status", help="TV 상태")
+    s = sub.add_parser("pair", help="TV 화면의 연결 코드로 TV 연결 (TV 에서는 설정할 것 없음)")
+    s.add_argument("code")
     a = ap.parse_args(argv)
+    if a.cmd != "update":
+        _ensure_deps()
 
     if a.cmd in (None, "ui"):
         from .ui import serve
@@ -73,6 +119,21 @@ def main(argv: list[str] | None = None) -> int:
         for item in res.get("results", []):
             print(("성공" if item.get("ok") else "실패") + ": %s %s" % (item.get("path"), item.get("error", "")))
         return 0 if res.get("ok") else 1
+    if a.cmd == "pair":
+        from .relay import pair, pair_done
+        import time as _t
+        cfg = config.load(ROOT)
+        if cfg is None:
+            raise SystemExit("먼저 tvrun.bat 에서 GitHub 토큰을 설정하세요.")
+        branch = pair(cfg, a.code)
+        print("연결 정보를 보냈습니다. TV 가 가져가기를 기다립니다 (최대 2분)…")
+        for _ in range(40):
+            _t.sleep(3)
+            if pair_done(cfg, branch):
+                print("연결 완료: TV '%s'" % cfg.tv)
+                return 0
+        print("TV 응답이 없습니다. TV 가 켜져 있고 인터넷에 연결돼 있는지, 코드가 맞는지 확인하세요.")
+        return 3
     if a.cmd == "status":
         st = _relay().state()
         if not st:

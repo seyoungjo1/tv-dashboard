@@ -4,6 +4,7 @@
     <string name="settings">설정</string>
     <string name="default_header_title">대상 오산공장 Dashboard</string>
     <string name="fullscreen">전체 화면</string>
+    <string name="toggle_sidebar">메뉴 숨기기/열기</string>
     <string name="exit_fullscreen">메뉴 보기</string>
     <string name="no_index">이 폴더에 index.html 이 없습니다.</string>
     <string name="empty_title">표시할 자료가 없습니다</string>

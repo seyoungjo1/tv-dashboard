@@ -1,0 +1,7 @@
+# tvrelay 가 쓰는 라이브러리 — 프로그램이 실행할 때 스스로 확인하고 없으면 설치한다 (cli._ensure_deps).
+# bat 의 설치 단계보다 업데이트가 뒤에 돌기 때문에, 새 버전이 필요로 하는 것은 여기 적어야 옛 bat 으로도 깔린다.
+# 형식: <pip 이름> <import 이름> [; 조건]
+# Windows: 암호화는 운영체제의 CNG(bcrypt.dll)를 쓰므로 cryptography 가 필요 없다 (32비트·최신 Python·회사망에서도 설치 문제 없음).
+# truststore 는 Windows 인증서 저장소의 회사 인증서를 쓰기 위해 (회사망의 SSL 검사 장비 대응).
+truststore truststore ; sys_platform == "win32"
+cryptography cryptography ; sys_platform != "win32"

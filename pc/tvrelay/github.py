@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import base64
 import json
-import ssl
 import urllib.error
 import urllib.request
 from typing import Any
 from urllib.parse import quote
+
+from .net import explain, ssl_context
 
 API = "https://api.github.com"
 
@@ -35,7 +36,7 @@ class GitHub:
                      "X-GitHub-Api-Version": "2022-11-28",
                      "User-Agent": "tvrelay-pc",
                      **({"Content-Type": "application/json"} if data is not None else {})})
-        ctx = ssl.create_default_context() if self.base.startswith("https") else None
+        ctx = ssl_context() if self.base.startswith("https") else None
         try:
             with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as r:
                 return r.status, r.read()
@@ -53,7 +54,7 @@ class GitHub:
                 raise GitHubError(403, "GitHub 권한이 없거나 호출 한도를 넘었습니다 (403). %s" % msg) from None
             raise GitHubError(e.code, "GitHub 오류 %d %s" % (e.code, msg)) from None
         except urllib.error.URLError as e:
-            raise GitHubError(0, "GitHub 에 연결할 수 없습니다: %s" % e.reason) from None
+            raise GitHubError(0, "GitHub 에 연결할 수 없습니다: %s" % explain(e.reason if isinstance(e.reason, BaseException) else e)) from None
 
     def _json(self, method: str, path: str, body: Any = None, ok: tuple[int, ...] = (200, 201)) -> Any:
         code, data = self.request(method, path, body, ok=ok + (404, 409, 422))

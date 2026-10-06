@@ -86,7 +86,7 @@ jobs:
       - name: PC 프로그램(tvrelay) 시험
         working-directory: pc
         run: |
-          python3 -m pip install -q -r requirements.txt
+          python3 -m pip install -q cryptography
           python3 -m unittest discover -s tests -t . -v
 
       - name: 디버그 APK 보관
@@ -209,7 +209,7 @@ jobs:
           PY
           cat dist/update.json
           # PC 원격 관리 프로그램 압축본 (tvrun.bat · tvupload.bat · tvrelay/)
-          (cd pc && zip -qr "../dist/tvrelay-pc-v$VERSION.zip" tvrelay tvrun.bat tvupload.bat requirements.txt README.md -x '*/__pycache__/*')
+          (cd pc && zip -qr "../dist/tvrelay-pc-v$VERSION.zip" tvrelay tvrun.bat tvupload.bat README.md -x '*/__pycache__/*')
           echo "apk=dist/$APK" >> "$GITHUB_OUTPUT"
 
       - name: Release APK 보관

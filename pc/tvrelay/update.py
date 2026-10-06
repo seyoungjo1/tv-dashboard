@@ -9,6 +9,7 @@ tvrelay/ · tv*.bat · requirements.txt 만 내려받아 교체한다.
   · 사용자 것(tvrelay.json · token.txt · out · venv · backup · downloads)은 절대 건드리지 않는다.
   · 지금 돌고 있는 .bat 은 덮어쓸 수 없으므로 <이름>_v<버전>.bat 로 받아 두고, 그 파일을 실행하면
     첫머리의 self-heal 줄이 자기를 원본으로 되돌린다.
+  · 라이브러리는 tvrelay/requirements.txt 에 적고, 프로그램이 실행할 때 확인·설치한다 (cli._ensure_deps).
   · 받은 파일끼리 맞물리는지 자식 파이썬으로 한 번 임포트해 보고, 아니면 VERSION 을 올리지 않는다.
   · VERSION 은 맨 마지막에, 모든 파일이 맞을 때만 쓴다.
   · 버전이 같아도 배포와 내용이 다른 파일이 있으면(blob SHA 비교) 다시 받는다.
@@ -22,7 +23,6 @@ import json
 import os
 import re
 import shutil
-import ssl
 import subprocess
 import sys
 import time
@@ -33,6 +33,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from .net import explain, ssl_context
+
 PKG_DIR = Path(__file__).resolve().parent          # <폴더>/tvrelay
 ROOT = PKG_DIR.parent
 REPO = "seyoungjo1/tv-dashboard"
@@ -41,7 +43,7 @@ PKG = "tvrelay"
 REMOTE_PREFIX = "pc/"                               # 레포 안의 pc/ 폴더 = PC 프로그램 폴더
 VERSION_PATH = PKG + "/VERSION"
 INCLUDE_BAT = re.compile(r"^tv[A-Za-z0-9_\-]*\.bat$", re.I)
-INCLUDE_FILES = {"requirements.txt", "README.md"}
+INCLUDE_FILES = {"README.md"}
 
 
 class UpdateError(Exception):
@@ -76,7 +78,7 @@ def _get(path: str, token: str, raw: bool = False, timeout: float = 30) -> bytes
         headers["Authorization"] = "Bearer " + token
     req = urllib.request.Request(API + path, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context()) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as r:
             return r.read()
     except urllib.error.HTTPError as e:
         if e.code in (401, 403) and token:
@@ -88,7 +90,7 @@ def _get(path: str, token: str, raw: bool = False, timeout: float = 30) -> bytes
             raise UpdateError("찾지 못했습니다 (HTTP 404): %s" % path) from None
         raise UpdateError("GitHub 오류 HTTP %d: %s" % (e.code, path)) from None
     except urllib.error.URLError as e:
-        raise UpdateError("GitHub 에 연결할 수 없습니다: %s" % e.reason) from None
+        raise UpdateError("GitHub 에 연결할 수 없습니다: %s" % explain(e.reason if isinstance(e.reason, BaseException) else e)) from None
 
 
 def branch_sha(token: str) -> str:
