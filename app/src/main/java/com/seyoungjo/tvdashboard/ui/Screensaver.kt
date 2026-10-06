@@ -65,6 +65,9 @@ class Screensaver(
     var active = false
         private set
 
+    /** 자료 폴더 안의 실제 이름 (main / Main …) — 페이지가 그 이름으로 JSON 을 읽는다 */
+    var folder = "main"
+
     /** true = 크롭(꽉 채움), false = 맞춤(블러 채움) */
     var crop = false
         set(value) {
@@ -204,6 +207,7 @@ class Screensaver(
             .put("message", AppSettings.idleMessage.trim())
             .put("blink", AppSettings.idleMsgHideSec > 0)
             .put("videos", videos.size)
+            .put("folder", folder)
             .toString()
 
         /** 동영상 칸 위치 (CSS px) — 페이지 폭 vw 기준이라 WebView 실제 픽셀로 환산 */

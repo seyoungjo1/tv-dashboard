@@ -345,17 +345,19 @@ class MainActivity : AppCompatActivity() {
             val mainVideos = MenuScanner.mainVideos(main)
             val crop = MenuScanner.mainCrop(main)
             val sig = MenuScanner.signature(list)
-            handler.post { applyMenu(list, sig, videos, main != null, mainVideos, crop, force) }
+            handler.post { applyMenu(list, sig, videos, main?.name, mainVideos, crop, force) }
         }
     }
 
     private fun applyMenu(
-        list: List<MenuEntry>, sig: String, videos: List<File>, main: Boolean, mainVideos: List<File>, crop: Boolean,
+        list: List<MenuEntry>, sig: String, videos: List<File>, mainName: String?, mainVideos: List<File>, crop: Boolean,
         force: Boolean,
     ) {
         if (isDestroyed) return
         idleVideos = videos
+        val main = mainName != null
         hasMain = main
+        if (mainName != null) screensaver.folder = mainName
         screensaver.crop = crop
         screensaver.setVideos(mainVideos)
         if (!main && screensaver.active && idleOverlay.visibility == View.VISIBLE) hideIdle()

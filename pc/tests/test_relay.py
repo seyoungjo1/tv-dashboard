@@ -262,6 +262,23 @@ class CacheTest(unittest.TestCase):
             fake.close()
 
 
+class RepoRulesTest(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[2]
+
+    def test_version_format(self):
+        import re
+        v = (self.ROOT / "pc" / "tvrelay" / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertRegex(v, r"^\d+\.\d+\.\d+(_p\d+)?$")       # 안드로이드 버전 또는 <버전>_pN
+
+    def test_screensaver_copy_matches_app(self):
+        app = self.ROOT / "app" / "src" / "main" / "assets" / "screensaver"
+        pc = self.ROOT / "pc" / "tvrelay" / "screensaver"
+        if not app.is_dir():
+            self.skipTest("app 폴더 없음")
+        for f in app.iterdir():
+            self.assertEqual(f.read_bytes(), (pc / f.name).read_bytes(), "pc/tvrelay/screensaver/%s 를 다시 복사하세요" % f.name)
+
+
 class PairTest(unittest.TestCase):
     def test_pair_roundtrip(self):
         fake = FakeGitHub()

@@ -484,9 +484,18 @@ def make_handler(api: Api):
                 if not f.is_file():
                     return self._send(404, {"error": "없음"})
                 return self._send(200, f.read_bytes(), MIME.get(f.suffix.lower().lstrip("."), "application/octet-stream"))
-            if method == "GET" and u.path.startswith("/preview/"):
+            if method == "GET" and u.path.startswith("/ss/"):          # 화면보호기 미리보기 (TV 와 같은 페이지 사본)
+                name = Path(u.path).name
+                f = HERE / "screensaver" / name
+                if not f.is_file():
+                    return self._send(404, {"error": "없음"})
+                ctype = MIME.get(f.suffix.lower().lstrip(".")) or mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+                if ctype.startswith("text/") or ctype in ("application/javascript",):
+                    ctype += "; charset=utf-8"
+                return self._send(200, f.read_bytes(), ctype)
+            if method == "GET" and (u.path.startswith("/preview/") or u.path.startswith("/data/")):
                 from urllib.parse import unquote
-                rel = unquote(u.path[len("/preview/"):])
+                rel = unquote(u.path.split("/", 2)[2])                   # /data/… 은 화면보호기 페이지가 TV 에서처럼 읽는 주소
                 try:
                     f = api._cache_file(rel)
                 except ValueError:
