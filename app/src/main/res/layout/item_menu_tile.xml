@@ -10,20 +10,18 @@
     android:paddingHorizontal="6dp"
     android:paddingVertical="12dp">
 
-    <!-- 정사각형 아이콘 박스 + 폴더의 icon.png (흰색·투명 배경 아이콘 권장) -->
+    <!-- 폴더의 icon.png (흰색·투명 배경) — 틀·색 없이 검은 사이드바 위에 그대로 -->
     <FrameLayout
         android:id="@+id/tileFrame"
         android:layout_width="@dimen/menu_icon"
-        android:layout_height="@dimen/menu_icon"
-        android:background="@drawable/icon_box_bg"
-        android:duplicateParentState="true">
+        android:layout_height="@dimen/menu_icon">
 
         <ImageView
             android:id="@+id/tileImage"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:importantForAccessibility="no"
-            android:padding="12dp"
+            android:padding="4dp"
             android:scaleType="fitCenter" />
 
         <TextView

@@ -2,9 +2,9 @@
 <resources>
     <!-- vDesk 스타일: 어두운 헤더·사이드바 + 밝은 콘텐츠 -->
     <color name="header">#FF1E2125</color>
-    <color name="sidebar">#FF2B2F34</color>
-    <color name="sidebar_selected">#FF3A4047</color>
-    <color name="sidebar_focus">#FF4A525B</color>
+    <color name="sidebar">#FF121416</color>
+    <color name="sidebar_selected">#FF26292D</color>
+    <color name="sidebar_focus">#FF33373C</color>
     <color name="sidebar_text">#FFD5DAE0</color>
     <color name="content_bg">#FFEEF1F4</color>
     <color name="content_text">#FF2B3440</color>
