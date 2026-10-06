@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>화면보호기</title>
 <!-- 대상 오산공장 Dashboard — 화면보호기 (자료/main 폴더가 있으면 대기 화면으로 표시)
      main/생산.json · sd.json · fi.json · plan.json  실적 대시보드 생성기의 JSON 4개 그대로
@@ -31,7 +31,7 @@
             <div class="n"><div class="nl">당월</div><div class="nv"><span class="count" id="s_m">0</span><small>억원</small></div><div class="badge" id="s_m_b"></div></div>
             <div class="n"><div class="nl">누계</div><div class="nv"><span class="count" id="s_y">0</span><small>억원</small></div><div class="badge" id="s_y_b"></div></div>
           </div>
-          <svg class="chart" id="s_chart"></svg>
+          <div class="chartbox"><svg class="chart" id="s_chart"></svg></div>
         </div>
         <div class="vline"></div>
         <div class="half" id="prod">
@@ -40,7 +40,7 @@
             <div class="n"><div class="nl">당월</div><div class="nv"><span class="count" id="p_m">0</span><small>톤</small></div><div class="badge" id="p_m_b"></div></div>
             <div class="n"><div class="nl">누계</div><div class="nv"><span class="count" id="p_y">0</span><small>톤</small></div><div class="badge" id="p_y_b"></div></div>
           </div>
-          <svg class="chart" id="p_chart"></svg>
+          <div class="chartbox"><svg class="chart" id="p_chart"></svg></div>
         </div>
         <div class="empty" id="perfEmpty">main 폴더에 생산.json · sd.json · fi.json · plan.json 을 넣으면 매출·생산 실적이 표시됩니다</div>
       </div>

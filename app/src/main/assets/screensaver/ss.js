@@ -18,8 +18,9 @@
   // ── 화면 맞춤: 1920×1080 기준으로 확대/축소하되, 비율이 다른 화면(16:10 · 21:9 · 4K 등)은
   //    남는 방향으로 무대를 늘려 빈 띠 없이 꽉 채운다 (글자·차트 크기는 비율 그대로) ──
   function fit() {
-    var W = innerWidth, H = innerHeight;
-    if (!W || !H) return;
+    var de = document.documentElement;
+    var W = de.clientWidth || innerWidth, H = de.clientHeight || innerHeight;   // WebView 가 아직 크기를 못 잡았으면 다음 기회에
+    if (!W || !H) { requestAnimationFrame(fit); return; }
     var s = Math.min(W / 1920, H / 1080);
     var st = $('stage');
     st.style.width = (W / s) + 'px';
@@ -169,10 +170,13 @@
   function chart(svg, series, color, gid, dec) {
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     // 칸의 실제 크기(무대 단위)로 그린다 — 화면 비율이 달라도 글자·점은 그대로, 그래프만 칸을 채움
-    var W = Math.max(200, Math.round(svg.clientWidth || 560)), H = Math.max(120, Math.round(svg.clientHeight || 250));
-    var L = 64, R = 18, T = 36, B = 40;
+    var box = svg.parentNode;
+    var W = Math.max(200, Math.round(box.clientWidth || 560)), H = Math.max(100, Math.round(box.clientHeight || 250));
+    svg.dataset.size = W + 'x' + H;
+    var R = 18, T = 36, B = 40;
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
     var max = niceMax(Math.max.apply(null, series.map(function (v) { return v || 0; })));
+    var L = 22 + tickLabel(max).length * 12;                 // 눈금 숫자 길이만큼 왼쪽 여백 (8,000 · 50k 등이 잘리지 않게)
     var X = function (i) { return L + (W - L - R) * i / 11; };
     var Y = function (v) { return T + (H - T - B) * (1 - v / max); };
     var defs = el('defs', {}, svg), g = el('linearGradient', { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
@@ -251,7 +255,7 @@
       : (a[4] || '').replace(/^\uFEFF/, '').split(/\r?\n/);
     lines = lines.map(function (s) { return String(s).trim(); }).filter(Boolean).slice(0, 5);
     var nb = $('notice');
-    nb.className = 'card' + (lines.length ? '' : ' none');
+    nb.className = 'card' + (lines.length ? (lines.length >= 4 ? ' n' + lines.length : '') : ' none');
     nb.innerHTML = '';
     lines.forEach(function (t) { var d = document.createElement('div'); d.className = 'row'; d.textContent = t; nb.appendChild(d); });
     // 동영상 칸: TV 는 앱이 그 위에 재생, 미리보기는 목록·방식을 글로 보여 준다
@@ -259,7 +263,7 @@
     $('video').classList.toggle('playing', !!TV && (cfg.videos || 0) > 0);
     if (!TV && vids) {
       $('videoPh').innerHTML = '<div>' + (vids.length
-        ? '▶ 동영상 ' + vids.length + '개 · ' + (override.fit === 'crop' ? '크롭(꽉 채움)' : '맞춤(남는 곳 흐리게)') +
+        ? '▶ 동영상 ' + vids.length + '개 (TV 에서 재생)' +
           '<br><span style="font-size:.85em;opacity:.8">' + vids.map(function (n) { return n.replace(/[&<>]/g, ''); }).join(' → ') + '</span>'
         : 'main 폴더에 1.mp4, 2.mp4 … 를 넣으면<br>여기에 순서대로 재생됩니다') + '</div>';
     }
@@ -284,19 +288,100 @@
     if (lastA) paint(lastA);
   });
 
+  // ── 유튜브 (쇼츠 포함): TV 앱이 차례가 되면 ssYoutube 를 부르고, 끝나면 TVSS.ytDone 으로 알려 준다 ──
+  //    공식 IFrame 플레이어로 소리 없이 재생. 인터넷이 없거나 퍼가기가 막힌 영상은 실패로 알려 건너뛴다.
+  var ytWait = null, ytPlayer = null, ytCur = null, ytTimer = 0;
+  function loadYtApi(cb) {
+    if (window.YT && YT.Player) return cb();
+    if (!ytWait) {
+      ytWait = [];
+      window.onYouTubeIframeAPIReady = function () { var w = ytWait; ytWait = null; w.forEach(function (f) { f(); }); };
+      var sc = document.createElement('script');
+      sc.src = 'https://www.youtube.com/iframe_api';
+      sc.onerror = function () { ytWait = null; ytDone(false); };
+      document.head.appendChild(sc);
+    }
+    ytWait.push(cb);
+  }
+  function ytDone(ok) {
+    var o = ytCur; if (!o) return;
+    ytCur = null; clearTimeout(ytTimer);
+    if (TV) { try { TV.ytDone(o.seq, ok); } catch (e) {} }
+  }
+  window.ssYoutubeStop = function () {
+    clearTimeout(ytTimer); ytCur = null;
+    if (ytPlayer) { try { ytPlayer.destroy(); } catch (e) {} ytPlayer = null; }
+    var w = $('yt'); if (w) w.remove();
+  };
+  /** o = {seq, id, vertical, crop, align: top|center|bottom, fill: blur|color, color, loop} */
+  window.ssYoutube = function (o) {
+    window.ssYoutubeStop();
+    ytCur = o;
+    var box = $('video'), bw = box.clientWidth, bh = box.clientHeight;
+    var ar = o.vertical ? 9 / 16 : 16 / 9;                     // 영상 가로/세로
+    var s = o.crop ? Math.max(bw / ar, bh) : Math.min(bw / ar, bh);
+    var vh = Math.round(s), vw = Math.round(s * ar);
+    var x = (bw - vw) / 2, y = (bh - vh) / 2;
+    if (o.crop) {                                              // 크롭: 넘치는 쪽을 위·가운데·아래(왼·가운데·오른) 맞춤
+      if (vh > bh) y = o.align === 'top' ? 0 : o.align === 'bottom' ? bh - vh : y;
+      else x = o.align === 'top' ? 0 : o.align === 'bottom' ? bw - vw : x;
+    }
+    var wrap = document.createElement('div');
+    wrap.id = 'yt';
+    wrap.style.background = !o.crop && o.fill === 'color' ? o.color : '#0d1620';
+    if (!o.crop && o.fill !== 'color') {                       // 확장 + 블러: 같은 영상의 썸네일을 흐리게 깔기
+      var bg = document.createElement('img');
+      bg.className = 'ytbg'; bg.src = 'https://i.ytimg.com/vi/' + o.id + '/hqdefault.jpg';
+      bg.onerror = function () { bg.remove(); };
+      wrap.appendChild(bg);
+    }
+    var hold = document.createElement('div');
+    hold.className = 'ythold';
+    hold.style.cssText = 'left:' + x + 'px;top:' + y + 'px;width:' + vw + 'px;height:' + vh + 'px';
+    var inner = document.createElement('div'); inner.id = 'ytPlayer'; hold.appendChild(inner);
+    wrap.appendChild(hold);
+    box.appendChild(wrap);
+    box.classList.add('playing');
+    ytTimer = setTimeout(function () { ytDone(false); }, 30000);   // 30초 안에 재생이 시작되지 않으면 건너뜀
+    loadYtApi(function () {
+      if (ytCur !== o) return;
+      var pv = { autoplay: 1, mute: 1, controls: 0, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3, fs: 0, disablekb: 1, origin: location.origin };
+      if (o.loop) { pv.loop = 1; pv.playlist = o.id; }
+      ytPlayer = new YT.Player('ytPlayer', {
+        width: vw, height: vh, videoId: o.id, playerVars: pv,
+        events: {
+          onReady: function (e) { try { e.target.mute(); e.target.playVideo(); } catch (er) {} },
+          onStateChange: function (e) { if (e.data === 1) clearTimeout(ytTimer); if (e.data === 0 && !o.loop) ytDone(true); },
+          onError: function () { ytDone(false); }
+        }
+      });
+    });
+  };
+
   // TV 앱이 부른다: 화면보호기를 다시 띄울 때(show) · main 폴더가 바뀌었을 때(refresh)
   window.ssShow = function () { load(true); };
   window.ssRefresh = function () { load(false); };
 
   if (TV) document.documentElement.classList.add('tv');
   if (PREVIEW) document.documentElement.classList.add('preview');
+  // 그래프 칸 크기가 바뀌면(공지 줄 수 · 글꼴 · 화면 크기) 그 크기로 다시 그린다
   var rt = 0;
-  addEventListener('resize', function () {
-    fit();
+  function redrawCharts() {
     clearTimeout(rt);
-    rt = setTimeout(function () { if (lastR) { chart($('s_chart'), lastR.sSeries, '#f2801f', 'gs', 1); chart($('p_chart'), lastR.pSeries, '#2f7be6', 'gp', 0); } }, 200);
-  });
+    rt = setTimeout(function () {
+      if (!lastR) return;
+      [['s_chart', lastR.sSeries, '#f2801f', 'gs', 1], ['p_chart', lastR.pSeries, '#2f7be6', 'gp', 0]].forEach(function (c) {
+        var svg = $(c[0]), b = svg.parentNode;
+        if (svg.dataset.size !== Math.round(b.clientWidth) + 'x' + Math.round(b.clientHeight)) chart(svg, c[1], c[2], c[3], c[4]);
+      });
+    }, 150);
+  }
+  addEventListener('resize', function () { fit(); redrawCharts(); });
+  if (window.ResizeObserver) document.querySelectorAll('.chartbox').forEach(function (b) { new ResizeObserver(redrawCharts).observe(b); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(redrawCharts);
   fit(); clock();
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(document.documentElement);   // 화면 크기가 바뀌면 다시 맞춤
+  setTimeout(fit, 300); setTimeout(fit, 1500);
   setInterval(clock, 1000);
   setInterval(function () { load(true); }, 60 * 1000);         // 1분마다 숫자·그래프 애니메이션 다시 재생
   load(true);

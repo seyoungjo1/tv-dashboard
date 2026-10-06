@@ -40,7 +40,24 @@ class MenuScannerTest {
         assertEquals(listOf("c팀", "a팀", "b팀", "d팀"), m.map { it.folder })     // 적힌 순서 먼저, 나머지는 이름순 · main 은 메뉴 아님
         val main = MenuScanner.mainDir(root)
         assertEquals(listOf("1.mp4", "2.mp4", "10.mp4"), MenuScanner.mainVideos(main).map { it.name })
-        assertTrue(MenuScanner.mainCrop(main))
+        // 예전 전체 설정(videoFit=crop)은 목록에 없는 영상의 기본값
+        assertTrue(MenuScanner.mainPlaylist(main).all { it.crop })
+    }
+
+    @Test fun playlistWithYoutubeAndPerVideoOptions() {
+        file("main/1.mp4"); file("main/2.mp4"); file("main/3.mp4")
+        file("main/설정.json", """{"playlist":[
+          {"src":"2.mp4","fit":"crop","align":"top"},
+          {"src":"https://www.youtube.com/shorts/KLkfruAh5yE?feature=share","fit":"fit","fill":"color","color":"#112233"},
+          {"src":"없는.mp4"},
+          {"src":"1.mp4","fit":"fit","fill":"blur"}]}""")
+        val p = MenuScanner.mainPlaylist(MenuScanner.mainDir(root))
+        assertEquals(listOf("2.mp4", "yt:KLkfruAh5yE", "1.mp4", "3.mp4"), p.map { it.file?.name ?: "yt:" + it.youtube })
+        assertTrue(p[0].crop); assertEquals("top", p[0].align)
+        assertTrue(p[1].vertical); assertTrue(!p[1].blur); assertEquals(0xFF112233.toInt(), p[1].color)
+        assertTrue(!p[2].crop && p[2].blur)
+        assertEquals("dQw4w9WgXcQ", MenuScanner.youtubeId("https://youtu.be/dQw4w9WgXcQ?si=x"))
+        assertEquals("dQw4w9WgXcQ", MenuScanner.youtubeId("https://www.youtube.com/watch?app=desktop&v=dQw4w9WgXcQ"))
     }
 
     @Test fun signatureChangesWhenFilesChange() {

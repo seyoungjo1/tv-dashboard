@@ -44,6 +44,7 @@ import com.seyoungjo.tvdashboard.data.ChangeBus
 import com.seyoungjo.tvdashboard.data.ContentStore
 import com.seyoungjo.tvdashboard.data.MenuEntry
 import com.seyoungjo.tvdashboard.data.MenuScanner
+import com.seyoungjo.tvdashboard.data.PlayItem
 import com.seyoungjo.tvdashboard.relay.Pairing
 import com.seyoungjo.tvdashboard.relay.RelaySettings
 import com.seyoungjo.tvdashboard.server.NetInfo
@@ -347,15 +348,14 @@ class MainActivity : AppCompatActivity() {
             val list = MenuScanner.scan(root)
             val videos = MenuScanner.idleVideos(root)
             val main = MenuScanner.mainDir(root)
-            val mainVideos = MenuScanner.mainVideos(main)
-            val crop = MenuScanner.mainCrop(main)
+            val playlist = MenuScanner.mainPlaylist(main)
             val sig = MenuScanner.signature(list)
-            handler.post { applyMenu(list, sig, videos, main?.name, mainVideos, crop, force) }
+            handler.post { applyMenu(list, sig, videos, main?.name, playlist, force) }
         }
     }
 
     private fun applyMenu(
-        list: List<MenuEntry>, sig: String, videos: List<File>, mainName: String?, mainVideos: List<File>, crop: Boolean,
+        list: List<MenuEntry>, sig: String, videos: List<File>, mainName: String?, playlist: List<PlayItem>,
         force: Boolean,
     ) {
         if (isDestroyed) return
@@ -363,8 +363,7 @@ class MainActivity : AppCompatActivity() {
         val main = mainName != null
         hasMain = main
         if (mainName != null) screensaver.folder = mainName
-        screensaver.crop = crop
-        screensaver.setVideos(mainVideos)
+        screensaver.setPlaylist(playlist)
         if (!main && screensaver.active && idleOverlay.visibility == View.VISIBLE) hideIdle()
         if (!force && sig == signature) return
         signature = sig

@@ -237,6 +237,7 @@
                     android:scaleType="centerCrop" />
 
                 <View
+                    android:id="@+id/ssDim"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:background="#40000000" />
@@ -259,8 +260,10 @@
             android:gravity="center"
             android:paddingHorizontal="36dp"
             android:paddingVertical="18dp"
+            android:layout_marginHorizontal="24dp"
+            android:maxLines="3"
             android:textColor="#FFFFFFFF"
-            android:textSize="40sp"
+            android:textSize="34sp"
             android:textStyle="bold" />
     </FrameLayout>
 </FrameLayout>

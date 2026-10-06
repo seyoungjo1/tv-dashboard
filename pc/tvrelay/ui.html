@@ -78,7 +78,10 @@
   #ssPanel .opt input { margin-right:6px; } #ssPanel .opt label:has(input:checked) { border-color:var(--accent); background:#e8f7fd; }
   #ssVids .v { display:flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; font-size:13px; background:#fff; }
   #ssVids .v .n { width:56px; color:#0b7fae; font-weight:800; } #ssVids .v .f { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  #ssVids .v.new { background:#f0fbf4; } #ssVids .v button { padding:3px 8px; }
+  #ssVids .v.new { background:#f0fbf4; } #ssVids .v.yt { background:#fff5f5; } #ssVids .v button { padding:3px 8px; }
+  #ssVids .v { flex-wrap:wrap; } #ssVids .v .o { display:flex; gap:4px; align-items:center; }
+  #ssVids .v select { font-size:12px; padding:3px 4px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  #ssVids .v input[type=color] { width:28px; height:24px; padding:0; border:1px solid var(--line); border-radius:6px; }
   .tvi[draggable=true] { cursor:grab; } .tvi.dragover { outline:6px dashed #0bb5e8; outline-offset:-6px; } .tvi.dragging { opacity:.35; }
   .tvinner { position:absolute; left:0; top:0; width:1920px; height:1080px; transform-origin:0 0; display:flex; flex-direction:column; background:#eef1f4; }
   /* TV 앱과 같은 배치 (TV 1.5배 기준): 상단바 78dp · 왼쪽 로고 · 가운데 제목 · 오른쪽 날짜 │ 시각 */
@@ -197,16 +200,15 @@
         <div>
           <h4>공지사항 <span class="hint" id="ssCount"></span></h4>
           <textarea id="ssNotice" placeholder="한 줄에 공지 하나 (위에서부터 5개까지 표시)&#10;예) 10월 정기교육은 14일에 진행됩니다."></textarea>
-          <h4>표시 방식 (동영상)</h4>
-          <div class="opt">
-            <label><input type="radio" name="ssFit" value="fit" checked><b>맞춤</b><br><span class="hint">전체가 보이고 남는 곳은 흐리게</span></label>
-            <label><input type="radio" name="ssFit" value="crop"><b>크롭</b><br><span class="hint">꽉 채우고 넘치는 곳은 잘림</span></label>
-          </div>
+</div>
         </div>
         <div>
-          <h4>동영상 <span class="hint">위에서부터 1.mp4, 2.mp4 … 순서로 재생</span></h4>
+          <h4>동영상 <span class="hint">위에서부터 순서대로 반복 재생 · 영상마다 표시 방식</span></h4>
           <div id="ssVids"></div>
           <button type="button" class="secondary" id="ssAddVid">+ 동영상 추가</button>
+          <button type="button" class="secondary" id="ssAddYt">+ 유튜브 링크 추가</button>
+          <div class="hint" style="margin-top:6px">크롭 = 칸을 꽉 채우고 긴 쪽을 자름(위·가운데·아래 맞춤) · 확장 = 작은 쪽을 맞춰 전체가 보이고 남는 곳은 블러/단색<br>
+          유튜브는 TV 가 인터넷에 연결돼 있어야 하고, 퍼가기가 막힌 영상은 건너뜁니다</div>
           <input type="file" id="ssVidInput" accept="video/*,.mp4,.m4v,.webm,.mkv,.mov,.3gp,.ts" multiple class="hidden">
         </div>
       </div>
@@ -396,24 +398,41 @@
   const isMain = (p) => !!p && p.toLowerCase() === 'main';
   const toolLabel = (f) => f === NOTICE_KEY ? '공지사항 편집 도구' : f;
 
-  // ── 화면보호기 설정: 미리보기 + 공지(main/공지.txt) + 동영상(1.mp4 2.mp4 …) + 크롭/맞춤(main/설정.json) ──
+  // ── 화면보호기 설정: 미리보기 + 공지(main/공지.txt) + 재생 목록(동영상·유튜브, 영상별 크롭/확장 → main/설정.json playlist) ──
   const VID_EXT = ['mp4', 'm4v', 'webm', 'mkv', '3gp', 'mov', 'ts'];
   const natCmp = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
-  let ssDir = 'main', ssConf = {}, ssVids = [];       // ssVids: [{name(TV 의 지금 이름) | file(새 파일)}]
+  const YT_RE = /(?:youtu\.be\/|youtube\.com\/(?:shorts\/|embed\/|live\/|watch\?(?:.*&)?v=))([A-Za-z0-9_-]{11})/;
+  // ssVids: [{ name(TV 의 지금 파일 이름) | file(새 파일) | yt(유튜브 주소), fit: fit|crop, align: top|center|bottom, fill: blur|color, color }]
+  let ssDir = 'main', ssConf = {}, ssVids = [];
   const ssLines = () => $('#ssNotice').value.split('\n').map(s => s.trim()).filter(Boolean);
-  const vidLabel = (v) => v.file ? v.file.name : v.name;
+  const vidLabel = (v) => v.yt ? v.yt : v.file ? v.file.name : v.name;
+  const target = (v, i) => `${i + 1}.${ext(vidLabel(v)) || 'mp4'}`;
+  const optText = (v) => v.fit === 'crop' ? '크롭·' + ({ top: '위', bottom: '아래' }[v.align] || '가운데') : '확장·' + (v.fill === 'color' ? '단색' : '블러');
+  const newItem = (o) => Object.assign({ fit: (ssConf.videoFit === 'crop' ? 'crop' : 'fit'), align: 'center', fill: 'blur', color: '#000000' }, o);
   function ssPush() {          // 미리보기에 저장 전 내용 반영
-    const fit = document.querySelector('input[name=ssFit]:checked').value;
-    $('#ssFrame').contentWindow?.postMessage({ ss: { notices: ssLines(), videos: ssVids.map((v, i) => `${i + 1}.${ext(vidLabel(v)) || 'mp4'}`), fit } }, '*');
+    $('#ssFrame').contentWindow?.postMessage({ ss: { notices: ssLines(),
+      videos: ssVids.map((v, i) => (v.yt ? '유튜브' : target(v, i)) + '(' + optText(v) + ')') } }, '*');
   }
   function ssCount() { const n = ssLines().length; $('#ssCount').textContent = n ? `${n}개${n > 5 ? ' — 5개까지만 표시' : ''}` : '(없으면 공지 칸 숨김)'; ssPush(); }
   function ssRenderVids() {
-    $('#ssVids').innerHTML = ssVids.map((v, i) => `<div class="v${v.file ? ' new' : ''}"><span class="n">${i + 1}.${esc(ext(vidLabel(v)) || 'mp4')}</span>
+    $('#ssVids').innerHTML = ssVids.map((v, i) => `<div class="v${v.file ? ' new' : ''}${v.yt ? ' yt' : ''}">
+      <span class="n">${v.yt ? '▶ 유튜브' : esc(target(v, i))}</span>
       <span class="f" title="${esc(vidLabel(v))}">${v.file ? '새 파일 · ' : ''}${esc(vidLabel(v))}${v.file ? ' (' + size(v.file.size) + ')' : ''}</span>
+      <span class="o">
+        <select data-k="fit" data-i="${i}"><option value="crop"${v.fit === 'crop' ? ' selected' : ''}>크롭</option><option value="fit"${v.fit !== 'crop' ? ' selected' : ''}>확장</option></select>
+        ${v.fit === 'crop'
+          ? `<select data-k="align" data-i="${i}">${[['top', '위쪽 맞춤'], ['center', '가운데 맞춤'], ['bottom', '아래쪽 맞춤']].map(([k, t]) => `<option value="${k}"${(v.align || 'center') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>`
+          : `<select data-k="fill" data-i="${i}"><option value="blur"${v.fill !== 'color' ? ' selected' : ''}>남는 곳 블러</option><option value="color"${v.fill === 'color' ? ' selected' : ''}>남는 곳 단색</option></select>` +
+            (v.fill === 'color' ? `<input type="color" data-k="color" data-i="${i}" value="${esc(v.color || '#000000')}" title="채울 색">` : '')}
+      </span>
       <button class="secondary" data-vu="${i}">▲</button><button class="secondary" data-vd="${i}">▼</button><button class="danger" data-vx="${i}">✕</button></div>`).join('')
       || '<div class="hint">동영상이 없습니다.</div>';
     ssPush();
   }
+  $('#ssVids').addEventListener('change', (e) => {
+    const k = e.target.dataset.k, i = e.target.dataset.i; if (!k || i === undefined) return;
+    ssVids[+i][k] = e.target.value; ssRenderVids();
+  });
   $('#ssVids').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     const u = b.dataset.vu, d = b.dataset.vd, x = b.dataset.vx;
@@ -423,9 +442,14 @@
     ssRenderVids();
   });
   $('#ssAddVid').onclick = () => { $('#ssVidInput').value = ''; $('#ssVidInput').click(); };
-  $('#ssVidInput').onchange = (e) => { [...e.target.files].sort((a, b) => natCmp(a.name, b.name)).forEach(f => ssVids.push({ file: f })); ssRenderVids(); };
+  $('#ssVidInput').onchange = (e) => { [...e.target.files].sort((a, b) => natCmp(a.name, b.name)).forEach(f => ssVids.push(newItem({ file: f }))); ssRenderVids(); };
+  $('#ssAddYt').onclick = () => {
+    const u = (prompt('유튜브 주소를 붙여넣으세요 (쇼츠·일반 영상)\n예) https://www.youtube.com/shorts/KLkfruAh5yE') || '').trim();
+    if (!u) return;
+    if (!YT_RE.test(u)) { alert('유튜브 영상 주소가 아닙니다.'); return; }
+    ssVids.push(newItem({ yt: u, fit: /\/shorts\//.test(u) ? 'fit' : undefined })); ssRenderVids();
+  };
   $('#ssNotice').addEventListener('input', ssCount);
-  document.querySelectorAll('input[name=ssFit]').forEach(r => r.addEventListener('change', ssPush));
   // main 폴더(또는 그 안)를 고르면 오른쪽 모니터 = 화면보호기 미리보기 + 아래 설정. 다른 폴더를 고르면 원래 TV 미리보기
   let ssActive = false;
   function ssMode(on, dir) {
@@ -440,7 +464,8 @@
   $('#ssFrame').addEventListener('load', () => setTimeout(ssPush, 300));
   async function openScreensaver(dir) {
     ssDir = dir; ssConf = {};
-    ssVids = kids(dir).filter(k => !k.d && VID_EXT.includes(ext(k.p))).map(k => ({ name: base(k.p) })).sort((a, b) => natCmp(a.name, b.name));
+    const tvVids = () => kids(dir).filter(k => !k.d && VID_EXT.includes(ext(k.p))).map(k => base(k.p)).sort(natCmp);
+    ssVids = tvVids().map(n => newItem({ name: n }));
     $('#ssNotice').value = ''; $('#ssSave').disabled = true;
     $('#ssFrame').src = 'about:blank';
     ssRenderVids(); ssCount();
@@ -456,21 +481,33 @@
       say(want.length ? '불러왔습니다.' : '');
     }
     if (!alive()) return;
-    document.querySelector(`input[name=ssFit][value=${ssConf.videoFit === 'crop' ? 'crop' : 'fit'}]`).checked = true;
+    // 재생 목록 (설정.json playlist) — 목록에 없는 TV 의 동영상은 뒤에 이름순으로
+    const files = tvVids(), used = new Set(), list = [];
+    for (const o of Array.isArray(ssConf.playlist) ? ssConf.playlist : []) {
+      const src = String(o.src || '').trim(), opt = { fit: o.fit === 'crop' ? 'crop' : o.fit === 'fit' ? 'fit' : undefined, align: o.align, fill: o.fill, color: o.color };
+      Object.keys(opt).forEach(k => opt[k] === undefined && delete opt[k]);
+      if (YT_RE.test(src)) list.push(newItem(Object.assign({ yt: src }, opt)));
+      else if (files.includes(src) && !used.has(src)) { used.add(src); list.push(newItem(Object.assign({ name: src }, opt))); }
+    }
+    files.filter(n => !used.has(n)).forEach(n => list.push(newItem({ name: n })));
+    ssVids = list; ssRenderVids();
     $('#ssFrame').src = `/ss/index.html?preview=1&folder=${encodeURIComponent(dir)}&title=${encodeURIComponent(tvTitleText())}` +
       `&message=${encodeURIComponent(((m) => !m || m === '오산공장 dashboard 터치시 접속됩니다' ? '' : m)((state?.settings?.idle_message || '').trim()))}&t=${Date.now()}`;
     ssCount(); $('#ssSave').disabled = false;
   }
   $('#ssSave').onclick = async () => {
     const lines = ssLines();
-    const conf = Object.assign({}, ssConf, { videoFit: document.querySelector('input[name=ssFit]:checked').value });
+    const conf = Object.assign({}, ssConf);
+    delete conf.videoFit;                                     // 예전 전체 설정 → 영상별 설정으로
+    conf.playlist = ssVids.map((v, i) => Object.assign({ src: v.yt || target(v, i), fit: v.fit === 'crop' ? 'crop' : 'fit' },
+      v.fit === 'crop' ? { align: v.align || 'center' } : { fill: v.fill === 'color' ? 'color' : 'blur' },
+      v.fit !== 'crop' && v.fill === 'color' ? { color: v.color || '#000000' } : {}));
     const dir = ssDir, ops = [];
     try {
       $('#ssSave').disabled = true;
       // 동영상: 지운 것 삭제 → 순서가 바뀐 것은 임시 이름 거쳐 1.mp4 2.mp4 … 로 → 새 파일은 그 번호로 올리기
-      const keep = new Set(ssVids.filter(v => v.name).map(v => v.name));
+      const keep = new Set(ssVids.filter(v => v.name).map(v => v.name));   // 유튜브 항목은 파일이 아님
       kids(dir).filter(k => !k.d && VID_EXT.includes(ext(k.p)) && !keep.has(base(k.p))).forEach(k => ops.push({ op: 'delete', path: k.p }));
-      const target = (v, i) => `${i + 1}.${ext(vidLabel(v)) || 'mp4'}`;
       const tag = Date.now().toString(36);
       const moving = ssVids.map((v, i) => ({ v, i })).filter(({ v, i }) => v.name && v.name !== target(v, i));
       moving.forEach(({ v, i }) => ops.push({ op: 'rename', path: dir + '/' + v.name, to: `${dir}/_ss_${tag}_${i}.${ext(v.name)}` }));
