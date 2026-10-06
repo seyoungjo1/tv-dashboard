@@ -3,7 +3,6 @@ package com.seyoungjo.tvdashboard.ui
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.Bitmap
-import android.graphics.Outline
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.SurfaceTexture
@@ -15,7 +14,6 @@ import android.view.Gravity
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
-import android.view.ViewOutlineProvider
 import android.webkit.JavascriptInterface
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
@@ -66,6 +64,7 @@ class Screensaver(
     private var index = 0
     private var errors = 0
     private var radiusPx = 0f
+    private val mask = CornerMask(activity)
     private var stagePx = 1f                             // 화면보호기 1080p 기준 1px 이 실제 몇 px 인지 (위아래 이동용)
     private var blurBmp: Bitmap? = null
     var active = false
@@ -104,10 +103,9 @@ class Screensaver(
             }
             insets
         }
-        box.outlineProvider = object : ViewOutlineProvider() {
-            override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, radiusPx)
-        }
-        box.clipToOutline = true
+        // 둥근 모서리: 윤곽 자르기(clipToOutline)는 경계가 계단처럼 거칠어서, 부드럽게(안티에일리어싱) 그린 덮개를 맨 위에 씌운다
+        box.clipChildren = true
+        box.addView(mask, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         if (Build.VERSION.SDK_INT >= 31) {
             blur.setRenderEffect(RenderEffect.createBlurEffect(36f, 36f, Shader.TileMode.CLAMP))
         }
@@ -256,7 +254,7 @@ class Screensaver(
         stagePx = (min(vw / 1920, vh / 1080) * k).toFloat()
         box.layoutParams = lp
         box.visibility = if (items.isEmpty() || current?.youtube != null) View.INVISIBLE else View.VISIBLE
-        box.invalidateOutline()
+        mask.radius = radiusPx
         box.post {
             player?.let { fitVideo(it.videoWidth, it.videoHeight) }
             if (active && player == null) play()
@@ -394,6 +392,29 @@ class Screensaver(
         val old = blurBmp
         if (old == null || old.width != bwSmall || old.height != bhSmall) {
             blurBmp = Bitmap.createBitmap(bwSmall, bhSmall, Bitmap.Config.ARGB_8888)
+        }
+    }
+
+    /** 칸의 네 모서리 바깥을 화면보호기 배경색으로 부드럽게 덮는다 (위쪽·아래쪽은 배경 그라데이션에 맞춘 색) */
+    private class CornerMask(ctx: android.content.Context) : View(ctx) {
+        var radius = 0f
+            set(v) { field = v; invalidate() }
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val path = android.graphics.Path()
+
+        override fun onDraw(c: android.graphics.Canvas) {
+            if (radius <= 0f) return
+            val w = width.toFloat()
+            val h = height.toFloat()
+            path.reset()
+            path.fillType = android.graphics.Path.FillType.EVEN_ODD
+            path.addRect(0f, 0f, w, h, android.graphics.Path.Direction.CW)
+            path.addRoundRect(0f, 0f, w, h, radius, radius, android.graphics.Path.Direction.CW)
+            c.save(); c.clipRect(0f, 0f, w, h / 2)
+            paint.color = 0xFFECF0F4.toInt(); c.drawPath(path, paint)
+            c.restore(); c.save(); c.clipRect(0f, h / 2, w, h)
+            paint.color = 0xFFE8ECF2.toInt(); c.drawPath(path, paint)
+            c.restore()
         }
     }
 

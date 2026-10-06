@@ -417,7 +417,7 @@
                  cc_load_policy: 0, cc_lang_pref: 'none', hl: 'ko', origin: location.origin };
       if (o.loop) { pv.loop = 1; pv.playlist = o.id; }
       ytPlayer = new YT.Player('ytPlayer', {
-        width: vw, height: vh, videoId: o.id, playerVars: pv,
+        width: vw, height: vh + 180, videoId: o.id, playerVars: pv,
         events: {
           onReady: function (e) { try { e.target.mute(); noCaptions(e.target); e.target.playVideo(); } catch (er) {} },
           onApiChange: function (e) { noCaptions(e.target); },
