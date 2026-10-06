@@ -266,4 +266,13 @@
             android:textSize="34sp"
             android:textStyle="bold" />
     </FrameLayout>
+
+    <!-- 화면 전환 효과: 누른 자리에서 동그라미가 퍼지며 화면을 덮고, 새 화면으로 바뀐 뒤 사라진다 -->
+    <View
+        android:id="@+id/revealOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/content_bg"
+        android:importantForAccessibility="no"
+        android:visibility="invisible" />
 </FrameLayout>

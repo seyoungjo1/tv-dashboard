@@ -94,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     private var resumed = false
     private var lastBack = 0L
     private var swallowGesture = false
+    private lateinit var reveal: View
     private var clearHistoryPending = false
     private var idleVideos: List<File> = emptyList()
     private var idleVideoIndex = 0
@@ -142,6 +143,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         keep16by9()
+        reveal = findViewById(R.id.revealOverlay)
         header = findViewById(R.id.header)
         headerTitle = findViewById(R.id.headerTitle)
         headerClock = findViewById(R.id.headerClock)
@@ -478,6 +480,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ── 화면 전환 효과 ─────────────────────────────────────────────────────
+    /**
+     * 화면보호기 → 대시보드: 누른 자리에서 동그라미가 퍼지며 화면을 덮고 → action(화면보호기 닫기) → 동그라미가 사라지며 대시보드가 보인다.
+     * 좌표는 창 기준 — 앱 화면을 비율로 줄여 쓰는 경우(keep16by9)도 맞게 환산한다. 음수면 화면 가운데에서.
+     */
+    private fun circleTransition(wx: Float, wy: Float, action: () -> Unit) {
+        val root = reveal.parent as View
+        if (root.width <= 0 || !reveal.isAttachedToWindow) { action(); return }
+        val (x, y) = if (wx < 0 || wy < 0) root.width / 2f to root.height / 2f else {
+            val c = IntArray(2)
+            (root.parent as View).getLocationInWindow(c)                 // 앱 화면을 담은 칸(축소 전 좌표계)
+            ((wx - c[0] - root.left - root.pivotX) / root.scaleX + root.pivotX) to
+                ((wy - c[1] - root.top - root.pivotY) / root.scaleY + root.pivotY)
+        }
+        val radius = kotlin.math.hypot(maxOf(x, root.width - x), maxOf(y, root.height - y))
+        reveal.animate().cancel()
+        reveal.bringToFront()
+        reveal.alpha = 1f
+        reveal.visibility = View.VISIBLE
+        val anim = android.view.ViewAnimationUtils.createCircularReveal(reveal, x.toInt(), y.toInt(), 0f, radius)
+        anim.duration = 420
+        anim.interpolator = android.view.animation.DecelerateInterpolator(1.6f)
+        anim.addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+                action()
+                reveal.animate().alpha(0f).setStartDelay(260).setDuration(300)
+                    .withEndAction { reveal.visibility = View.INVISIBLE; reveal.alpha = 1f }.start()
+            }
+        })
+        anim.start()
+    }
+
     /** 손잡이는 대시보드 위에 겹쳐 있으므로 사이드바가 보이면 그 오른쪽, 아니면 화면 왼쪽 끝에 붙인다 */
     private fun placeHandle() {
         val h = findViewById<View>(R.id.sidebarToggle)
@@ -520,7 +554,7 @@ class MainActivity : AppCompatActivity() {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             if (idleOverlay.visibility == View.VISIBLE) {
                 swallowGesture = true
-                hideIdle()
+                circleTransition(ev.x, ev.y) { hideIdle() }       // 터치한 자리에서 동그라미가 퍼지며 대시보드로
                 return true
             }
             resetIdle()
@@ -538,7 +572,7 @@ class MainActivity : AppCompatActivity() {
         val volume = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
             event.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE
         if (!volume && idleOverlay.visibility == View.VISIBLE) {
-            if (event.action == KeyEvent.ACTION_UP) hideIdle()
+            if (event.action == KeyEvent.ACTION_UP) circleTransition(-1f, -1f) { hideIdle() }   // 리모컨: 화면 가운데에서
             return true
         }
         if (event.action == KeyEvent.ACTION_DOWN) resetIdle()
