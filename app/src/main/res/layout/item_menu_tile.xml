@@ -10,27 +10,30 @@
     android:paddingHorizontal="6dp"
     android:paddingVertical="12dp">
 
-    <!-- 정사각형 아이콘 (폴더의 icon.png) -->
+    <!-- 정사각형 아이콘 박스 + 폴더의 icon.png (흰색·투명 배경 아이콘 권장) -->
     <FrameLayout
         android:id="@+id/tileFrame"
         android:layout_width="@dimen/menu_icon"
-        android:layout_height="@dimen/menu_icon">
+        android:layout_height="@dimen/menu_icon"
+        android:background="@drawable/icon_box_bg"
+        android:duplicateParentState="true">
 
         <ImageView
             android:id="@+id/tileImage"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:importantForAccessibility="no"
-            android:scaleType="centerCrop" />
+            android:padding="12dp"
+            android:scaleType="fitCenter" />
 
         <TextView
             android:id="@+id/tileInitial"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:gravity="center"
+            android:fontFamily="@font/pretendard_extrabold"
             android:textColor="#FFFFFFFF"
-            android:textSize="28sp"
-            android:textStyle="bold" />
+            android:textSize="30sp" />
     </FrameLayout>
 
     <TextView
@@ -42,5 +45,5 @@
         android:gravity="center"
         android:maxLines="2"
         android:textColor="@color/sidebar_text"
-        android:textSize="14sp" />
+        android:textSize="15sp" />
 </LinearLayout>

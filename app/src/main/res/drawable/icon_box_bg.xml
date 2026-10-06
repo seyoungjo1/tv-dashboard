@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 사이드바 아이콘 박스: 흰색 투명 아이콘이 잘 보이도록 어두운 정사각형, 선택 시 파란색 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <shape><solid android:color="@color/accent" /><corners android:radius="14dp" /></shape>
+    </item>
+    <item android:state_focused="true">
+        <shape><solid android:color="#FF5A646E" /><corners android:radius="14dp" /></shape>
+    </item>
+    <item>
+        <shape><solid android:color="#FF3F454D" /><corners android:radius="14dp" /></shape>
+    </item>
+</selector>

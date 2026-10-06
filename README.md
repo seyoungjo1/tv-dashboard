@@ -88,7 +88,7 @@ TV를 **자료 저장소 + 화면 표시기**로 사용하는 Android 앱입니�
 | 버튼 | 자료 폴더 **바로 아래 폴더 1개 = 버튼 1개** |
 | 버튼 이름 | 폴더명. 앞의 정렬 번호는 숨김 (`01_생산팀` → `생산팀`, `2. 지원팀` → `지원팀`) |
 | 순서 | 폴더명 자연 정렬 (`2_` < `10_`) → 번호를 붙여 순서 지정 |
-| 아이콘 | 폴더 안 **`icon.png`** (icon.jpg / icon.jpeg / icon.webp 도 가능, 정사각형 권장). 없으면 이름 첫 글자 색상 타일 |
+| 아이콘 | 폴더 안 **`icon.png`** — **흰색 아이콘 + 투명 배경** PNG(정사각형, 256px 권장). 어두운 정사각형 박스 위에 표시되고 선택 시 파란 박스. icon.jpg/webp 도 가능. 없으면 이름 첫 글자 |
 | 표시 파일 | 폴더의 `index.html` (없으면 `index.htm`). 없으면 안내 문구 표시 |
 | 숨김 | `.` 또는 `_` 로 시작하는 폴더는 메뉴에 나오지 않음 |
 | 대기 화면 동영상 | 자료 폴더 **루트**의 동영상(mp4·webm·mkv 등). 여러 개면 이름순으로 반복 재생 |
@@ -111,6 +111,15 @@ TV를 **자료 저장소 + 화면 표시기**로 사용하는 Android 앱입니�
 `sample/자료/01_생산팀` 은 색상 타일 4개 + 목록 2개 + 게이지·막대·도넛 카드로 구성되며, **화면 내용은 전부 `data.json` 으로 바꿉니다.**
 `tiles[]`(label·value·sub·color), `lists[]`(title·color·items[time·text·tag]), `cards[]`(type: gauge / bars / donut).
 색 이름: blue · green · red · orange · sky · teal · purple · pink · gray (또는 `#RRGGBB`). 외부 라이브러리를 쓰지 않아 오프라인에서도 그대로 표시됩니다.
+
+### 폰트
+앱 화면은 **Pretendard Bold/ExtraBold**(굵은 한글 서체, SIL OFL 무료 라이선스)를 사용합니다. 대시보드 HTML에서도 앱에 내장된 폰트를 인터넷 없이 쓸 수 있습니다:
+```css
+@font-face { font-family: "Pretendard"; font-weight: 700;
+  src: url("https://appassets.androidplatform.net/assets/fonts/Pretendard-Bold.woff2") format("woff2"); }
+/* SemiBold(600) · ExtraBold(800) 도 같은 방식: Pretendard-SemiBold.woff2 / Pretendard-ExtraBold.woff2 */
+body { font-family: "Pretendard", sans-serif; font-weight: 700; }
+```
 
 ### index.html 작성 규칙
 - 같은 폴더의 파일은 **상대 경로**로 사용: `fetch('data.json')`, `<img src="chart.png">`, `<link href="style.css">`

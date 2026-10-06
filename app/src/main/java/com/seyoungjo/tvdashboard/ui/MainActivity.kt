@@ -148,6 +148,8 @@ class MainActivity : AppCompatActivity() {
         assetLoader = WebViewAssetLoader.Builder()
             .setDomain(ContentStore.WEB_HOST)
             .addPathHandler(ContentStore.WEB_PREFIX, DataPathHandler(applicationContext))
+            // 앱 내장 폰트 등: https://appassets.androidplatform.net/assets/fonts/Pretendard-Bold.woff2
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(applicationContext))
             .build()
 
         menuList.layoutManager = LinearLayoutManager(this)

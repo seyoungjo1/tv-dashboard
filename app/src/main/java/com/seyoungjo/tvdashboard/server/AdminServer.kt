@@ -78,6 +78,8 @@ class AdminServer(private val ctx: Context, port: Int) : NanoHTTPD(port) {
             if (m != Method.GET && m != Method.HEAD) throw HttpError(405, "허용되지 않는 메서드")
             return when (uri) {
                 "/", "/index.html" -> asset("admin/index.html", "text/html; charset=utf-8")
+                "/fonts/Pretendard-SemiBold.woff2", "/fonts/Pretendard-Bold.woff2", "/fonts/Pretendard-ExtraBold.woff2" ->
+                    asset(uri.removePrefix("/"), "font/woff2")
                 else -> throw HttpError(404, "Not Found")
             }
         }

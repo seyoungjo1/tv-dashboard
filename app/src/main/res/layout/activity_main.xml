@@ -38,9 +38,9 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:text="@string/default_header_title"
+                android:fontFamily="@font/pretendard_extrabold"
                 android:textColor="#FFFFFFFF"
-                android:textSize="26sp"
-                android:textStyle="bold" />
+                android:textSize="28sp" />
 
             <TextView
                 android:id="@+id/headerClock"

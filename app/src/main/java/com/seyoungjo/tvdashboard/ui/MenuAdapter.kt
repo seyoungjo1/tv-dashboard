@@ -2,7 +2,6 @@ package com.seyoungjo.tvdashboard.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
@@ -67,10 +66,6 @@ class MenuAdapter(
         h.itemView.contentDescription = e.title
         h.itemView.setOnClickListener { onClick(e) }
         h.initial.text = e.title.take(1)
-        h.frame.background = GradientDrawable().apply {
-            cornerRadius = 12 * h.frame.resources.displayMetrics.density
-            setColor(PALETTE[position % PALETTE.size])
-        }
         val img = e.image
         if (img == null) {
             h.key = null
@@ -96,14 +91,6 @@ class MenuAdapter(
                 }
             }
         }
-    }
-
-    companion object {
-        /** 아이콘이 없을 때 쓰는 vDesk 풍 색상 */
-        private val PALETTE = intArrayOf(
-            0xFF0BB5E8.toInt(), 0xFF19B394.toInt(), 0xFFF5655F.toInt(), 0xFFF5A03A.toInt(),
-            0xFF10C1C6.toInt(), 0xFF7E57C2.toInt(), 0xFF3F7FE0.toInt(), 0xFFE0559A.toInt(),
-        )
     }
 
     private fun decode(f: File, target: Int): Bitmap? = try {
