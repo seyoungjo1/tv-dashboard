@@ -245,7 +245,16 @@ class Screensaver(
 
     /** main 폴더 내용이 바뀌었을 때 (숫자·그래프 다시 읽기) */
     fun refresh() {
+        applyDark()
         if (active) web?.evaluateJavascript("window.ssRefresh&&ssRefresh()", null)
+    }
+
+    private fun pageBg(): Int = if (AppSettings.darkMode) DARK_BG else 0xFFEAEEF3.toInt()
+
+    /** 다크 모드가 바뀌면 페이지 바깥 바탕 · 동영상 칸 모서리 색도 같이 */
+    private fun applyDark() {
+        web?.setBackgroundColor(pageBg())
+        mask.invalidate()
     }
 
     fun destroy() {
@@ -258,7 +267,7 @@ class Screensaver(
     private fun createWeb(): WebView {
         val wv = WebView(activity)
         wv.layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        wv.setBackgroundColor(0xFFEAEEF3.toInt())
+        wv.setBackgroundColor(pageBg())
         wv.isFocusable = false
         with(wv.settings) {
             javaScriptEnabled = true
@@ -305,7 +314,15 @@ class Screensaver(
             .put("videos", items.size)
             .put("folder", folder)
             .put("title", AppSettings.headerTitle)
+            .put("dark", AppSettings.darkMode)
             .toString()
+
+        /** 화면보호기의 달/해 버튼 → 다크 모드 저장 (페이지는 이미 바꿔 그림) */
+        @JavascriptInterface
+        fun setDark(on: Boolean) {
+            AppSettings.darkMode = on
+            handler.post { applyDark() }
+        }
 
         /** 공지 수정 아이콘들의 위치 (CSS px) — JSON [[x, y, w, h], …] */
         @JavascriptInterface
@@ -661,9 +678,9 @@ class Screensaver(
             path.addRect(0f, 0f, w, h, android.graphics.Path.Direction.CW)
             path.addRoundRect(0f, 0f, w, h, radius, radius, android.graphics.Path.Direction.CW)
             c.save(); c.clipRect(0f, 0f, w, h / 2)
-            paint.color = 0xFFECF0F4.toInt(); c.drawPath(path, paint)
+            paint.color = if (AppSettings.darkMode) DARK_BG else 0xFFECF0F4.toInt(); c.drawPath(path, paint)
             c.restore(); c.save(); c.clipRect(0f, h / 2, w, h)
-            paint.color = 0xFFE8ECF2.toInt(); c.drawPath(path, paint)
+            paint.color = if (AppSettings.darkMode) DARK_BG else 0xFFE8ECF2.toInt(); c.drawPath(path, paint)
             c.restore()
         }
     }
@@ -671,5 +688,7 @@ class Screensaver(
     companion object {
         private const val TAG = "Screensaver"
         private const val URL = "https://" + ContentStore.WEB_HOST + "/assets/screensaver/index.html"
+        /** 다크 모드 페이지 바탕색 (ss.css html.dark 와 같게) */
+        private const val DARK_BG = 0xFF0E1319.toInt()
     }
 }

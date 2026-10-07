@@ -93,7 +93,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
         listOf("header_title", "idle_enabled", "idle_seconds", "idle_message", "idle_msg_show_sec", "idle_msg_hide_sec",
-            "keep_screen_on", "auto_refresh").forEach { key ->
+            "keep_screen_on", "auto_refresh", "dark_mode").forEach { key ->
             findPreference<Preference>(key)?.setOnPreferenceChangeListener { _, _ ->
                 view?.post { ChangeBus.post(AppEvent.SettingsChanged) }; true
             }

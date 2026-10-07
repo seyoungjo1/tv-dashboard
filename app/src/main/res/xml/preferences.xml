@@ -43,6 +43,9 @@
             app:useSimpleSummaryProvider="true" />
         <SwitchPreferenceCompat app:key="idle_video_sound" app:defaultValue="false"
             app:dependency="idle_enabled" app:title="동영상 소리 켜기" />
+        <SwitchPreferenceCompat app:key="dark_mode" app:defaultValue="false"
+            app:title="대기 화면 다크 모드"
+            app:summary="대기 화면 오른쪽 위(시계 왼쪽)의 달/해 버튼으로도 바로 바꿀 수 있습니다." />
         <Preference app:key="ss_notice" app:title="화면보호기 공지사항 편집"
             app:summary="main 폴더의 공지.txt — 한 줄에 공지 하나 (5개까지 표시)" />
         <EditTextPreference app:key="notice_pin" app:defaultValue=""

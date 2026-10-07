@@ -270,6 +270,7 @@
         <div><label>멘트 숨김 시간(초)</label><input type="number" min="0" name="idle_msg_hide_sec"></div>
       </div>
       <label><input type="checkbox" name="idle_video_sound"> 동영상 소리 켜기</label>
+      <label><input type="checkbox" name="dark_mode"> 대기 화면 다크 모드 (TV 대기 화면의 달/해 버튼으로도 바꿀 수 있음)</label>
       <h3>화면</h3>
       <label><input type="checkbox" name="auto_refresh"> 자료 변경 시 화면 자동 새로고침</label>
       <label><input type="checkbox" name="keep_screen_on"> 앱 실행 중 화면 꺼짐 방지</label>
@@ -802,7 +803,7 @@
     await Promise.all(files.map(async (n) => { try { const r = await fetch(prevUrl(dir + '/' + n), { method: 'HEAD' }); if (r.ok) ssHave.add(n); } catch (_) {} }));
     if (!ssVidsDirty) { ssVids = list; ssRenderVids(); }           // 받는 동안 직접 고쳤으면 고친 목록을 그대로 둔다
     else say('TV 에서 받은 재생 목록 대신, 지금 고치고 있는 목록을 그대로 둡니다.');
-    $('#ssFrame').src = `/ss/index.html?preview=1&folder=${encodeURIComponent(dir)}&title=${encodeURIComponent(tvTitleText())}` +
+    $('#ssFrame').src = `/ss/index.html?preview=1&folder=${encodeURIComponent(dir)}&title=${encodeURIComponent(tvTitleText())}${state?.settings?.dark_mode ? '&dark=1' : ''}` +
       `&message=${encodeURIComponent(((m) => !m || m === '오산공장 dashboard 터치시 접속됩니다' ? '' : m)((state?.settings?.idle_message || '').trim()))}&t=${Date.now()}`;
     ssCount(); $('#ssSave').disabled = false;
   }

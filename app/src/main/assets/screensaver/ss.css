@@ -132,3 +132,46 @@ html.tv #perf.nonotice #noticeAdd, html.preview #perf.nonotice #noticeAdd { disp
 .sswipe { position: absolute; top: -10%; bottom: -10%; left: 0; width: 140px; z-index: 3; pointer-events: none;
           background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.55) 45%, rgba(255,255,255,.95) 50%, rgba(255,255,255,.55) 55%, rgba(255,255,255,0));
           filter: blur(2px); }
+
+/* 다크 모드 버튼: 시계 왼쪽 반투명 (달 ↔ 해). 눌러도 대시보드로 넘어가지 않는다 */
+#darkBtn { width: 46px; height: 46px; color: #1d2b3a; opacity: .3; cursor: pointer; }
+#darkBtn svg { width: 100%; height: 100%; display: block; }
+html.dark #darkBtn { color: #e3eaf2; opacity: .4; }
+#darkBtn.tap { animation: darkTap .45s ease; }
+@keyframes darkTap { 40% { transform: scale(1.25) rotate(-20deg); opacity: .8; } }
+html, html body, #stage, #title, .card { transition: background-color .5s ease, color .5s ease; }
+
+/* 다크 모드 (화면보호기의 달 버튼 · TV 설정 '다크 모드' · PC 미리보기 ?dark=1) — 배치는 같고 색만 바꾼다 */
+html.dark, html.dark body { background: #0e1319; }
+html.dark body { color: #e3eaf2; }
+html.dark #stage { background: #0e1319; }
+html.dark #title { color: #eef3f8; }
+html.dark .clock span { color: #9aa8b8; }
+html.dark .clock i { background: #36414d; }
+html.dark .card { background: #19212b; box-shadow: 0 4px 18px rgba(0, 0, 0, .35); }
+html.dark #notice .row { border-bottom-color: #26303b; }
+html.dark .vline, html.dark .n + .n { background: #26303b; border-left-color: #26303b; }
+html.dark .n + .n { background: none; }
+html.dark .asof, html.dark .empty { color: #8592a1; }
+html.dark .nl { color: #a9b5c2; }
+html.dark .nv small { color: #b7c2ce; }
+html.dark #sales .badge { background: #3a2617; color: #ff9a4d; }
+html.dark #prod .badge { background: #17294a; color: #6aa5ff; }
+html.dark #video { box-shadow: 0 6px 22px rgba(0, 0, 0, .5); }
+html.dark #hint { color: #b7c2ce; }
+html.dark #hint.prompt { color: #5fb0ff; }
+html.dark .nedit { color: #e3eaf2; opacity: .32; }
+html.dark #ntDim { background: rgba(0, 0, 0, .6); }
+html.dark #ntPop { background: #1c2530; color: #e3eaf2; box-shadow: 0 18px 60px rgba(0, 0, 0, .6); }
+html.dark #ntPop .sub, html.dark .edhint { color: #95a2b0; }
+html.dark #ntPop .sub.err, html.dark .edhint.err { color: #ff6b6b; }
+html.dark .dots i { border-color: #4a5868; }
+html.dark .dots i.on { background: #2f7be6; border-color: #2f7be6; }
+html.dark .pad button { background: #283340; color: #e3eaf2; }
+html.dark .pad button:active { background: #34506f; }
+html.dark .pad button.fn { background: #222c37; }
+html.dark .pad button.ok { background: #2f7be6; color: #fff; }
+html.dark #ntTa { background: #121920; border-color: #33404e; color: #e3eaf2; }
+html.dark #ntTa:focus { border-color: #2f7be6; }
+html.dark .edbar button { background: #283340; color: #e3eaf2; }
+html.dark .edbar button.save { background: #2f7be6; color: #fff; }

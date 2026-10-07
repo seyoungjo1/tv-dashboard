@@ -51,6 +51,10 @@ object AppSettings {
         .let { if (it == OLD_DEFAULT_MESSAGE) DEFAULT_MESSAGE else it }   // 예전 기본 멘트는 새 문구로
     val idleMsgShowSec get() = int("idle_msg_show_sec", 0, 0, 3600)
     val idleMsgHideSec get() = int("idle_msg_hide_sec", 0, 0, 3600)
+    /** 화면보호기(대기화면) 다크 모드 — 화면보호기의 달/해 버튼 · TV 설정 · PC 의 TV 설정 */
+    var darkMode: Boolean
+        get() = prefs.getBoolean("dark_mode", false)
+        set(v) = prefs.edit().putBoolean("dark_mode", v).apply()
 
     var lastFolder: String?
         get() = prefs.getString("last_folder", null)
@@ -65,6 +69,7 @@ object AppSettings {
         "idle_msg_show_sec" to Int::class,
         "idle_msg_hide_sec" to Int::class,
         "idle_video_sound" to Boolean::class,
+        "dark_mode" to Boolean::class,
         "auto_refresh" to Boolean::class,
         "keep_screen_on" to Boolean::class,
         "update_url" to String::class,

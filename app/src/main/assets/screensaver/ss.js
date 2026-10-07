@@ -39,11 +39,11 @@
     try { TV.videoRect(r.left, r.top, r.width, r.height, innerWidth, innerHeight); } catch (e) {}
     reportEdit();
   }
-  /** 공지 수정 아이콘들의 위치 → TV 앱 (아이콘을 누른 터치는 대시보드로 넘어가지 않고 이 페이지로 온다) */
+  /** 공지 수정 아이콘 · 다크 모드 버튼의 위치 → TV 앱 (아이콘을 누른 터치는 대시보드로 넘어가지 않고 이 페이지로 온다) */
   function reportEdit() {
     if (!TV || !TV.editRects) return;
     var out = [];
-    [].forEach.call(document.querySelectorAll('.nedit'), function (b) {
+    [].forEach.call(document.querySelectorAll('.nedit, #darkBtn'), function (b) {
       if (!b.offsetParent) return;                       // 안 보이는 아이콘
       var r = b.getBoundingClientRect();
       out.push([r.left, r.top, r.width, r.height]);
@@ -245,12 +245,12 @@
     el('stop', { offset: '100%', 'stop-color': color, 'stop-opacity': .02 }, g);
     for (var t = 0; t <= 4; t++) {
       var v = max * t / 4, yy = Y(v);
-      el('line', { x1: L, x2: W - R, y1: yy, y2: yy, stroke: t ? '#eef1f4' : '#d9dfe6', 'stroke-width': 2 }, svg);
-      el('text', { x: L - 12, y: yy + 7, 'text-anchor': 'end', 'font-size': 20, fill: '#7a8796' }, svg).textContent = tickLabel(v);
+      el('line', { x1: L, x2: W - R, y1: yy, y2: yy, stroke: DARK ? (t ? '#232c37' : '#334050') : (t ? '#eef1f4' : '#d9dfe6'), 'stroke-width': 2 }, svg);
+      el('text', { x: L - 12, y: yy + 7, 'text-anchor': 'end', 'font-size': 20, fill: DARK ? '#8592a1' : '#7a8796' }, svg).textContent = tickLabel(v);
     }
     var slot = (W - L - R) / 11, short = slot < 46;          // 좁으면 '월' 을 빼고 숫자만 (끝에 한 번만 '월')
     for (var i = 0; i < 12; i++) {
-      el('text', { x: X(i), y: H - 8, 'text-anchor': 'middle', 'font-size': 20, fill: '#5d6b7a' }, svg).textContent =
+      el('text', { x: X(i), y: H - 8, 'text-anchor': 'middle', 'font-size': 20, fill: DARK ? '#9aa8b8' : '#5d6b7a' }, svg).textContent =
         short ? (i + 1) + (i === 11 ? '월' : '') : (i + 1) + '월';
     }
     var pts = [];
@@ -340,14 +340,37 @@
     requestAnimationFrame(reportVideo);
     return lines;
   }
+  // 다크 모드: TV 는 설정값, PC 미리보기는 ?dark=1. 화면보호기의 달/해 버튼으로 바로 바꿀 수 있다
+  var DARK = null;
+  var MOON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>';
+  var SUN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/>' +
+    '<path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>';
+  function setDark(on) {
+    on = !!on;
+    if (on === DARK) return false;
+    DARK = on;
+    document.documentElement.classList.toggle('dark', DARK);
+    $('darkBtn').innerHTML = DARK ? SUN_SVG : MOON_SVG;            // 지금 어두우면 해(밝게), 밝으면 달(어둡게)
+    return true;
+  }
+  function toggleDark() {
+    setDark(!DARK);
+    var b = $('darkBtn'); b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap');
+    if (TV && TV.setDark) { try { TV.setDark(DARK); } catch (e) {} }   // TV 설정에 저장 (다음에도 그대로)
+    if (lastR) {                                                     // 그래프 색도 바로
+      [['s_chart', lastR.sSeries, '#f2801f', 'gs', 1], ['p_chart', lastR.pSeries, '#2f7be6', 'gp', 0]].forEach(function (c) { chart($(c[0]), c[1], c[2], c[3], c[4]); });
+    }
+    lastKey = lastKey.replace(/:dark$/, '') + (DARK ? ':dark' : '');
+  }
   function load(force) {
     cfg = config();
+    setDark(TV ? cfg.dark : Q.get('dark') === '1');
     BASE = '/data/' + encodeURIComponent(cfg.folder || 'main') + '/';
     Promise.all([getJson('생산.json'), getJson('sd.json'), getJson('fi.json'), getJson('plan.json'),
                  getText('공지.txt'), getText('제목.txt')]).then(function (a) {
       lastA = a;
       var lines = paint(a);
-      var key = JSON.stringify([a[0], a[1], a[2], a[3]]).length + ':' + lines.join('|');
+      var key = JSON.stringify([a[0], a[1], a[2], a[3]]).length + ':' + lines.join('|') + (DARK ? ':dark' : '');   // 다크 모드가 바뀌면 그래프도 다시
       if (force || key !== lastKey) {
         lastKey = key;
         render(compute({ prod: toStore(a[0], 'prod'), sd: toStore(a[1], 'sd'), fi: toStore(a[2], 'fi'), plan: toStore(a[3], 'plan') }));
@@ -778,6 +801,7 @@
   }
   var ntLine = -1;                                     // 누른 아이콘의 공지 줄 (입력란을 열 때 그 줄 끝에 커서)
   document.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('#darkBtn')) { if (!ntOpen) toggleDark(); return; }
     var b = e.target.closest && e.target.closest('.nedit');
     if (b && !TV && PREVIEW) {                           // PC 미리보기: 아래 공지사항 입력칸의 그 줄로
       parent.postMessage({ ssEditNotice: b.dataset.line != null ? +b.dataset.line : -1 }, '*');
