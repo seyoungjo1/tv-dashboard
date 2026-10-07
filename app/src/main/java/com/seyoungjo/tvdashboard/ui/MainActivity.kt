@@ -283,6 +283,7 @@ class MainActivity : AppCompatActivity() {
                 assetLoader.shouldInterceptRequest(request.url)
 
             override fun onPageFinished(view: WebView, url: String?) {
+                TapClick.inject(view)
                 if (clearHistoryPending) {
                     view.clearHistory()
                     clearHistoryPending = false
@@ -713,47 +714,41 @@ class MainActivity : AppCompatActivity() {
         return steadyDispatch(ev)
     }
 
-    // ── 손가락 터치 떨림 보정 ──
-    // 대형 터치판은 손가락을 대고 있는 동안 좌표가 몇 픽셀씩 흔들린다. 일반 버튼(사이드바)은 괜찮지만
-    // 웹 화면은 이것을 '끌기'로 보고 누름(클릭)을 취소해 버린다 (마우스는 흔들림이 없어 정상).
-    // → 누른 자리에서 조금(화면 너비의 1%)만 움직였으면 누른 자리 그대로 전달하고, 그보다 많이 움직이면 그때부터 실제 좌표(끌기·스크롤)
-    private var holdTap = false
+    // ── 손가락 한 번 누름 → 웹 화면 클릭 ──
+    // 이 TV 터치판에서는 손가락 터치가 웹 화면에 들어가도(스크롤은 됨) 웹 화면이 그것을 클릭으로 판정하지 못한다
+    // (마우스는 정상, 앱 버튼인 사이드바도 정상). → 손가락을 떼면 TapClick 이 그 자리에 클릭을 넣는다.
+    // 끌기·스크롤(많이 움직임) · 길게 누름 · 두 손가락은 그대로 둔다
+    private var tapDown = false
     private var tapX = 0f
     private var tapY = 0f
+    private var tapT = 0L
 
     private fun steadyDispatch(ev: MotionEvent): Boolean {
         val mouse = ev.isFromSource(android.view.InputDevice.SOURCE_MOUSE) || ev.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE
-        if (mouse) return super.dispatchTouchEvent(ev)
-        TouchDiag.add(ev)
-        when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { holdTap = true; tapX = ev.x; tapY = ev.y }
-            MotionEvent.ACTION_POINTER_DOWN -> holdTap = false            // 두 손가락(확대 등)은 그대로
-            MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> if (holdTap && ev.pointerCount == 1) {
-                val slop = maxOf(window.decorView.width, window.decorView.height) * 0.01f
-                if (Math.hypot((ev.x - tapX).toDouble(), (ev.y - tapY).toDouble()) > slop) {
-                    holdTap = false
-                    TouchDiag.moved()
+        if (!mouse) {
+            TouchDiag.add(ev)
+            val slop = maxOf(window.decorView.width, window.decorView.height) * 0.012f
+            val moved = Math.hypot((ev.x - tapX).toDouble(), (ev.y - tapY).toDouble()) > slop
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { tapDown = true; tapX = ev.x; tapY = ev.y; tapT = ev.eventTime }
+                MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_CANCEL -> tapDown = false
+                MotionEvent.ACTION_MOVE -> if (tapDown && moved) { tapDown = false; TouchDiag.moved() }
+                MotionEvent.ACTION_UP -> if (tapDown) {
+                    tapDown = false
+                    if (!moved && ev.eventTime - tapT < 500) {
+                        val x = ev.x; val y = ev.y
+                        handler.post { clickWeb(x, y) }
+                    }
                 }
             }
         }
-        val fixTool = ev.pointerCount == 1 && ev.getToolType(0) == MotionEvent.TOOL_TYPE_UNKNOWN
-        if (!(holdTap && ev.pointerCount == 1) && !fixTool) return super.dispatchTouchEvent(ev)
-        val e = normalized(ev, if (holdTap) tapX else ev.x, if (holdTap) tapY else ev.y)
-        try { return super.dispatchTouchEvent(e) } finally { e.recycle() }
+        return super.dispatchTouchEvent(ev)
     }
 
-    /** 한 손가락 이벤트를 '손가락 · 터치스크린' 으로, 좌표는 (x, y) 로 다시 만든다 */
-    private fun normalized(ev: MotionEvent, x: Float, y: Float): MotionEvent {
-        val props = MotionEvent.PointerProperties()
-        ev.getPointerProperties(0, props)
-        if (props.toolType == MotionEvent.TOOL_TYPE_UNKNOWN) props.toolType = MotionEvent.TOOL_TYPE_FINGER
-        val c = MotionEvent.PointerCoords()
-        ev.getPointerCoords(0, c)
-        c.x = x; c.y = y
-        if (c.pressure <= 0f) c.pressure = 1f
-        val src = if (ev.source == 0 || ev.isFromSource(android.view.InputDevice.SOURCE_TOUCHSCREEN)) android.view.InputDevice.SOURCE_TOUCHSCREEN else ev.source
-        return MotionEvent.obtain(ev.downTime, ev.eventTime, ev.action, 1, arrayOf(props), arrayOf(c),
-            ev.metaState, ev.buttonState, ev.xPrecision, ev.yPrecision, ev.deviceId, ev.edgeFlags, src, ev.flags)
+    /** 창 좌표 (x, y) 아래의 웹 화면(화면보호기 · 대시보드)에 클릭 */
+    private fun clickWeb(x: Float, y: Float) {
+        if (idleOverlay.visibility == View.VISIBLE) TapClick.click(screensaver.page, x, y)
+        else TapClick.click(webView, x, y)
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {

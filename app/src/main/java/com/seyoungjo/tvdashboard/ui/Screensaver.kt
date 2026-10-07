@@ -60,6 +60,8 @@ class Screensaver(
     private val dim: View = layer.findViewById(R.id.ssDim)
 
     private var web: WebView? = null
+    /** 화면보호기 페이지 (손가락 누름을 클릭으로 넣을 때) */
+    val page: WebView? get() = web
     private var surface: Surface? = null
     private var player: MediaPlayer? = null
     private var items: List<PlayItem> = emptyList()
@@ -285,6 +287,8 @@ class Screensaver(
         wv.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
                 assetLoader.shouldInterceptRequest(request.url)
+
+            override fun onPageFinished(view: WebView, url: String?) { TapClick.inject(view) }   // 손가락 누름 → 클릭
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                 if (view === web) {
