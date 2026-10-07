@@ -110,12 +110,18 @@ def run(root: Path, relay: Relay, src: Path, folder: str, wait: int = 180, force
         echo("  (TV 가 지금 오프라인입니다 — 켜지면 반영됩니다)")
     vers = versions.load(root, relay.tv)
     job, sent, same, blobs = Job(), [], 0, []
+    from . import video
     for rel, f in files:
         data = f.read_bytes()
         path = folder + "/" + rel
         if not force and versions.unchanged(tree, path, data, vers):
             same += 1
             continue
+        if video.is_main_path(path) and video.is_video(path):
+            data = video.prepare(rel.rsplit("/", 1)[-1], data, echo)     # 화면보호기 동영상은 TV 가 반드시 트는 규격으로
+            if not force and versions.unchanged(tree, path, data, vers):
+                same += 1
+                continue
         job.put(path, data, True)
         versions.remember(vers, path, data)
         sent.append(rel)

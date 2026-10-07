@@ -78,6 +78,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var idleVideo: VideoView
     private lateinit var idleMessage: TextView
     private var webView: WebView? = null
+    private val dataHandler by lazy { DataPathHandler(applicationContext) }
     private lateinit var screensaver: Screensaver
     private var hasMain = false                       // 자료/main 폴더가 있으면 대기 화면 = 화면보호기
 
@@ -172,7 +173,7 @@ class MainActivity : AppCompatActivity() {
 
         assetLoader = WebViewAssetLoader.Builder()
             .setDomain(ContentStore.WEB_HOST)
-            .addPathHandler(ContentStore.WEB_PREFIX, DataPathHandler(applicationContext))
+            .addPathHandler(ContentStore.WEB_PREFIX, dataHandler)
             // 앱 내장 폰트 등: https://appassets.androidplatform.net/assets/fonts/Pretendard-Bold.woff2
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(applicationContext))
             .build()
@@ -279,8 +280,14 @@ class MainActivity : AppCompatActivity() {
             displayZoomControls = false
         }
         wv.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                assetLoader.shouldInterceptRequest(request.url)
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                val u = request.url
+                val range = request.requestHeaders?.get("Range")           // 대시보드 안 <video> 등의 조각 읽기
+                if (u.host == ContentStore.WEB_HOST && range != null && (u.path ?: "").startsWith(ContentStore.WEB_PREFIX)) {
+                    return dataHandler.handle((u.path ?: "").removePrefix(ContentStore.WEB_PREFIX), range)
+                }
+                return assetLoader.shouldInterceptRequest(u)
+            }
 
             override fun onPageFinished(view: WebView, url: String?) {
                 TapClick.inject(view)

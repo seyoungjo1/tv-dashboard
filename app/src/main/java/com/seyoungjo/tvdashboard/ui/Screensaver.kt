@@ -7,6 +7,7 @@ import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
+import com.seyoungjo.tvdashboard.data.VideoDiag
 import android.os.Build
 import android.os.Handler
 import android.util.Log
@@ -60,6 +61,8 @@ class Screensaver(
     private val dim: View = layer.findViewById(R.id.ssDim)
 
     private var web: WebView? = null
+    private val dataHandler = DataPathHandler(activity.applicationContext)
+    private var prepWatch: Runnable? = null              // TV 플레이어가 정해진 시간 안에 시작하지 못하면 페이지 재생으로
     /** 화면보호기 페이지 (손가락 누름을 클릭으로 넣을 때) */
     val page: WebView? get() = web
     private var surface: Surface? = null
@@ -285,8 +288,15 @@ class Screensaver(
             setSupportZoom(false)
         }
         wv.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                assetLoader.shouldInterceptRequest(request.url)
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                // 동영상을 페이지 <video> 로 틀 때는 Range 요청이 온다 → 자료 파일을 조각으로 답한다
+                val u = request.url
+                val range = request.requestHeaders?.get("Range")
+                if (u.host == ContentStore.WEB_HOST && range != null && (u.path ?: "").startsWith(ContentStore.WEB_PREFIX)) {
+                    return dataHandler.handle((u.path ?: "").removePrefix(ContentStore.WEB_PREFIX), range)
+                }
+                return assetLoader.shouldInterceptRequest(u)
+            }
 
             override fun onPageFinished(view: WebView, url: String?) { TapClick.inject(view) }   // 손가락 누름 → 클릭
 
@@ -418,6 +428,12 @@ class Screensaver(
             }
         }
 
+        /** 페이지 <video> 재생(TV 플레이어 대신)의 결과 — 둘 다 실패하면 이유를 TV 상태에 남긴다 */
+        @JavascriptInterface
+        fun webVideo(seq: Int, name: String, ok: Boolean, why: String) {
+            if (ok) VideoDiag.ok() else VideoDiag.fail(name, VideoDiag.last.substringAfter(" — ", "") + " · 페이지 재생도 실패: " + why)
+        }
+
         /** 동영상 칸 위치 (CSS px) — 페이지 폭 vw 기준이라 WebView 실제 픽셀로 환산 */
         @JavascriptInterface
         fun videoRect(x: Double, y: Double, w: Double, h: Double, vw: Double, vh: Double) {
@@ -502,10 +518,15 @@ class Screensaver(
                 box.animate().cancel()
                 box.alpha = 0f
                 box.visibility = View.VISIBLE
+                val want = item
+                handler.postDelayed({
+                    if (active && player == null && surface == null && current === want && !webItem) videoFail(want, f, "영상 판(Surface)이 만들어지지 않음")
+                }, 5000)
             }
             return
         }
         ytSeq++
+        prepWatch?.let { handler.removeCallbacks(it) }
         val afterWeb = webItem                           // 사진·유튜브 다음: 동영상 칸을 서서히 나타나게
         webItem = false
         web?.evaluateJavascript("window.ssWebStop&&ssWebStop(${if (afterWeb) 900 else 0})", null)
@@ -525,9 +546,11 @@ class Screensaver(
             mp.setOnVideoSizeChangedListener { _, w, h -> fitVideo(w, h) }
             mp.setOnPreparedListener {
                 if (player !== it) return@setOnPreparedListener
+                prepWatch?.let { w -> handler.removeCallbacks(w) }
                 errors = 0
-                fitVideo(it.videoWidth, it.videoHeight)
-                it.start()
+                VideoDiag.ok()
+                try { fitVideo(it.videoWidth, it.videoHeight) } catch (e: Exception) { Log.w(TAG, "fitVideo", e) }
+                try { it.start() } catch (e: Exception) { videoFail(item, f, "시작 실패: $e"); return@setOnPreparedListener }
                 if (box.alpha < 1f) box.animate().alpha(1f).setStartDelay(120).setDuration(550).start()
             }
             mp.setOnCompletionListener {
@@ -537,14 +560,53 @@ class Screensaver(
             }
             mp.setOnErrorListener { p, what, extra ->
                 Log.w(TAG, "video error $what/$extra: ${f.name}")
-                if (player === p) next()
+                if (player === p) videoFail(item, f, "TV 플레이어 오류 " + errorText(what, extra))
                 true
             }
             mp.prepareAsync()
+            val watch = Runnable { if (player === mp && !mp.isPlayingSafe()) videoFail(item, f, "TV 플레이어가 15초 안에 시작하지 못함") }
+            prepWatch = watch
+            handler.postDelayed(watch, 15_000)
         } catch (e: Exception) {
             Log.w(TAG, "video open failed: ${f.name}", e)
-            next()
+            videoFail(item, f, "파일 열기 실패: " + (e.message ?: e.javaClass.simpleName))
         }
+    }
+
+    private fun MediaPlayer.isPlayingSafe(): Boolean = try { isPlaying } catch (_: Exception) { false }
+
+    private fun errorText(what: Int, extra: Int): String {
+        val w = when (what) { 1 -> "알 수 없음"; 100 -> "미디어 서버 종료"; 200 -> "점진 재생 불가"; else -> what.toString() }
+        val x = when (extra) {
+            -1010 -> "지원하지 않는 형식(코덱·크기·프레임)"; -1007 -> "파일 손상"; -1004 -> "읽기 오류"; -110 -> "시간 초과"
+            else -> extra.toString()
+        }
+        return "$what/$extra ($w · $x)"
+    }
+
+    /**
+     * TV 기본 플레이어가 이 파일을 틀지 못했다 → 같은 파일을 페이지 <video>(유튜브가 재생되는 그 길)로 튼다.
+     * 이유는 TV 상태(PC 화면)에 남기고, 페이지 재생도 실패하면 화면에 글자로 보여 준 뒤 다음 항목으로
+     */
+    private fun videoFail(item: PlayItem, f: java.io.File, why: String) {
+        if (!active || current !== item) return
+        prepWatch?.let { handler.removeCallbacks(it) }
+        releasePlayer()
+        Log.w(TAG, "video fallback: ${f.name}: $why")
+        VideoDiag.fail(f.name, why)
+        val seq = ++ytSeq
+        webItem = true
+        box.animate().cancel()
+        box.visibility = View.INVISIBLE
+        val url = ContentStore.WEB_PREFIX + android.net.Uri.encode(folder) + "/" + android.net.Uri.encode(f.name)
+        val o = JSONObject().put("seq", seq).put("name", f.name).put("url", url).put("why", why)
+            .put("crop", item.crop).put("align", item.align).put("fill", if (item.blur) "blur" else "color")
+            .put("color", String.format("#%06X", item.color and 0xFFFFFF)).put("loop", items.size == 1)
+            .put("custom", item.custom).put("base", if (item.cropBase) "crop" else "fit")
+            .put("scale", item.scale).put("halign", item.hAlign).put("offsetX", item.offsetX)
+            .put("valign", item.vAlign).put("offsetY", item.offsetY)
+            .put("sound", AppSettings.prefs.getBoolean("idle_video_sound", false))
+        web?.evaluateJavascript("window.ssVideoWeb&&ssVideoWeb($o)", null)
     }
 
     /** 동영상 칸에 보이는 그대로(블러 채움 포함)를 떠서 JPEG data URL 로 (Android 8+, 실패하면 null) */

@@ -262,6 +262,7 @@ class FileOps(private val ctx: Context) {
             .put("port", AppSettings.port)
             .put("addresses", addrs)
             .put("deletedOnUninstall", ContentStore.effectiveMode() == "app")
+            .put("videoError", VideoDiag.last)               // 화면보호기 동영상 마지막 실패 이유 (비어 있으면 정상)
     }
 
     fun menu(): JSONObject {

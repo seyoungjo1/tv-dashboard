@@ -157,6 +157,9 @@ def main(argv: list[str] | None = None) -> int:
         r = _relay(a.tv)
         from . import backup
         blob = read_local(a.local)
+        from . import video
+        if video.is_main_path(a.remote) and video.is_video(a.remote):
+            blob = video.prepare(a.remote.rsplit("/", 1)[-1], blob)      # 화면보호기 동영상은 TV 가 반드시 트는 규격으로
         id_ = r.submit(Job().put(a.remote, blob))
         backup.record_put(ROOT, r.tv, a.remote.strip().strip("/"), blob)
         print("보냄: %s → %s (작업 %s)" % (a.local, a.remote, id_))

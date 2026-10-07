@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, backup, config, grants, syncbat, update, versions
+from . import __version__, backup, config, grants, syncbat, update, versions, video
 from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
@@ -439,6 +439,12 @@ class Api:
                 if kind == "put" and not force and not q and self.unchanged(path, data, vers):
                     skipped.append(path)                    # 바뀌지 않은 파일은 보내지 않는다
                     continue
+                if kind == "put" and video.is_main_path(path) and video.is_video(path):
+                    data = video.prepare(path.rsplit("/", 1)[-1], data, echo)   # 화면보호기 동영상은 TV 가 반드시 트는 규격으로
+                    if q and q.get("h") == versions.sha(data):
+                        skipped.append(path); queued_skip.append(path); continue
+                    if not force and not q and self.unchanged(path, data, vers):
+                        skipped.append(path); continue
                 if kind == "put":
                     versions.remember(vers, str(op["path"]), data)
                     job.put(str(op["path"]), data, bool(op.get("overwrite", True)))

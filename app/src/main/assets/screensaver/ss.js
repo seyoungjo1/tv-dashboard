@@ -416,12 +416,24 @@
       };
       fg.addEventListener('loadedmetadata', custom);
     }
-    fg.onended = function () { parent.postMessage({ ssEnded: o.seq, ok: true }, '*'); };
-    fg.onerror = function () { parent.postMessage({ ssEnded: o.seq, ok: false }, '*'); };
+    if (o.loop) fg.loop = true;
+    if (o.sound) fg.muted = false;
+    fg.onended = function () { if (!o.loop) webDone(o.seq, true); };
+    fg.onerror = function () {
+      var m = fg.error ? ('코드 ' + fg.error.code + (fg.error.message ? ' ' + fg.error.message : '')) : '?';
+      if (TV && TV.webVideo) { try { TV.webVideo(o.seq, o.name || '', false, m); } catch (e) {} }
+      webDone(o.seq, false);
+    };
+    fg.onplaying = function () { if (TV && TV.webVideo) { try { TV.webVideo(o.seq, o.name || '', true, ''); } catch (e) {} } };
     wrap.appendChild(fg);
     box.appendChild(wrap);
     box.classList.add('playing');
   }
+  /** TV: 기본 플레이어가 틀지 못한 동영상 파일을 페이지 <video> 로 (유튜브가 재생되는 길). 화면에는 아무 표시도 하지 않는다 */
+  window.ssVideoWeb = function (o) {
+    pvStop(); window.ssWebStop(0);
+    pvFile(o);
+  };
   // PC 미리보기: 저장하기 전 내용을 바로 반영 · {play} 영상 재생 · {stop} 멈춤
   addEventListener('message', function (e) {
     if (!e.data || !e.data.ss) return;
@@ -495,6 +507,7 @@
   /** 페이지가 보여 주던 것(유튜브 · 사진)을 내린다. delay 만큼 사진을 남겨 두면 그 위로 다음 동영상이 서서히 나타난다 */
   window.ssWebStop = function (delay) {
     window.ssYoutubeStop();
+    if (TV) pvStop();
     clearTimeout(imgTimer); imgCur = null;
     clearLayers(delay || 0);
   };

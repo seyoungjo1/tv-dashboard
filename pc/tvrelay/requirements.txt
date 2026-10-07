@@ -5,3 +5,5 @@
 # truststore 는 Windows 인증서 저장소의 회사 인증서를 쓰기 위해 (회사망의 SSL 검사 장비 대응).
 truststore truststore ; sys_platform == "win32"
 cryptography cryptography ; sys_platform != "win32"
+# 동영상 변환(ffmpeg) — 화면보호기에 보내는 동영상을 안드로이드가 반드시 재생하는 규격으로 바꿀 때 (video.py)
+imageio-ffmpeg imageio_ffmpeg

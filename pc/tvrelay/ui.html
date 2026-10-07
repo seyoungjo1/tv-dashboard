@@ -540,7 +540,7 @@
         // 보내기는 TV 가 꺼져 있어도 맡겨지므로, 연결 상태는 '마지막 응답'만 차분하게 (15분 넘게 소식 없을 때만 꺼짐으로)
         pill.className = 'pill ' + (state.online ? 'on' : 'off');
         const ago = state.age_sec < 60 ? '방금' : state.age_sec < 3600 ? Math.round(state.age_sec / 60) + '분 전' : Math.round(state.age_sec / 3600) + '시간 전';
-        pill.textContent = `📺 ${info?.tv || 'TV'} · ` + (state.online ? `응답 ${ago}` : `꺼진 것 같음 (마지막 응답 ${ago})`) + ` · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}`;
+        pill.textContent = `📺 ${info?.tv || 'TV'} · ` + (state.online ? `응답 ${ago}` : `꺼진 것 같음 (마지막 응답 ${ago})`) + ` · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}` + (state.status?.videoError ? ` · ⚠ 화면보호기 동영상 재생 실패: ${state.status.videoError}` : '');
         pill.title = state.cached ? '저장해 둔 마지막 상태 — TV 확인 중' : '';
       }
       await loadGrants();
