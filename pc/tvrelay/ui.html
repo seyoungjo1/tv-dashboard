@@ -82,6 +82,12 @@
   #ssPanel .ssCols { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   @media (max-width:1300px) { #ssPanel .ssCols { grid-template-columns:1fr; } }
   #ssPanel .opt { display:flex; gap:8px; } #ssPanel .opt label { flex:1; border:1px solid var(--line); border-radius:10px; padding:8px 10px; cursor:pointer; font-size:13px; line-height:1.45; background:#fff; }
+  #ssPanels .pn { border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin-bottom:6px; background:#fff; font-size:12px; display:grid; grid-template-columns:repeat(3, 1fr); gap:5px 8px; align-items:end; }
+  #ssPanels .pn label { display:flex; flex-direction:column; gap:2px; color:var(--dim); font-size:11px; min-width:0; white-space:nowrap; }
+  #ssPanels .pn input, #ssPanels .pn select { font-size:12px; padding:3px 5px; border:1px solid var(--line); border-radius:6px; width:100%; box-sizing:border-box; }
+  #ssPanels .pn input[type=color] { height:24px; padding:0 2px; }
+  #ssPanels .pn .hd { grid-column:1 / -1; display:flex; gap:6px; align-items:center; } #ssPanels .pn .hd b { flex:1; color:#0b7fae; }
+  #ssPanels .pn .hd button { padding:2px 8px; font-size:12px; } #ssPanels .pn .pl { display:none; } #ssPanels .pn.plan .pl { display:flex; }
   #ssPanel .opt input { margin-right:6px; } #ssPanel .opt label:has(input:checked) { border-color:var(--accent); background:#e8f7fd; }
   #ssVids .v { display:flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; font-size:13px; background:#fff; }
   #ssVids .v .n { width:56px; color:#0b7fae; font-weight:800; } #ssVids .v .f { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -228,6 +234,13 @@
         <div>
           <h4>공지사항 <span class="hint" id="ssCount"></span></h4>
           <textarea id="ssNotice" placeholder="한 줄에 공지 하나 (위에서부터 5개까지 표시)&#10;예) 10월 정기교육은 14일에 진행됩니다."></textarea>
+          <h4>현황판 항목 <span class="hint">매출 · 생산량 · 전력량 … 최대 4개 — 저장하면 main/현황판.json 으로, TV 는 앱 업데이트 없이 바로 반영</span></h4>
+          <div id="ssPanels"></div>
+          <button type="button" class="secondary" id="ssAddPanel">+ 항목 추가</button>
+          <button type="button" class="secondary" id="ssPanelsReset">기본(매출 · 생산량)으로</button>
+          <div class="hint" style="margin-top:6px">파일 = main 폴더의 일별 JSON(날짜 · 구분 · 숫자 칸을 값 모양으로 찾음) · 표시 = 값 ÷ 나누기, 소수 자리, 단위 ·
+          비교 = 전년 같은 기간 대비 / 월 계획 파일 대비 달성율(계획이 원 단위면 계획 나누기 1000) / 없음 ·
+          값 칸 = 숫자 칸이 여럿일 때 이름 일부(예: 사용량) · 제외 = 빼고 계산할 구분(쉼표로) · 보정 = fi.json 식 비율 파일(매출)</div>
 </div>
         </div>
         <div>
@@ -739,6 +752,65 @@
     ssVidsDirty = true;
     ssVids.push(newItem({ yt: u, fit: /\/shorts\//.test(u) ? 'fit' : undefined })); ssRenderVids();
   };
+  // ── 현황판 항목 (main/현황판.json "panels") — 없으면 기본 2개 ──
+  const DEFAULT_PANELS = [
+    { title: '매출', file: 'sd.json', unit: '억원', divide: 100000, decimals: 1, color: '#f2801f', compare: 'plan', plan: 'plan.json', planDivide: 1000, adjust: 'fi.json', exclude: ['면류'], value: '' },
+    { title: '생산량', file: '생산.json', unit: '톤', divide: 1000, decimals: 0, color: '#2f7be6', compare: 'prev', exclude: ['면류'], value: '' }];
+  let ssPanels = [], ssPanelsDirty = false, ssPanelsKnown = false;
+  const PANEL_COLORS = ['#f2801f', '#2f7be6', '#2fb36a', '#9b59e0'];
+  const jsonFiles = () => kids(ssDir).filter(k => !k.d && /\.json$/i.test(k.p) && !/^(설정|현황판)\.json$/i.test(base(k.p))).map(k => base(k.p)).sort(natCmp);
+  const normPanel = (p, i) => ({ title: String(p.title || p.file || ''), file: String(p.file || ''), unit: String(p.unit || ''),
+    divide: +p.divide > 0 ? +p.divide : 1, decimals: Math.max(0, Math.min(3, +p.decimals || 0)),
+    color: /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : PANEL_COLORS[i % 4],
+    compare: ['plan', 'none'].includes(p.compare) ? p.compare : 'prev', plan: String(p.plan || 'plan.json'), planDivide: +p.planDivide > 0 ? +p.planDivide : 1,
+    adjust: String(p.adjust || ''), exclude: Array.isArray(p.exclude) ? p.exclude.map(String) : String(p.exclude || '').split(',').map(s => s.trim()).filter(Boolean),
+    value: String(p.value || ''), badge: String(p.badge || '') });
+  const panelsOut = () => ssPanels.map(p => { const o = { title: p.title, file: p.file, unit: p.unit, divide: p.divide, decimals: p.decimals, color: p.color, compare: p.compare };
+    if (p.compare === 'plan') { o.plan = p.plan; if (p.planDivide !== 1) o.planDivide = p.planDivide; }
+    if (p.adjust) o.adjust = p.adjust; if (p.exclude.length) o.exclude = p.exclude; if (p.value) o.value = p.value; if (p.badge) o.badge = p.badge; return o; });
+  function ssRenderPanels() {
+    const files = jsonFiles();
+    const fileSel = (v, name) => `<select data-k="${name}">${[...new Set([v, ...files].filter(Boolean))].map(f => `<option${f === v ? ' selected' : ''}>${esc(f)}</option>`).join('')}<option value="">(직접 입력)</option></select>`;
+    $('#ssPanels').innerHTML = ssPanels.map((p, i) => `<div class="pn${p.compare === 'plan' ? ' plan' : ''}" data-i="${i}">
+      <div class="hd"><b>${i + 1}. ${esc(p.title || '(제목)')}</b>
+        <button type="button" data-mv="-1" ${i ? '' : 'disabled'}>▲</button><button type="button" data-mv="1" ${i < ssPanels.length - 1 ? '' : 'disabled'}>▼</button><button type="button" data-del="1">지우기</button></div>
+      <label>제목<input data-k="title" value="${esc(p.title)}"></label>
+      <label>파일(JSON)${files.includes(p.file) ? fileSel(p.file, 'file') : `<input data-k="file" value="${esc(p.file)}" list="ssJsonList">`}</label>
+      <label>단위<input data-k="unit" value="${esc(p.unit)}"></label>
+      <label>나누기<input data-k="divide" type="number" min="1" value="${p.divide}"></label>
+      <label>소수 자리<input data-k="decimals" type="number" min="0" max="3" value="${p.decimals}"></label>
+      <label>색<input data-k="color" type="color" value="${p.color}"></label>
+      <label>비교<select data-k="compare"><option value="prev"${p.compare === 'prev' ? ' selected' : ''}>전년비</option><option value="plan"${p.compare === 'plan' ? ' selected' : ''}>목표(계획 대비)</option><option value="none"${p.compare === 'none' ? ' selected' : ''}>없음</option></select></label>
+      <label class="pl">계획 파일<input data-k="plan" value="${esc(p.plan)}" list="ssJsonList"></label>
+      <label class="pl">계획 나누기<input data-k="planDivide" type="number" min="1" value="${p.planDivide}"></label>
+      <label>값 칸(이름 일부)<input data-k="value" value="${esc(p.value)}" placeholder="비우면 자동"></label>
+      <label>제외 구분<input data-k="exclude" value="${esc(p.exclude.join(', '))}" placeholder="예: 면류"></label>
+      <label>보정(fi)<input data-k="adjust" value="${esc(p.adjust)}" placeholder="없음" list="ssJsonList"></label>
+    </div>`).join('') + `<datalist id="ssJsonList">${files.map(f => `<option value="${esc(f)}">`).join('')}</datalist>`;
+    $('#ssAddPanel').disabled = ssPanels.length >= 4;
+  }
+  function ssPushPanels() { $('#ssFrame').contentWindow?.postMessage({ ss: { panels: panelsOut() } }, '*'); }
+  $('#ssPanels').addEventListener('input', (e) => {
+    const row = e.target.closest('.pn'); if (!row) return; const p = ssPanels[+row.dataset.i], k = e.target.dataset.k; if (!p || !k) return;
+    let v = e.target.value;
+    if (k === 'divide' || k === 'planDivide') v = +v > 0 ? +v : 1; else if (k === 'decimals') v = Math.max(0, Math.min(3, +v || 0));
+    else if (k === 'exclude') v = v.split(',').map(s => s.trim()).filter(Boolean); else v = v.trim();
+    p[k] = v; ssPanelsDirty = true;
+    if (k === 'compare') row.classList.toggle('plan', v === 'plan');
+    if (k === 'title') row.querySelector('.hd b').textContent = `${+row.dataset.i + 1}. ${v || '(제목)'}`;
+    if (k === 'file' && e.target.tagName === 'SELECT' && v === '') { ssRenderPanels(); row.querySelector && $('#ssPanels .pn[data-i="' + row.dataset.i + '"] [data-k=file]')?.focus(); }
+    ssPushPanels();
+  });
+  $('#ssPanels').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); const row = e.target.closest('.pn'); if (!b || !row) return; const i = +row.dataset.i;
+    if (b.dataset.del) ssPanels.splice(i, 1);
+    else if (b.dataset.mv) { const j = i + +b.dataset.mv; if (j < 0 || j >= ssPanels.length) return; [ssPanels[i], ssPanels[j]] = [ssPanels[j], ssPanels[i]]; }
+    ssPanelsDirty = true; ssRenderPanels(); ssPushPanels();
+  });
+  $('#ssAddPanel').onclick = () => { if (ssPanels.length >= 4) return; const files = jsonFiles().filter(f => !ssPanels.some(p => p.file === f));
+    ssPanels.push(normPanel({ title: '', file: files[0] || '', unit: '', divide: 1, decimals: 0, compare: 'prev' }, ssPanels.length)); ssPanelsDirty = true; ssRenderPanels(); ssPushPanels(); };
+  $('#ssPanelsReset').onclick = () => { ssPanels = DEFAULT_PANELS.map(normPanel); ssPanelsDirty = true; ssRenderPanels(); ssPushPanels(); };
+
   let ssNoticeDirty = false, ssNoticeKnown = false;          // 직접 고쳤는지 · TV 의 지금 공지를 알고 있는지
   $('#ssNotice').addEventListener('input', () => { ssNoticeDirty = true; ssCount(); });
   // main 폴더(또는 그 안)를 고르면 오른쪽 모니터 = 화면보호기 미리보기 + 아래 설정. 다른 폴더를 고르면 원래 TV 미리보기
@@ -755,6 +827,7 @@
   $('#ssFrame').addEventListener('load', () => setTimeout(() => { ssPush(); if (ssActive) ssPlay(0); }, 400));
   async function openScreensaver(dir) {
     ssDir = dir; ssConf = {}; ssVidsDirty = false;
+    ssPanels = DEFAULT_PANELS.map(normPanel); ssPanelsDirty = false; ssPanelsKnown = !entry(dir + '/현황판.json'); ssRenderPanels();
     const tvVids = () => kids(dir).filter(k => !k.d && isMedia(base(k.p))).map(k => base(k.p)).sort(natCmp);
     ssVids = tvVids().map(n => newItem({ name: n }));
     const ta = $('#ssNotice');
@@ -769,11 +842,14 @@
     ssNoticeKnown = !hasNotice || cachedNotice !== null;          // TV 에 공지가 없거나, 받아 둔 내용이 있으면 '알고 있음'
     if (cachedNotice !== null) ta.value = cachedNotice.replace(/^﻿/, '').trim();
     try { const c = await get('설정.json'); if (c) ssConf = JSON.parse(c) || {}; } catch (_) {}
+    const loadPanels = async () => { try { const c = await get('현황판.json'); if (c === null) return false; const j = JSON.parse(c);
+      if (Array.isArray(j?.panels) && j.panels.length && !ssPanelsDirty) { ssPanels = j.panels.slice(0, 4).map(normPanel); ssRenderPanels(); } ssPanelsKnown = true; return true; } catch (_) { return false; } };
+    await loadPanels();
     ta.readOnly = !ssNoticeKnown;
     ta.placeholder = ssNoticeKnown ? '한 줄에 공지 하나 (위에서부터 5개까지 표시)\n예) 10월 정기교육은 14일에 진행됩니다.' : 'TV 에서 지금 공지를 불러오는 중… (10~20초)';
     ssCount();
     // 2) TV 에서 최신 내용을 받아 바꿔 넣는다 (그사이 직접 고쳤으면 고친 내용을 유지)
-    const names = ['생산.json', 'sd.json', 'fi.json', 'plan.json', '공지.txt', '설정.json', '제목.txt'];
+    const names = [...new Set(['생산.json', 'sd.json', 'fi.json', 'plan.json', '공지.txt', '설정.json', '제목.txt', '현황판.json', ...jsonFiles()])];
     const want = names.map(n => dir + '/' + n).filter(p => entry(p)).concat(entry('logo.png') ? ['logo.png'] : []);
     say(want.length ? 'TV 에서 최신 내용을 확인하는 중…' : '');
     const alive = () => ssActive && ssDir === dir;
@@ -782,6 +858,7 @@
       if (tvNotice !== null && !ssNoticeDirty) ta.value = tvNotice.replace(/^﻿/, '').trim();
       if (tvNotice !== null || !hasNotice) ssNoticeKnown = true;
       try { const c = await get('설정.json'); ssConf = c ? (JSON.parse(c) || {}) : {}; } catch (_) {}
+      await loadPanels(); ssRenderPanels();
       say(want.length ? 'TV 의 최신 내용입니다.' : '');
     } else if (alive()) {
       say(ssNoticeKnown ? 'TV 에 연결되지 않아 마지막으로 받아 둔 내용을 보여 줍니다.' : 'TV 에서 공지를 불러오지 못했습니다 — 공지를 고치지 않으면 TV 의 공지는 그대로 둡니다.');
@@ -807,6 +884,7 @@
       `&message=${encodeURIComponent(((m) => !m || m === '오산공장 dashboard 터치시 접속됩니다' ? '' : m)((state?.settings?.idle_message || '').trim()))}&t=${Date.now()}`;
     ssCount(); $('#ssSave').disabled = false;
   }
+  $('#ssFrame').addEventListener('load', () => setTimeout(ssPushPanels, 500));
   $('#ssSave').onclick = async () => {
     const lines = ssLines();
     const conf = Object.assign({}, ssConf);
@@ -833,6 +911,12 @@
       // TV 의 공지를 모르는 채로(불러오기 실패) 고치지도 않았으면 공지 파일은 건드리지 않는다 — 빈 공지로 덮어쓰기 방지
       if (ssNoticeKnown || ssNoticeDirty) ops.push({ op: 'put', path: dir + '/공지.txt', stage: (await api('PUT', '/api/stage', txt, true)).id });
       ops.push({ op: 'put', path: dir + '/설정.json', stage: (await api('PUT', '/api/stage', js, true)).id });
+      // 현황판 항목: TV 의 파일을 못 받은 채로 고치지도 않았으면 건드리지 않는다 (기본값으로 덮어쓰기 방지)
+      if (ssPanelsKnown || ssPanelsDirty) {
+        const bad = ssPanels.find(p => !p.file || !p.title); if (bad) throw new Error('현황판 항목의 제목과 파일을 채워 주세요.');
+        const pj = new File([JSON.stringify({ panels: panelsOut() }, null, 2)], '현황판.json', { type: 'application/json' });
+        ops.push({ op: 'put', path: dir + '/현황판.json', stage: (await api('PUT', '/api/stage', pj, true)).id });
+      }
       say('');
       // 이름을 옮기는 작업과 함께 보내므로 '바뀐 파일만' 비교는 끈다 (옮기기 전 이름과 비교하면 틀릴 수 있음)
       await send(ops, '화면보호기 설정 저장' + (ssVids.some(v => v.file) ? ` (동영상·사진 ${ssVids.filter(v => v.file).length}개 올림)` : ''), moving.length > 0 || ops.some(o => o.op === 'delete'));

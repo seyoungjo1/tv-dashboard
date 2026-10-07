@@ -444,7 +444,7 @@
     setDark(TV ? cfg.dark : Q.get('dark') === '1');
     BASE = '/data/' + encodeURIComponent(cfg.folder || 'main') + '/';
     getJson('현황판.json').then(function (pc) {
-      var list = normPanels(pc), names = [];
+      var list = normPanels(overridePanels ? { panels: overridePanels } : pc), names = [];
       list.forEach(function (p) { [p.file, p.plan, p.adjust].forEach(function (n) { if (n && names.indexOf(n) < 0) names.push(n); }); });
       return Promise.all(names.map(getJson).concat([getText('공지.txt'), getText('제목.txt')])).then(function (a) {
         var files = {}; names.forEach(function (n, i) { files[n] = a[i]; });
@@ -529,9 +529,11 @@
       if (d.play.kind === 'yt') window.ssYoutube(d.play); else pvFile(d.play);
       return;
     }
+    if (d.panels !== undefined) { overridePanels = d.panels; load(true); return; }   // 현황판 항목 (저장 전)
     override = d;
     if (lastA) paint(lastA);
   });
+  var overridePanels = null;
 
   // ── 유튜브 (쇼츠 포함): TV 앱이 차례가 되면 ssYoutube 를 부르고, 끝나면 TVSS.ytDone 으로 알려 준다 ──
   //    공식 IFrame 플레이어로 소리 없이 재생. 인터넷이 없거나 퍼가기가 막힌 영상은 실패로 알려 건너뛴다.
