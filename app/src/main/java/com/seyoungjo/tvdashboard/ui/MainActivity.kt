@@ -140,6 +140,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 4K(3840×2160) 기준 비율로 보이게: 화면의 16:9 영역이 1920dp 가 되도록 화면 밀도(densityDpi)를 낮춘다.
+     * 예전에는 앱 전체를 scaleX/Y 로 줄였는데, 웹 화면(대시보드·화면보호기)은 부모가 변형되면
+     * 손터치 좌표가 어긋나고(마우스는 정상) 오른쪽 일부를 그리지 않았다 → 변형 없이 밀도로 맞춘다.
+     */
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(fitDensity(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -453,30 +462,23 @@ class MainActivity : AppCompatActivity() {
      *  · 비율이 다른 화면에서는 가운데 16:9 만 쓰고 남는 곳은 검게. 터치 위치는 Android 가 함께 환산한다
      *  · TV 처럼 1920×1080dp 이상이면 그대로(축소 없음) 꽉 채운다
      */
+    /** 화면 안의 16:9 영역만 쓰고 나머지는 검게 (크기는 attachBaseContext 의 밀도로 맞춤 — 변형 없음) */
     private fun keep16by9() {
         val content = findViewById<FrameLayout>(android.R.id.content)
         content.setBackgroundColor(Color.BLACK)
         content.clipChildren = true
         val app = content.getChildAt(0) ?: return
-        val d = resources.displayMetrics.density
-        val designW = (1920 * d).toInt()
-        val designH = (1080 * d).toInt()
         content.addOnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
             val w = r - l
             val h = b - t
             if (w <= 0 || h <= 0) return@addOnLayoutChangeListener
             val (tw, th) = if (w * 9 > h * 16) Pair(h * 16 / 9, h) else Pair(w, w * 9 / 16)   // 화면 안의 16:9 영역
-            val scale = if (tw < designW) tw.toFloat() / designW else 1f
-            val lw = if (scale < 1f) designW else tw
-            val lh = if (scale < 1f) designH else th
             val lp = app.layoutParams as FrameLayout.LayoutParams
-            if (lp.width != lw || lp.height != lh || lp.gravity != Gravity.CENTER || app.scaleX != scale) {
+            if (lp.width != tw || lp.height != th || lp.gravity != Gravity.CENTER || app.scaleX != 1f) {
                 content.post {
-                    app.layoutParams = FrameLayout.LayoutParams(lw, lh, Gravity.CENTER)
-                    app.pivotX = lw / 2f            // 가운데를 기준으로 줄여서 16:9 영역에 딱 맞게
-                    app.pivotY = lh / 2f
-                    app.scaleX = scale
-                    app.scaleY = scale
+                    app.layoutParams = FrameLayout.LayoutParams(tw, th, Gravity.CENTER)
+                    app.scaleX = 1f
+                    app.scaleY = 1f
                 }
             }
         }
@@ -865,6 +867,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        /** 화면의 16:9 영역이 1920dp 보다 작으면(밀도가 높은 기기) 밀도를 낮춰 1920dp 로 — 4K 기준 비율 그대로, 변형 없이 */
+        fun fitDensity(base: android.content.Context): android.content.Context {
+            val dm = base.resources.displayMetrics
+            val w = maxOf(dm.widthPixels, dm.heightPixels)
+            val h = minOf(dm.widthPixels, dm.heightPixels)
+            if (w <= 0 || h <= 0) return base
+            val tw = if (w * 9 > h * 16) h * 16 / 9 else w
+            val want = tw * android.util.DisplayMetrics.DENSITY_DEFAULT / 1920
+            val conf = android.content.res.Configuration(base.resources.configuration)
+            if (want <= 0 || want >= conf.densityDpi) return base
+            conf.densityDpi = want
+            return base.createConfigurationContext(conf)
+        }
+
         const val EXTRA_PREVIEW_IDLE = "preview_idle"
         private const val LOGO_FILE = "logo.png"
         private const val SCAN_MS = 15_000L
