@@ -431,9 +431,24 @@
     wrap.id = 'yt';
     wrap.style.background = !o.crop && o.fill === 'color' ? o.color : '#0d1620';
     if ((!o.crop || o.custom) && o.fill !== 'color') {         // 확장·직접 조절 + 블러: 같은 영상의 썸네일을 흐리게 깔기
+      // 쇼츠의 기본 썸네일(hqdefault)은 4:3 가운데에 세로 영상 + 양옆 검은 띠라 흐리게 깔면 거의 검게 보인다 →
+      // 원래 비율 썸네일(oardefault)을 먼저 쓰고, 없으면 기본 썸네일을 검은 띠가 잘려 나가게 확대해서 쓴다
       var bg = document.createElement('img');
-      bg.className = 'ytbg'; bg.src = 'https://i.ytimg.com/vi/' + o.id + '/hqdefault.jpg';
-      bg.onerror = function () { bg.remove(); };
+      bg.className = 'ytbg';
+      var hq = function () {
+        bg.onerror = function () { bg.remove(); };
+        if (o.vertical) {
+          var vis = Math.min(1, (bw / bh) / (4 / 3)), content = (9 / 16) / (4 / 3);   // 칸에 보이는 썸네일 폭 · 그 안의 영상 폭
+          bg.style.transform = 'scale(' + (Math.max(1, vis / content) * 1.06).toFixed(3) + ')';
+        }
+        bg.src = 'https://i.ytimg.com/vi/' + o.id + '/hqdefault.jpg';
+      };
+      if (o.vertical) {
+        bg.onerror = hq;
+        // oardefault 가 없으면 유튜브가 120×90 회색 그림을 줄 때가 있어 크기로도 확인
+        bg.onload = function () { if (bg.naturalWidth <= 120 && /oardefault/.test(bg.src)) hq(); };
+        bg.src = 'https://i.ytimg.com/vi/' + o.id + '/oardefault.jpg';
+      } else hq();
       wrap.appendChild(bg);
     }
     var hold = document.createElement('div');
