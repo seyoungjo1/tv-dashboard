@@ -317,8 +317,9 @@
     var wrap = document.createElement('div');
     wrap.id = 'pvv';
     wrap.style.background = !o.crop && o.fill === 'color' ? o.color : '#0d1620';
+    var bg = null;
     if (!o.crop && o.fill !== 'color') {
-      var bg = document.createElement('video');
+      bg = document.createElement('video');
       bg.className = 'pvbg'; bg.src = o.url; bg.muted = true; bg.loop = true; bg.autoplay = true; bg.playsInline = true;
       wrap.appendChild(bg);
     }
@@ -334,6 +335,9 @@
       fg.style.transformOrigin = p;
     }
     place(); fg.onloadedmetadata = place;
+    if (bg) fg.addEventListener('loadedmetadata', function () {      // 블러가 영상 위치를 따라가게
+      if (fg.videoWidth) placeBlur(bg, placeRect(o, box.clientWidth, box.clientHeight, fg.videoWidth / fg.videoHeight));
+    });
     if (o.custom) {                                            // 직접 조절: TV 와 같은 계산으로 크기·위치를 직접 정함
       fg.style.objectFit = 'fill';
       var custom = function () {
@@ -380,6 +384,23 @@
       document.head.appendChild(sc);
     }
     ytWait.push(cb);
+  }
+  /**
+   * 남는 곳 블러의 자리: 영상(x, y, w, h)의 가운데를 중심으로, 영상 비율 그대로 키워 칸의 가장 먼 끝까지 덮고도 남게.
+   * 블러는 가장자리로 갈수록 흐려져 어두워지므로, 칸 가운데에 고정하면 영상을 옮겼을 때 어두운 가장자리만 보인다 →
+   * 영상을 따라가게 해서 영상 가까운 곳은 그 영상이 이어지는 밝은 블러, 어두운 가장자리는 칸 밖으로
+   */
+  function blurRect(x, y, w, h, bw, bh) {
+    var ar = w / h, cx = x + w / 2, cy = y + h / 2;
+    var hw = Math.max(cx, bw - cx), hh = Math.max(cy, bh - cy);
+    var W = Math.max(2 * hw, 2 * hh * ar) * 1.18, H = W / ar;
+    return [cx - W / 2, cy - H / 2, W, H];
+  }
+  function placeBlur(el, r) {
+    if (!el || !r || !(r[2] > 0) || !(r[3] > 0)) return;
+    var box = $('video'), b = blurRect(r[0], r[1], r[2], r[3], box.clientWidth, box.clientHeight);
+    el.style.inset = 'auto';
+    el.style.left = b[0] + 'px'; el.style.top = b[1] + 'px'; el.style.width = b[2] + 'px'; el.style.height = b[3] + 'px';
   }
   /** 직접 조절 위치: 기준선(왼·가운데·오른 / 위·가운데·아래)에서 안쪽으로 px (1080p 기준) */
   function customPos(o, bw, bh, vw, vh) {
@@ -438,7 +459,7 @@
       var hq = function () {
         bg.onerror = function () { bg.remove(); };
         if (o.vertical) {
-          var vis = Math.min(1, (bw / bh) / (4 / 3)), content = (9 / 16) / (4 / 3);   // 칸에 보이는 썸네일 폭 · 그 안의 영상 폭
+          var vis = Math.min(1, (vw / vh) / (4 / 3)), content = (9 / 16) / (4 / 3);   // 블러 자리에 보이는 썸네일 폭 · 그 안의 영상 폭
           bg.style.transform = 'scale(' + (Math.max(1, vis / content) * 1.06).toFixed(3) + ')';
         }
         bg.src = 'https://i.ytimg.com/vi/' + o.id + '/hqdefault.jpg';
@@ -449,6 +470,7 @@
         bg.onload = function () { if (bg.naturalWidth <= 120 && /oardefault/.test(bg.src)) hq(); };
         bg.src = 'https://i.ytimg.com/vi/' + o.id + '/oardefault.jpg';
       } else hq();
+      placeBlur(bg, [x, y, vw, vh]);                         // 블러가 영상 위치를 따라가게
       wrap.appendChild(bg);
     }
     var hold = document.createElement('div');
@@ -523,10 +545,12 @@
     var L = document.createElement('div');
     L.className = 'sslayer ssimg';
     L.style.background = !o.crop && o.fill === 'color' ? o.color : '#0d1620';
+    var bg = null;
     if ((!o.crop || o.custom) && o.fill !== 'color') {
-      var bg = document.createElement('img'); bg.className = 'ytbg'; bg.src = img.src; L.appendChild(bg);
+      bg = document.createElement('img'); bg.className = 'ytbg'; bg.src = img.src; L.appendChild(bg);
     }
     var r = placeRect(o, bw, bh, (img.naturalWidth || 16) / (img.naturalHeight || 9));
+    if (bg) placeBlur(bg, r);                                // 블러가 사진 위치를 따라가게
     img.className = 'imgfg';
     img.style.cssText = 'left:' + r[0] + 'px;top:' + r[1] + 'px;width:' + r[2] + 'px;height:' + r[3] + 'px';
     L.appendChild(img);

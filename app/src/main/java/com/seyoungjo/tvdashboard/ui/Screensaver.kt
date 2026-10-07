@@ -584,6 +584,7 @@ class Screensaver(
             tex.layoutParams = FrameLayout.LayoutParams(w, h, Gravity.TOP or Gravity.START)
             tex.translationX = when (item.hAlign) { "left" -> ox; "right" -> bw - w - ox; else -> (bw - w) / 2f + ox }
             tex.translationY = when (item.vAlign) { "top" -> oy; "bottom" -> bh - h - oy; else -> (bh - h) / 2f + oy }
+            placeBlur(tex.translationX, tex.translationY, w, h)
             ensureBlurBmp(vw, vh)
             return
         }
@@ -595,7 +596,30 @@ class Screensaver(
         tex.layoutParams = FrameLayout.LayoutParams(w, h, gravity)
         tex.translationX = 0f
         tex.translationY = 0f
+        placeBlur((bw - w) / 2f, (bh - h) / 2f, w, h)       // 확장(가운데). 크롭은 블러를 쓰지 않음
         ensureBlurBmp(vw, vh)
+    }
+
+    /**
+     * 남는 곳 블러의 자리: 영상(x, y, w, h)의 가운데를 중심으로 영상 비율 그대로 키워 칸의 가장 먼 끝까지 덮고도 남게.
+     * 블러는 가장자리로 갈수록 흐려져 어두워지므로, 칸에 고정하면 영상을 옮겼을 때 어두운 가장자리만 보인다 →
+     * 영상을 따라가게 해서 영상 가까운 곳은 밝게 이어지고 어두운 가장자리는 칸 밖으로 (화면보호기 페이지의 blurRect 와 같은 계산)
+     */
+    private fun placeBlur(x: Float, y: Float, w: Int, h: Int) {
+        val bw = box.width
+        val bh = box.height
+        if (w <= 0 || h <= 0 || bw <= 0 || bh <= 0) return
+        val ar = w.toFloat() / h
+        val cx = x + w / 2f
+        val cy = y + h / 2f
+        val hw = max(cx, bw - cx)
+        val hh = max(cy, bh - cy)
+        val bigW = max(2 * hw, 2 * hh * ar) * 1.18f
+        val bigH = bigW / ar
+        blur.scaleType = ImageView.ScaleType.FIT_XY
+        blur.layoutParams = FrameLayout.LayoutParams(bigW.roundToInt(), bigH.roundToInt(), Gravity.TOP or Gravity.START)
+        blur.translationX = cx - bigW / 2
+        blur.translationY = cy - bigH / 2
     }
 
     private fun ensureBlurBmp(vw: Int, vh: Int) {
