@@ -47,7 +47,7 @@
             app:summary="main 폴더의 공지.txt — 한 줄에 공지 하나 (5개까지 표시)" />
         <EditTextPreference app:key="notice_pin" app:defaultValue=""
             app:title="공지 수정 비밀번호 (숫자 6자리)"
-            app:summary="화면보호기의 [✎ 공지 수정] 버튼을 누르면 이 비밀번호를 물어봅니다. 비우면 화면보호기에서 공지를 고칠 수 없습니다." />
+            app:summary="화면보호기 공지 옆의 수정 아이콘을 누르면 이 비밀번호를 물어봅니다. 비우면 화면보호기에서 공지를 고칠 수 없습니다." />
         <Preference app:key="idle_preview" app:dependency="idle_enabled" app:title="대기 화면 미리보기" />
     </PreferenceCategory>
 

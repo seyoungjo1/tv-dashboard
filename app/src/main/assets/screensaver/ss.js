@@ -41,10 +41,18 @@
   }
   /** [✎ 공지 수정] 버튼 위치 → TV 앱 (그 버튼을 누른 터치는 대시보드로 넘어가지 않고 이 페이지로 온다) */
   function reportEdit() {
-    if (!TV || !TV.editRect) return;
-    var b = $('noticeEdit'), r = b.getBoundingClientRect();
-    try { TV.editRect(r.left, r.top, b.offsetParent ? r.width : 0, r.height, innerWidth); } catch (e) {}
+    if (!TV || !TV.editRects) return;
+    var out = [];
+    [].forEach.call(document.querySelectorAll('.nedit'), function (b) {
+      if (!b.offsetParent) return;                       // 안 보이는 아이콘
+      var r = b.getBoundingClientRect();
+      out.push([r.left, r.top, r.width, r.height]);
+    });
+    try { TV.editRects(JSON.stringify(out), innerWidth); } catch (e) {}
   }
+  var EDIT_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M11 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5V13"/>' +
+    '<path d="M17.3 3.7a1.8 1.8 0 0 1 2.6 0l.4.4a1.8 1.8 0 0 1 0 2.6L12 15l-3.6.6.6-3.6z"/><path d="M15.6 5.4l3 3"/></svg>';
 
   // ── 시계 ──
   function pad(n) { return String(n).padStart(2, '0'); }
@@ -272,7 +280,13 @@
     noticeText = (a[4] || '').replace(/^\uFEFF/, '').replace(/\s+$/, '');
     nb.className = 'card' + (lines.length ? (lines.length >= 4 ? ' n' + lines.length : '') : ' none');
     nb.innerHTML = '';
-    lines.forEach(function (t) { var d = document.createElement('div'); d.className = 'row'; d.textContent = t; nb.appendChild(d); });
+    lines.forEach(function (t, i) {
+      var d = document.createElement('div'); d.className = 'row';
+      var tx = document.createElement('span'); tx.className = 't'; tx.textContent = t; d.appendChild(tx);
+      var ic = document.createElement('div'); ic.className = 'nedit'; ic.dataset.line = i; ic.innerHTML = EDIT_SVG; d.appendChild(ic);
+      nb.appendChild(d);
+    });
+    $('perf').classList.toggle('nonotice', !lines.length);
     // 동영상 칸: TV 는 앱이 그 위에 재생, 미리보기는 목록·방식을 글로 보여 준다
     var vids = override && override.videos ? override.videos : null;
     $('video').classList.toggle('playing', !!TV && (cfg.videos || 0) > 0);
@@ -581,13 +595,13 @@
   function ntClose() {
     ntOpen = false; clearTimeout(ntIdle);
     ['ntDim', 'ntPop'].forEach(function (id) { var e = $(id); if (e) e.remove(); });
-    $('noticeEdit').classList.remove('hide');
     if (TV && TV.noticeEdit) { try { TV.noticeEdit(false); } catch (e) {} }
     reportEdit();
   }
   function ntTouch() { clearTimeout(ntIdle); ntIdle = setTimeout(ntClose, 3 * 60 * 1000); }   // 3분 동안 손대지 않으면 닫음
   function ntPop(html) {
     var p = $('ntPop');
+    if (p) p.className = '';
     if (!p) {
       var d = document.createElement('div'); d.id = 'ntDim'; $('stage').appendChild(d);
       p = document.createElement('div'); p.id = 'ntPop'; $('stage').appendChild(p);
@@ -605,10 +619,11 @@
     }
     var pin = '';
     var p = ntPop('<h3>공지사항 수정</h3><div class="sub" id="ntSub">공지 수정 비밀번호 6자리를 입력하세요</div>' +
-      '<div class="pinrow"><div class="dots" id="ntDots">' + '<i></i>'.repeat(6) + '</div></div>' +
-      '<div class="pad">' + ['1', '2', '3', '4', '5', '지우기', '6', '7', '8', '9', '0', '취소'].map(function (k) {
-        return '<button type="button" data-k="' + k + '" class="' + (k === '지우기' ? 'fn' : k === '취소' ? 'fn' : '') + '">' + k + '</button>';
+      '<div class="dots" id="ntDots">' + '<i></i>'.repeat(6) + '</div>' +
+      '<div class="pad">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9', '취소', '0', '지우기'].map(function (k) {
+        return '<button type="button" data-k="' + k + '" class="' + (k === '지우기' || k === '취소' ? 'fn' : '') + '">' + k + '</button>';
       }).join('') + '</div>');
+    p.classList.add('pin');
     var dots = function () { [].forEach.call($('ntDots').children, function (d, i) { d.className = i < pin.length ? 'on' : ''; }); };
     var check = function () {
       var r = 'wrong:0';
@@ -660,13 +675,20 @@
       var t = ta.value.split('\n').map(function (s) { return s.replace(/\s+$/, ''); }).join('\n').replace(/^\n+|\n+$/g, '');
       try { TV.saveNotice(t ? t + '\n' : ''); } catch (e) { window.ssNoticeSaved(false, e.message); }
     };
-    setTimeout(function () { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); if (TV && TV.showKeys) TV.showKeys(); }, 60);
+    var at = ta.value.length;                              // 누른 줄 끝에 커서 (공지 칸의 n번째 줄 = 입력란의 n번째 내용 줄)
+    if (ntLine >= 0) {
+      var ls = ta.value.split('\n'), seen = -1, pos = 0;
+      for (var k = 0; k < ls.length; k++) { if (ls[k].trim()) seen++; pos += ls[k].length; if (seen === ntLine) { at = pos; break; } pos++; }
+    }
+    setTimeout(function () { ta.focus(); ta.setSelectionRange(at, at); if (TV && TV.showKeys) TV.showKeys(); }, 60);
   }
-  $('noticeEdit').addEventListener('click', function () {
-    if (!TV || ntOpen) return;
+  var ntLine = -1;                                     // 누른 아이콘의 공지 줄 (입력란을 열 때 그 줄 끝에 커서)
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('.nedit');
+    if (!b || !TV || ntOpen) return;
     ntOpen = true; ntTouch();
-    $('noticeEdit').classList.add('hide');
-    try { TV.noticeEdit(true); } catch (e) {}
+    ntLine = b.dataset.line != null ? +b.dataset.line : -1;
+    try { TV.noticeEdit(true); } catch (er) {}
     ntPin();
   });
   window.ssNoticeSaved = function (ok, msg) {

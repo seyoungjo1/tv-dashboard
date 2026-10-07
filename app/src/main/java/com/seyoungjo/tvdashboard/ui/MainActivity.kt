@@ -674,7 +674,7 @@ class MainActivity : AppCompatActivity() {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             passGesture = false
             if (idleOverlay.visibility == View.VISIBLE && hasMain && !morphing) {
-                // 화면보호기의 [✎ 공지 수정] 버튼 · 수정 중인 화면: 대시보드로 넘어가지 않고 화면보호기 페이지가 받는다
+                // 화면보호기의 공지 수정 아이콘 · 수정 중인 화면: 대시보드로 넘어가지 않고 화면보호기 페이지가 받는다
                 val (rx, ry) = toRoot(ev.x, ev.y)
                 if (screensaver.editing || screensaver.hitsEditButton(rx, ry, reveal.parent as View)) {
                     disarmTap()

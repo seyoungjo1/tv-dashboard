@@ -45,7 +45,7 @@ import kotlin.math.roundToInt
  *    (인터넷이 없거나 퍼가기가 막힌 영상은 건너뜀)
  *  · 사진: 페이지가 전환 효과(모핑·쉐이딩·닦아내기·원형·블라인드)로 띄우고 정한 초만큼 보여 준 뒤 ytDone.
  *    동영상 → 사진은 마지막 장면을 떠서(PixelCopy) 페이지에 넘겨 그 장면에서 사진으로 전환된다
- *  · 공지 간편 수정: 페이지의 [✎ 공지 수정] 버튼 → 위쪽 팝업에 숫자패드로 공지 수정 비밀번호(6자리, TV 설정) →
+ *  · 공지 간편 수정: 공지 줄 오른쪽의 수정 아이콘 → 위쪽 팝업에 숫자패드(3×4)로 공지 수정 비밀번호(6자리, TV 설정) →
  *    맞으면 공지 입력란 + 화면 키보드 → main/공지.txt 저장. 수정 중에는 화면을 눌러도 대시보드로 넘어가지 않는다
  */
 class Screensaver(
@@ -73,7 +73,7 @@ class Screensaver(
     private var blurBmp: Bitmap? = null
     private var webItem = false                          // 지금 페이지가 보여 주는 항목(사진 · 유튜브)인가
     private var pageW = 0.0                              // 페이지 폭(CSS px) — WebView 픽셀 ↔ CSS px 환산
-    private var editBtn: DoubleArray? = null             // [✎ 공지 수정] 버튼 위치 (CSS px: x, y, w, h)
+    private var editBtns: List<DoubleArray> = emptyList() // 공지 수정 아이콘들의 위치 (CSS px: x, y, w, h)
     private var savedSoftInput = 0
     var active = false
         private set
@@ -187,13 +187,12 @@ class Screensaver(
     }
 
     /**
-     * 이 점(앱 화면 좌표, root 기준)이 [✎ 공지 수정] 버튼 위인가 — 그 터치는 화면보호기 페이지로 보낸다.
+     * 이 점(앱 화면 좌표, root 기준)이 공지 수정 아이콘 위인가 — 그 터치는 화면보호기 페이지로 보낸다.
      * 앱 화면 안의 뷰들은 따로 확대/이동하지 않으므로 left/top 을 더해 WebView 안 좌표로, 다시 CSS px 로 바꾼다.
      */
     fun hitsEditButton(x: Float, y: Float, root: View): Boolean {
         val wv = web ?: return false
-        val r = editBtn ?: return false
-        if (!active || pageW <= 0 || wv.width <= 0) return false
+        if (editBtns.isEmpty() || !active || pageW <= 0 || wv.width <= 0) return false
         var ox = 0f
         var oy = 0f
         var v: View = wv
@@ -205,8 +204,8 @@ class Screensaver(
         val k = wv.width / pageW
         val cx = (x - ox) / k
         val cy = (y - oy) / k
-        val pad = 14                                        // 손가락이 살짝 빗나가도 버튼으로
-        return cx >= r[0] - pad && cx <= r[0] + r[2] + pad && cy >= r[1] - pad && cy <= r[1] + r[3] + pad
+        val pad = 14                                        // 손가락이 살짝 빗나가도 아이콘으로
+        return editBtns.any { r -> cx >= r[0] - pad && cx <= r[0] + r[2] + pad && cy >= r[1] - pad && cy <= r[1] + r[3] + pad }
     }
 
     /**
@@ -308,10 +307,14 @@ class Screensaver(
             .put("title", AppSettings.headerTitle)
             .toString()
 
-        /** [✎ 공지 수정] 버튼 위치 (CSS px). 버튼이 없으면 w=0 */
+        /** 공지 수정 아이콘들의 위치 (CSS px) — JSON [[x, y, w, h], …] */
         @JavascriptInterface
-        fun editRect(x: Double, y: Double, w: Double, h: Double, vw: Double) {
-            handler.post { editBtn = if (w > 0) doubleArrayOf(x, y, w, h) else null; if (vw > 0) pageW = vw }
+        fun editRects(json: String, vw: Double) {
+            val list = try {
+                val a = org.json.JSONArray(json)
+                (0 until a.length()).map { i -> a.getJSONArray(i).let { r -> DoubleArray(4) { r.getDouble(it) } } }
+            } catch (_: Exception) { emptyList() }
+            handler.post { editBtns = list; if (vw > 0) pageW = vw }
         }
 
         /** 공지 수정 시작/끝 */
