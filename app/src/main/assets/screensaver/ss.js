@@ -438,7 +438,8 @@
     }
     var hold = document.createElement('div');
     hold.className = 'ythold';
-    hold.style.cssText = 'left:' + x + 'px;top:' + y + 'px;width:' + vw + 'px;height:' + vh + 'px';
+    // 재생이 실제로 시작될 때까지 숨김 — 유튜브가 불러오는 동안 띄우는 썸네일·재생 아이콘·어두운 막이 안 보이게 (그동안은 흐린 배경만)
+    hold.style.cssText = 'left:' + x + 'px;top:' + y + 'px;width:' + vw + 'px;height:' + vh + 'px;opacity:0';
     var inner = document.createElement('div'); inner.id = 'ytPlayer'; hold.appendChild(inner);
     wrap.appendChild(hold);
     box.appendChild(wrap);
@@ -455,7 +456,10 @@
         events: {
           onReady: function (e) { try { e.target.mute(); noCaptions(e.target); e.target.playVideo(); } catch (er) {} },
           onApiChange: function (e) { noCaptions(e.target); },
-          onStateChange: function (e) { if (e.data === 1) { clearTimeout(ytTimer); noCaptions(e.target); clearLayers(400); } if (e.data === 0 && !o.loop) ytDone(true); },
+          onStateChange: function (e) {
+            if (e.data === 1) { clearTimeout(ytTimer); noCaptions(e.target); clearLayers(400); hold.style.opacity = '1'; }   // 재생 시작 → 서서히 보이기
+            if (e.data === 0 && !o.loop) { hold.style.opacity = '0'; ytDone(true); }        // 끝 화면(추천 영상 등)도 안 보이게
+          },
           onError: function () { ytDone(false); }
         }
       });

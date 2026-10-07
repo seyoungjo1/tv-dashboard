@@ -66,7 +66,7 @@ main { position: absolute; left: 38px; right: 38px; top: 122px; bottom: 82px; di
 #video.playing .ph { display: none; }
 #yt { position: absolute; inset: 0; overflow: hidden; }
 #yt .ytbg { position: absolute; inset: -8%; width: 116%; height: 116%; object-fit: cover; filter: blur(40px) brightness(.75); }
-#yt .ythold { position: absolute; overflow: hidden; }
+#yt .ythold { position: absolute; overflow: hidden; transition: opacity .5s ease .3s; }
 #pvv { position: absolute; inset: 0; overflow: hidden; }
 #pvv .pvbg { position: absolute; inset: -8%; width: 116%; height: 116%; object-fit: cover; filter: blur(40px) brightness(.75); }
 #pvv .pvfg { position: absolute; inset: 0; width: 100%; height: 100%; }
