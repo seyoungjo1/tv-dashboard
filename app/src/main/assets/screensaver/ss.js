@@ -457,7 +457,14 @@
           onReady: function (e) { try { e.target.mute(); noCaptions(e.target); e.target.playVideo(); } catch (er) {} },
           onApiChange: function (e) { noCaptions(e.target); },
           onStateChange: function (e) {
-            if (e.data === 1) { clearTimeout(ytTimer); noCaptions(e.target); clearLayers(400); hold.style.opacity = '1'; }   // 재생 시작 → 서서히 보이기
+            if (e.data === 1) {                                     // 재생 시작 → 처음부터 서서히 밝아지기
+              clearTimeout(ytTimer); noCaptions(e.target); clearLayers(400);
+              if (hold.style.opacity !== '1') {
+                // 숨겨 둔 사이 영상이 조금 진행됐으면 처음으로 — 첫 장면부터 보이게
+                try { if (e.target.getCurrentTime() > 0.15) e.target.seekTo(0, true); } catch (er) {}
+                hold.style.opacity = '1';
+              }
+            }
             if (e.data === 0 && !o.loop) { hold.style.opacity = '0'; ytDone(true); }        // 끝 화면(추천 영상 등)도 안 보이게
           },
           onError: function () { ytDone(false); }
