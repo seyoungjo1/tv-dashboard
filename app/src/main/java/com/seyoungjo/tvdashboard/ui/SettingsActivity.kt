@@ -179,6 +179,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             addrs.isEmpty() -> "네트워크 연결 없음 (포트 $port)"
             else -> addrs.joinToString("\n") { "http://${it.ip}:$port" + if (it.tailscale) "  (Tailscale)" else "" }
         }
+        findPreference<Preference>("touch_diag")?.summary = TouchDiag.summary()
         val init = Auth.initialPassword
         findPreference<Preference>("admin_password")?.summary =
             if (init != null) "초기 비밀번호: $init\n(관리 웹에서 변경하면 더 이상 여기에 표시되지 않습니다. 누르면 초기화)"
