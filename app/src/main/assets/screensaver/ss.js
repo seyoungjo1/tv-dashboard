@@ -685,6 +685,10 @@
   var ntLine = -1;                                     // 누른 아이콘의 공지 줄 (입력란을 열 때 그 줄 끝에 커서)
   document.addEventListener('click', function (e) {
     var b = e.target.closest && e.target.closest('.nedit');
+    if (b && !TV && PREVIEW) {                           // PC 미리보기: 아래 공지사항 입력칸의 그 줄로
+      parent.postMessage({ ssEditNotice: b.dataset.line != null ? +b.dataset.line : -1 }, '*');
+      return;
+    }
     if (!b || !TV || ntOpen) return;
     ntOpen = true; ntTouch();
     ntLine = b.dataset.line != null ? +b.dataset.line : -1;

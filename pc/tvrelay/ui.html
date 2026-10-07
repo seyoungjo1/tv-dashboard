@@ -523,6 +523,14 @@
   // 영상 비율(가로/세로): 새 파일·받아 둔 영상은 실제 값, 유튜브는 쇼츠 9:16 · 일반 16:9, 모르면 16:9 로 가정
   let ssBox = [742, 928];                                    // 미리보기가 알려 주는 동영상 칸 크기 (1080p 기준)
   window.addEventListener('message', (e) => { if (e.data && e.data.ssBox) ssBox = e.data.ssBox; });
+  // 미리보기의 공지 수정 아이콘 → 공지사항 입력칸의 그 줄 끝에 커서 (TV 에서는 같은 아이콘이 비밀번호 → 수정 팝업)
+  window.addEventListener('message', (e) => {
+    if (!e.data || e.data.ssEditNotice === undefined) return;
+    const ta = $('#ssNotice'), line = e.data.ssEditNotice;
+    let at = ta.value.length;
+    if (line >= 0) { const ls = ta.value.split('\n'); let seen = -1, pos = 0; for (const l of ls) { if (l.trim()) seen++; pos += l.length; if (seen === line) { at = pos; break; } pos++; } }
+    ta.scrollIntoView({ block: 'center', behavior: 'smooth' }); ta.focus(); ta.setSelectionRange(at, at);
+  });
   async function videoRatio(v) {
     if (v.ar) return { ar: v.ar, exact: true };
     if (v.yt) return { ar: /\/shorts\//.test(v.yt) ? 9 / 16 : 16 / 9, exact: true };
