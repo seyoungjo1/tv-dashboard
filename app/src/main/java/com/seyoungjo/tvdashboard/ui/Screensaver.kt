@@ -470,7 +470,20 @@ class Screensaver(
             return
         }
         val s = surface
-        if (s == null || box.width <= 0) return          // 칸·화면이 준비되면 다시 불린다
+        if (s == null || box.width <= 0) {               // 칸·영상 판(Surface)이 준비되면 다시 불린다 (placeBox · onSurfaceTextureAvailable)
+            if (s == null && box.width > 0) {
+                // 영상 판은 TextureView 가 크기를 갖고 화면에 그려질 때 생긴다 → 칸을 투명하게 띄워 판부터 만든다
+                // (사진·유튜브 다음이면 칸이 숨겨져 있어 판이 없을 수 있음)
+                if (tex.width <= 0 || tex.height <= 0) {
+                    tex.layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+                    tex.translationX = 0f; tex.translationY = 0f
+                }
+                box.animate().cancel()
+                box.alpha = 0f
+                box.visibility = View.VISIBLE
+            }
+            return
+        }
         ytSeq++
         val afterWeb = webItem                           // 사진·유튜브 다음: 동영상 칸을 서서히 나타나게
         webItem = false

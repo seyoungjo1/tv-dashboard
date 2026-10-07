@@ -270,10 +270,12 @@
                     android:layout_height="match_parent"
                     android:background="#40000000" />
 
+                <!-- 처음부터 칸 크기 — 크기가 0 이면 안드로이드가 영상 판(Surface)을 만들지 않아 재생이 시작되지 않는다.
+                     영상 크기를 알면 fitVideo 가 맞춘다 -->
                 <TextureView
                     android:id="@+id/ssVideo"
-                    android:layout_width="0dp"
-                    android:layout_height="0dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
                     android:layout_gravity="center" />
             </FrameLayout>
         </FrameLayout>

@@ -593,6 +593,8 @@ class Api:
     def backup_restore(self, body: dict[str, Any] | None = None) -> dict[str, Any]:
         """고른 TV 의 백업(기본: 지금 TV)을 지금 연결된 TV 로 그대로 올린다 — 파일(같은 것은 건너뜀) · TV 설정 · 직원용 도구(같은 열쇠)"""
         src = str((body or {}).get("from") or "") or self.relay().tv
+        if not backup.info(self.root, src).get("count") and not backup.meta(self.root, src).get("settings"):
+            raise ValueError("'%s' 백업이 비어 있습니다 — 위쪽에서 '%s' 를 고르고 [백업 파일 넣기] 를 먼저 하세요" % (src, src))
 
         def go() -> None:
             st = self.state()
@@ -652,9 +654,10 @@ class Api:
                 r = relay.wait(relay.submit(job), timeout=600)
                 if r is None:
                     raise ValueError("TV 응답이 없습니다 (파일은 모두 올라감) — 다시 누르면 설정만 적용합니다")
-            self.bk["msg"] = "백업 파일 보내기 완료 — 파일 %d개%s%s%s" % (len(items) - len(fails), " · TV 설정" if m.get("settings") else "",
-                                                         " · 직원용 도구 %d개" % len(g_ops) if g_ops else "",
-                                                         " · 보내지 못한 파일 %d개: %s" % (len(fails), ", ".join(fails[:3])) if fails else "")
+            self.bk["msg"] = "백업 파일 보내기 완료 — 파일 %d개%s%s%s" % (len(items) - len(fails), " (TV 와 이미 같아 보낼 파일 없음)" if not items else "",
+                                                         " · TV 설정" if m.get("settings") else "",
+                                                         (" · 직원용 도구 %d개" % len(g_ops) if g_ops else "") +
+                                                         (" · 보내지 못한 파일 %d개: %s" % (len(fails), ", ".join(fails[:3])) if fails else ""))
             echo(self.bk["msg"])
         r = self._bk_run("restore", go)
         r["from"] = src

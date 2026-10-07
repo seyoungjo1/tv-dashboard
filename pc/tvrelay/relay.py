@@ -155,7 +155,9 @@ class Relay:
     def _with_age(st: dict[str, Any]) -> dict[str, Any]:
         st["age_sec"] = max(0, int(time.time() - st.get("time", 0) / 1000))
         interval = int(st.get("interval", 10) or 10)
-        st["online"] = st["age_sec"] < max(6 * 60, interval * 3)    # TV 는 5분마다 상태를 다시 올린다
+        # TV 는 바뀐 게 없으면 5분마다 한 번 상태를 다시 올린다 → 넉넉히 15분 동안 소식이 없을 때만 '꺼짐'
+        # (6분으로 두면 TV 가 조금만 늦어도 켜짐/꺼짐이 깜박였다)
+        st["online"] = st["age_sec"] < max(15 * 60, interval * 3)
         return st
 
 

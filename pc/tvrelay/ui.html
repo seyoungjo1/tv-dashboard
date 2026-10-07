@@ -35,6 +35,13 @@
 
   /* ── 탐색기 ── */
   #explorer { flex:1; min-height:0; display:flex; }
+  #dock { flex:0 0 auto; background:#fff; border-top:1px solid var(--line); display:flex; flex-direction:column; }
+  #dock .dhead { display:flex; align-items:center; gap:4px; padding:4px 10px; border-bottom:1px solid var(--line); background:#f7f9fb; }
+  #dock .dt { background:transparent; color:var(--dim); padding:6px 12px; border-radius:6px; }
+  #dock .dt.on { background:#e6ebf1; color:var(--text); }
+  #dock .dbody { height:190px; overflow:auto; }
+  #dock.collapsed .dbody { display:none; }
+  #dock.collapsed #dockHint { display:none; }
   #tree { width:340px; min-width:220px; background:#fff; border-right:1px solid var(--line); display:flex; flex-direction:column; }
   #tree.collapsed { display:none; }
   .ttools { display:flex; gap:6px; padding:8px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
@@ -110,8 +117,8 @@
   .tvc { flex:1; position:relative; min-width:0; }
   .tvc iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:#eef1f4; }
   .tvc .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:34px; color:#6b7785; text-align:center; padding:60px; }
-  /* 보낸 직후 잠깐 뜨는 알림 (결과는 [전송 결과] 탭에서) */
-  #toast { position:fixed; right:16px; bottom:16px; max-width:380px; padding:12px 16px; border-radius:10px; background:#1e2125; color:#fff; font-size:13px; font-weight:700; box-shadow:0 6px 20px rgba(0,0,0,.25); z-index:90; }
+  /* 보낸 직후 잠깐 뜨는 알림 (결과는 탐색기 아래 [전송 결과]) */
+  #toast { position:fixed; right:16px; top:64px; max-width:380px; padding:12px 16px; border-radius:10px; background:#1e2125; color:#fff; font-size:13px; font-weight:700; box-shadow:0 6px 20px rgba(0,0,0,.25); z-index:90; }
   #toast.bad { background:var(--danger); }
   #toast { white-space:pre-line; }
   .job { padding:7px 12px; border-bottom:1px solid #f0f2f5; display:flex; gap:8px; justify-content:space-between; }
@@ -155,7 +162,6 @@
   <button data-tab="explorer" class="active">파일 탐색기</button>
   <button data-tab="settings">TV 설정</button>
   <button data-tab="update">앱 업데이트</button>
-  <button data-tab="jobs">전송 결과 <span class="pill off hidden" id="jobsBadge" style="font-size:11px;padding:1px 7px"></span></button>
   <button data-tab="conn">연결</button>
 </nav>
 
@@ -239,6 +245,18 @@
   </section>
 </div>
 
+<!-- 파일 탐색기 아래: 전송 결과 · 기록 (접고 펼 수 있음) -->
+<div id="dock" class="hidden">
+  <div class="dhead">
+    <button type="button" class="dt on" data-dt="jobs">전송 결과 <span class="pill off hidden" id="jobsBadge" style="font-size:11px;padding:1px 7px"></span></button>
+    <button type="button" class="dt" data-dt="log">기록</button>
+    <span class="hint" id="dockHint" style="flex:1;padding-left:8px">보냄 = TV 가 아직 가져가지 않음(꺼져 있으면 켜질 때 반영) · 반영됨 = 적용 완료 · 실패 = 적용 못 함</span>
+    <button type="button" class="icon" id="dockToggle" title="접기/펴기">▾</button>
+  </div>
+  <div class="dbody" id="dockJobs"><div id="jobsList" class="hint">아직 없습니다.</div></div>
+  <div class="dbody hidden" id="dockLog"><pre id="log" style="white-space:pre-wrap;margin:0;padding:8px 12px"></pre></div>
+</div>
+
 <div id="settingsPage" class="page hidden">
   <div class="card">
     <form id="settingsForm">
@@ -275,12 +293,6 @@
   </div>
 </div>
 
-<div id="jobsPage" class="page hidden">
-  <div class="card"><h3 style="margin-top:0">전송 결과</h3>
-    <p class="hint" style="margin-top:0">보내면 작업은 GitHub 에 암호화되어 맡겨지고 끝입니다 (자동 업로드 .bat 과 같음). TV 가 켜져 있으면 10~20초 안에, 꺼져 있으면 켜질 때 가져가 반영합니다.
-      <b>보냄</b> = TV 가 아직 가져가지 않음 · <b>반영됨</b> = TV 에 적용 완료 · <b>실패</b> = TV 가 적용하지 못함</p>
-    <div id="jobsList" class="hint">아직 없습니다.</div></div>
-  <div class="card"><h3 style="margin-top:0">기록</h3><pre id="log" style="white-space:pre-wrap;max-height:400px;overflow:auto;padding:10px"></pre></div>
 </div>
 
 <div id="connPage" class="page hidden">
@@ -376,8 +388,8 @@
     tab = t;
     document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
     $('#explorer').classList.toggle('hidden', t !== 'explorer');
-    for (const [id, name] of [['#settingsPage','settings'],['#updatePage','update'],['#jobsPage','jobs'],['#connPage','conn'],['#setupPage','setup']]) $(id).classList.toggle('hidden', t !== name);
-    if (t === 'jobs') { loadLog(); jobs.forEach(j => j.unseen = false); renderJobs(); }
+    $('#dock').classList.toggle('hidden', t !== 'explorer');
+    for (const [id, name] of [['#settingsPage','settings'],['#updatePage','update'],['#connPage','conn'],['#setupPage','setup']]) $(id).classList.toggle('hidden', t !== name);
     if (t === 'conn') { loadBackup(); loadTvs(); }
   }
   document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.tab));
@@ -474,7 +486,9 @@
       $('#bkList').innerHTML = r.items.length ? '<table style="width:100%">' + r.items.map(b =>
         `<tr><td><b>${esc(b.tv)}</b>${b.tv === r.current ? ' <span class="pill on" style="font-size:11px">지금 TV</span>' : ''}</td>
          <td>파일 ${b.count}개 · ${size(b.size)}${b.hasSettings ? ' · 설정' : ''}</td><td class="hint">${when(b.updated)}</td>
-         <td style="text-align:right"><button class="secondary" data-bkr="${esc(b.tv)}" title="이 백업의 파일·TV 설정·직원용 도구를 지금 TV(${esc(r.current)})로 보냅니다 — 같은 파일은 건너뜀">⬆ 백업 파일 보내기 → ${esc(r.current)}</button></td></tr>`).join('') + '</table>'
+         <td style="text-align:right">${!b.count ? `<span class="hint">비어 있음 — ${b.tv === r.current ? '위의 [백업 파일 넣기]' : `위쪽에서 '${esc(b.tv)}' 를 고르고 [백업 파일 넣기]`} 먼저</span>`
+           : b.tv === r.current ? `<button class="secondary" data-bkr="${esc(b.tv)}" title="이 TV 를 다른 기기로 바꿔 같은 이름으로 다시 연결했을 때, 백업을 새 기기로 보냅니다">⬆ 이 TV 로 다시 보내기 (기기 교체 시)</button>`
+           : `<button class="secondary" data-bkr="${esc(b.tv)}" title="이 백업의 파일·TV 설정·직원용 도구를 지금 TV(${esc(r.current)})로 보냅니다 — 같은 파일은 건너뜀">⬆ 백업 파일 보내기 → ${esc(r.current)}</button>`}</td></tr>`).join('') + '</table>'
         : '아직 백업이 없습니다. PC 에서 파일을 올리면 자동으로 쌓입니다.';
       $('#bkPullTv').textContent = r.current ? '(' + r.current + ' → PC)' : '';
       const j = r.job || {};
@@ -522,14 +536,20 @@
       const pill = $('#tvPill');
       if (state.none) { pill.className = 'pill off'; pill.textContent = 'TV 미연결 — 연결 코드를 입력하세요'; }
       else {
+        // 보내기는 TV 가 꺼져 있어도 맡겨지므로, 연결 상태는 '마지막 응답'만 차분하게 (15분 넘게 소식 없을 때만 꺼짐으로)
         pill.className = 'pill ' + (state.online ? 'on' : 'off');
-        const ago = state.age_sec < 60 ? state.age_sec + '초' : Math.round(state.age_sec / 60) + '분';
-        pill.textContent = (state.cached ? '확인 중… ' : '') + (state.online ? 'TV 온라인' : 'TV 오프라인') + ` · ${ago} 전 · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}`;
+        const ago = state.age_sec < 60 ? '방금' : state.age_sec < 3600 ? Math.round(state.age_sec / 60) + '분 전' : Math.round(state.age_sec / 3600) + '시간 전';
+        pill.textContent = `📺 ${info?.tv || 'TV'} · ` + (state.online ? `응답 ${ago}` : `꺼진 것 같음 (마지막 응답 ${ago})`) + ` · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}`;
+        pill.title = state.cached ? '저장해 둔 마지막 상태 — TV 확인 중' : '';
       }
       await loadGrants();
       renderTree(); fillSettings();
       if (tab === 'explorer') { renderPane(false); renderTv(false); }
-    } catch (e) { $('#tvPill').className = 'pill off'; $('#tvPill').textContent = e.message; }
+    } catch (e) {
+      // GitHub 를 잠깐 못 읽어도 화면은 마지막 상태(캐시) 그대로 — 표시만 작게
+      $('#tvPill').title = 'TV 상태 확인 실패 (마지막 상태 표시 중): ' + e.message;
+      if (!state || state.none) { $('#tvPill').className = 'pill off'; $('#tvPill').textContent = 'TV 상태 확인 중… (' + e.message + ')'; }
+    }
   }
 
   // ── 직원용 업로드 도구 (폴더 전용 HTML) ──
@@ -1213,7 +1233,7 @@
         renderJobs(); toast(desc + ' — ' + note); return null;
       }
       jobs.unshift({ id: r.id, at: Date.now(), desc: desc + (sk ? ` (${qd ? `이미 보낸 ${qd}개 · ` : ''}바뀌지 않은 ${sk - qd}개 건너뜀)` : ''), st: 'wait', note: 'GitHub 에 맡김 — TV 가 가져가면 반영됩니다' });
-      renderJobs(); toast('보냈습니다 — ' + desc + '\nTV 가 가져가면 반영됩니다 (결과는 [전송 결과] 탭)'); poll(r.id); return r.id;
+      renderJobs(); toast('보냈습니다 — ' + desc + '\nTV 가 가져가면 반영됩니다 (결과는 아래 [전송 결과])'); poll(r.id); return r.id;
     } catch (e) { alert(e.message); }
     finally { setTimeout(() => inflight.delete(key), 1500); }
   }
@@ -1228,7 +1248,7 @@
         if (!j) return;
         j.st = r.ok ? 'ok' : 'bad'; j.done = Date.now();
         j.note = r.ok ? 'TV 에 반영됨' : '실패: ' + fails.map(x => `${x.path || x.op} (${x.error})`).join(', ');
-        if (!r.ok) { j.unseen = true; toast('실패 — ' + j.desc + ' ([전송 결과] 탭에서 확인)', true); }
+        if (!r.ok) { j.unseen = true; toast('실패 — ' + j.desc + ' (아래 [전송 결과]에서 확인)', true); dockOpen(true); }
         (r.results || []).filter(x => x.file).forEach(x => { const a = document.createElement('a'); a.href = x.file; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); j.note += ' · 저장: ' + x.saved; });
         (r.results || []).filter(x => x.message).forEach(x => j.note += ' · ' + x.message);
         renderJobs(); setTimeout(async () => { pb.dataset.for = '\u0000'; await loadState(); renderTv(true); if (ssActive) openScreensaver(ssDir); }, 1500);
@@ -1245,6 +1265,21 @@
     $('#jobsBadge').textContent = bad ? '실패 ' + bad : ''; $('#jobsBadge').classList.toggle('hidden', !bad);
     saveJobs();
   }
+  // 아래 패널: [전송 결과] [기록] 탭 · 접기 (접어 둔 상태는 기억)
+  function dockTab(t) {
+    document.querySelectorAll('#dock .dt').forEach(b => b.classList.toggle('on', b.dataset.dt === t));
+    $('#dockJobs').classList.toggle('hidden', t !== 'jobs'); $('#dockLog').classList.toggle('hidden', t !== 'log');
+    $('#dockHint').style.visibility = t === 'jobs' ? '' : 'hidden';
+    if (t === 'log') loadLog();
+    if (t === 'jobs') { jobs.forEach(j => j.unseen = false); renderJobs(); }
+  }
+  function dockOpen(open) {
+    $('#dock').classList.toggle('collapsed', !open); $('#dockToggle').textContent = open ? '▾' : '▴';
+    try { localStorage.setItem('dockClosed', open ? '' : '1'); } catch (_) {}
+  }
+  document.querySelectorAll('#dock .dt').forEach(b => b.onclick = () => { dockTab(b.dataset.dt); dockOpen(true); });
+  $('#dockToggle').onclick = () => dockOpen($('#dock').classList.contains('collapsed'));
+  try { if (localStorage.getItem('dockClosed')) dockOpen(false); } catch (_) {}
   async function loadLog() { try { $('#log').textContent = (await api('GET', '/api/log')).lines.join('\n'); } catch (_) {} }
 
   const staging = new Set();
