@@ -448,7 +448,7 @@ const CFG = /*__CONFIG__*/null;
     if (isNew) xlMode = 'replace';
     const HINT = {
       replace: '붙여 넣은 표로 파일 전체를 바꿉니다 (기존 내용은 없어짐)',
-      add: isMap ? '붙여 넣은 줄을 더합니다 — 같은 키(날짜·구분 등)는 새 값으로 바뀌고, 나머지는 그대로' : '붙여 넣은 줄을 기존 표 아래에 이어 붙입니다',
+      add: isMap ? '붙여 넣은 줄을 더합니다 — 같은 키(날짜·구분 등)는 새 값으로 바뀌고, 나머지는 그대로' : '날짜·구분 등(숫자가 아닌 칸)이 같은 줄은 새 값으로 바뀌고, 새 줄은 아래에 이어 붙습니다',
       delete: isMap ? '붙여 넣은 키(날짜·구분 등)를 지웁니다 — 값 칸은 없어도 됩니다' : '붙여 넣은 줄과 같은 줄을 지웁니다 — 머리글을 넣으면 그 칸만 비교',
     };
     $('#xlModes').innerHTML = !f ? '' : isNew ? '<span class="modehint">새 파일 — 붙여 넣은 표로 만듭니다</span>'
@@ -469,7 +469,7 @@ const CFG = /*__CONFIG__*/null;
       (o.table.length > 50 ? `<div class="hint">… ${o.table.length - 50}줄 더</div>` : '') +
       (o.warnings.length ? `<div class="msg wait">확인하세요:\n${esc(o.warnings.join('\n'))}</div>` : '');
     $('#xlSum').textContent = `붙여 넣은 ${o.table.length}줄${o.headerUsed ? ' (첫 줄은 머리글로 보고 뺐습니다)' : ' (머리글 없음 — 칸 순서대로)'}` +
-      (o.mode === 'delete' ? ` · 지움 ${o.removed}${o.missing ? ` · 없는 것 ${o.missing}` : ''}` : o.kind === 'map' ? ` · 새로 ${o.added} · 바뀜 ${o.changed}` : ` · 더함 ${o.added}`) +
+      (o.mode === 'delete' ? ` · 지움 ${o.removed}${o.missing ? ` · 없는 것 ${o.missing}` : ''}` : o.kind === 'map' || o.changed != null ? ` · 새로 ${o.added} · 바뀜 ${o.changed}` : ` · 더함 ${o.added}`) +
       ` → 올린 뒤 전체 ${o.count}${o.kind === 'map' ? '개' : '줄'} · ${size(new TextEncoder().encode(o.json).length)}`;
     $('#xlSend').disabled = !o.table.length || (o.mode === 'delete' && !o.removed);
     $('#xlSend').textContent = o.mode === 'delete' ? `${o.removed}개 지우고 TV 로 올리기` : 'TV 로 올리기';

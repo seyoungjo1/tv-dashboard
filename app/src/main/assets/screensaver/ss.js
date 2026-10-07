@@ -109,6 +109,47 @@
     return daysIn(y, m);
   }
 
+  // ── 표 형식 JSON → 계산용 모음 ──
+  //  생성기 형식 {"2025.01.02|당류": 값} 은 그대로, 표 형식 {columns:[…], rows:[{…}|[…]]} (또는 행 배열)은 바꿔서 읽는다.
+  //  칸은 이름이 아니라 값의 모양으로 찾는다: 날짜(yyyy.mm.dd / yyyy.mm) · 구분(글자) · 숫자(수량·금액). 같은 날짜·구분은 마지막 값
+  function numv(v) { if (typeof v === 'number') return v; var t = String(v == null ? '' : v).replace(/[,\s]/g, ''); return t === '' || t === '-' ? NaN : parseFloat(t); }
+  function dateKey(v, month) {
+    var m = /^(\d{4})[.\-\/](\d{1,2})(?:[.\-\/](\d{1,2}))?\.?$/.exec(String(v == null ? '' : v).trim()) || /^(\d{4})(\d{2})(\d{2})?$/.exec(String(v == null ? '' : v).trim());
+    if (!m) return null;
+    if (month) return m[1] + '.' + pad(+m[2]);
+    return m[3] ? m[1] + '.' + pad(+m[2]) + '.' + pad(+m[3]) : null;
+  }
+  function toStore(j, kind) {
+    var rows = Array.isArray(j) ? j : j && Array.isArray(j.rows) ? j.rows : null;
+    if (!rows) return j || {};                                         // 생성기 형식 그대로
+    var cols = j && Array.isArray(j.columns) ? j.columns : rows.length && !Array.isArray(rows[0]) && rows[0] ? Object.keys(rows[0]) : [];
+    var get = function (r, i) { return Array.isArray(r) ? r[i] : r ? r[cols[i]] : undefined; };
+    var n = Array.isArray(rows[0]) ? rows[0].length : cols.length, sample = rows.slice(0, 50);
+    var isDate = [], isNum = [];
+    for (var i = 0; i < n; i++) {
+      isDate[i] = sample.some(function (r) { return dateKey(get(r, i), true); }) && sample.every(function (r) { var v = get(r, i); return v == null || v === '' || dateKey(v, true); });
+      isNum[i] = !isDate[i] && sample.some(function (r) { return isFinite(numv(get(r, i))); }) && sample.every(function (r) { var v = get(r, i); return v == null || v === '' || isFinite(numv(v)); });
+    }
+    var dc = isDate.indexOf(true), cc = -1, nums = [];
+    for (i = 0; i < n; i++) { if (i === dc) continue; if (isNum[i]) nums.push(i); else if (cc < 0) cc = i; }
+    if (dc < 0 || cc < 0 || !nums.length) return {};
+    var name = function (i) { return String(cols[i] || ''); };
+    var out = {}, month = kind === 'fi' || kind === 'plan';
+    var fiC = nums.filter(function (i) { return /fi/i.test(name(i)); })[0], sdC = nums.filter(function (i) { return /sd/i.test(name(i)); })[0];
+    if (kind === 'fi' && (fiC == null || sdC == null)) { fiC = nums[0]; sdC = nums[1]; }   // 생성기 순서: FI, SD
+    // 값 칸: 생산은 수량(KG), SD 는 매출실적·금액(천원), 계획은 금액 — 이름으로 못 찾으면 마지막 숫자 칸
+    var want = kind === 'prod' ? /수량|kg|생산/i : /매출|실적|금액|천원|원|sd|계획|plan/i;
+    var valC = nums.filter(function (i) { return want.test(name(i)); }).pop();
+    if (valC == null) valC = nums[nums.length - 1];
+    rows.forEach(function (r) {
+      var d = dateKey(get(r, dc), month), c = String(get(r, cc) == null ? '' : get(r, cc)).trim();
+      if (!d || !c) return;
+      if (kind === 'fi') out[d + '|' + c] = { fi: numv(get(r, fiC)) || 0, sd: sdC == null ? 0 : numv(get(r, sdC)) || 0 };
+      else { var v = numv(get(r, valC)); if (isFinite(v)) out[d + '|' + c] = v; }
+    });
+    return out;
+  }
+
   function compute(st) {
     var latest = '';
     [st.sd, st.prod].forEach(function (s) { Object.keys(s || {}).forEach(function (k) { var d = k.split('|')[0]; if (d > latest) latest = d; }); });
@@ -307,7 +348,10 @@
       lastA = a;
       var lines = paint(a);
       var key = JSON.stringify([a[0], a[1], a[2], a[3]]).length + ':' + lines.join('|');
-      if (force || key !== lastKey) { lastKey = key; render(compute({ prod: a[0], sd: a[1], fi: a[2], plan: a[3] })); }
+      if (force || key !== lastKey) {
+        lastKey = key;
+        render(compute({ prod: toStore(a[0], 'prod'), sd: toStore(a[1], 'sd'), fi: toStore(a[2], 'fi'), plan: toStore(a[3], 'plan') }));
+      }
     });
   }
   // ── PC 미리보기: 동영상 파일을 TV 와 같은 방식(크롭/확장 · 블러/단색)으로 재생 ──

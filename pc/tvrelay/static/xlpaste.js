@@ -8,7 +8,8 @@
  * 2) parse(붙여 넣은 글) : 엑셀에서 복사한 표(탭 구분, 따옴표 안 줄바꿈 포함)
  * 3) build(양식, 표, {mode}) : 첫 줄이 머리글이면 이름으로, 머리글이 없으면 순서대로 칸에 넣는다
  *      mode  replace = 덮어쓰기(전체 교체)
- *            add     = 추가하기 — (map) 같은 키는 새 값으로, 나머지는 그대로 / (표) 아래에 이어 붙이기
+ *            add     = 추가하기 — (map) 같은 키는 새 값으로, 나머지는 그대로
+ *                      (표) 숫자가 아닌 칸(날짜·구분 등)이 같은 줄은 새 값으로 바꾸고, 새 줄은 아래에 이어 붙이기
  *            delete  = 삭제 — (map) 붙여 넣은 키를 지움 (값 칸은 없어도 됨) / (표) 붙여 넣은 줄과 같은 줄을 지움
  */
 (function (G) {
@@ -303,7 +304,24 @@
       var old = f.kind === 'new' ? [] : ((f.path && f.path.length ? f.root[f.path[0]] : f.root) || []);
       out.added = 0; out.removed = 0; out.missing = 0;
       if (mode === 'replace') { if (hdr) list.unshift(f.header.slice()); out.added = table.length; }
-      else if (mode === 'add') { list = old.concat(list); out.added = table.length; }
+      else if (mode === 'add') {
+        // 숫자가 아닌 칸(날짜·구분 등)을 키로: 같은 줄은 새 값으로 바꾸고 나머지는 이어 붙임 (같은 날짜가 두 번 들어가지 않게)
+        var keyCols = cols.map(function (c, k) { return c.type !== 'num' && mapping[k] >= 0 ? k : -1; }).filter(function (k) { return k >= 0; });
+        var hasNum = cols.some(function (c, k) { return c.type === 'num' && mapping[k] >= 0; });
+        if (keyCols.length && hasNum) {
+          var cellOf = function (row, k) { return kind === 'rows-obj' ? (row || {})[cols[k].name] : (row || [])[k]; };
+          var keyOf = function (row) { return JSON.stringify(keyCols.map(function (k) { var v = cellOf(row, k); return v == null ? '' : String(v); })); };
+          var merged = old.slice(), at = {};
+          merged.forEach(function (row, i) { if (i >= hdr) at[keyOf(row)] = i; });
+          out.added = 0; out.changed = 0;
+          list.forEach(function (row) {
+            var kk = keyOf(row);
+            if (Object.prototype.hasOwnProperty.call(at, kk)) { merged[at[kk]] = row; out.changed++; }
+            else { at[kk] = merged.length; merged.push(row); out.added++; }
+          });
+          list = merged;
+        } else { list = old.concat(list); out.added = table.length; }
+      }
       else {                                          // 삭제: 붙여 넣은 칸(머리글로 고른 칸)이 모두 같은 줄을 지운다
         var used = mapping.map(function (m, k) { return m >= 0 ? k : -1; }).filter(function (k) { return k >= 0; });
         var cell = function (row, k) { return kind === 'rows-obj' ? (row || {})[cols[k].name] : (row || [])[k]; };
