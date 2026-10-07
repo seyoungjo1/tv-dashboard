@@ -400,7 +400,11 @@
          <td style="text-align:right"><button class="secondary" data-bkr="${esc(b.tv)}" title="이 백업을 지금 연결된 TV(${esc(r.current)})로 올립니다 — 이미 같은 파일은 건너뜀">지금 TV 로 올리기</button></td></tr>`).join('') + '</table>'
         : '아직 백업이 없습니다. PC 에서 파일을 올리면 자동으로 쌓입니다.';
       const j = r.job || {};
-      $('#bkMsg').textContent = j.msg ? j.msg + (j.running && j.total ? ` (${j.done}/${j.total})` : '') : '';
+      const ms = r.missing;
+      $('#bkMsg').textContent = (j.msg ? j.msg + (j.running && j.total ? ` (${j.done}/${j.total})` : '') : '') +
+        (!j.running && ms && ms.count ? `${j.msg ? '\n' : ''}⚠ 지금 TV 에는 있는데 백업에 없는 파일 ${ms.count}개` +
+          `${ms.videos ? ` (동영상 ${ms.videos}개)` : ''} · ${size(ms.size)} — 복원하면 빠집니다. [TV 에서 받아 백업 채우기]를 눌러 주세요.\n예: ${ms.sample.join(', ')}` : '');
+      $('#bkMsg').style.whiteSpace = 'pre-wrap';
       document.querySelectorAll('#bkPull, [data-bkr]').forEach(b => b.disabled = !!j.running);
       clearTimeout(bkTimer);
       if (j.running) bkTimer = setTimeout(loadBackup, 2000);

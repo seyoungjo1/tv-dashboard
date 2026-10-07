@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 DIR = "tv-backup"
-BATCH = 40 * 1024 * 1024          # 한 번에 보내는 작업 크기 (이보다 큰 파일은 혼자 보낸다)
+BATCH = 16 * 1024 * 1024          # 한 번에 보내는 작업 크기 (이보다 큰 파일은 혼자 보낸다) — 작게 나눠 진행이 보이게
 
 
 def _tvname(tv: str) -> str:
@@ -181,11 +181,15 @@ def sha(f: Path) -> str:
 
 
 def same_on_tv(tree: dict[str, dict[str, Any]], rel: str, f: Path) -> bool:
-    """TV 에 이미 같은 파일이 있는지 (크기 + TV 가 알려 준 버전)"""
+    """TV 에 이미 같은 파일이 있는지 (크기 + TV 가 알려 준 버전).
+    TV 는 64MB 가 넘는 파일(큰 동영상)의 버전은 계산하지 않으므로, 그때는 크기가 같으면 같은 파일로 본다
+    — 안 그러면 백업할 때마다 큰 동영상을 처음부터 다시 주고받아 끝나지 않는다"""
     e = tree.get(rel)
     if not e or e.get("d") or int(e.get("s", -1)) != f.stat().st_size:
         return False
-    return bool(e.get("h")) and str(e["h"]).lower() == sha(f)
+    if not e.get("h"):
+        return True
+    return str(e["h"]).lower() == sha(f)
 
 
 def batches(items: list[tuple[str, Path]]) -> Iterator[list[tuple[str, Path]]]:

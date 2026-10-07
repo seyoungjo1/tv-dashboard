@@ -422,8 +422,16 @@ class Api:
     def backup_info(self) -> dict[str, Any]:
         cfg = config.load(self.root)
         tv = cfg.tv if cfg else ""
-        return {"current": tv, "items": backup.all_backups(self.root), "job": self.bk,
-                "mine": backup.info(self.root, tv) if tv else None}
+        out = {"current": tv, "items": backup.all_backups(self.root), "job": self.bk,
+               "mine": backup.info(self.root, tv) if tv else None}
+        # 지금 TV 에는 있는데 백업에 없는(또는 크기가 다른) 파일 — 복원하면 빠지므로 [TV 에서 받아 백업 채우기] 필요
+        if tv and self.tree:
+            local = dict(backup.files(self.root, tv))
+            miss = [(p, e) for p, e in self.tree.items() if not e.get("d") and not (p in local and backup.same_on_tv(self.tree, p, local[p]))]
+            out["missing"] = {"count": len(miss), "size": sum(int(e.get("s") or 0) for _, e in miss),
+                              "videos": sum(1 for p, _ in miss if p.rsplit(".", 1)[-1].lower() in ("mp4", "m4v", "webm", "mkv", "mov", "3gp", "ts")),
+                              "sample": [p for p, _ in miss[:5]]}
+        return out
 
     def _bk_run(self, kind: str, fn: Any) -> dict[str, Any]:
         if self.bk.get("running"):
@@ -456,27 +464,35 @@ class Api:
             need = [p for p, e in tree.items() if not e.get("d") and not (p in local and backup.same_on_tv(tree, p, local[p]))]
             for p in [p for p in local if p not in tree]:  # TV 에서 지워진 파일은 백업에서도 지움
                 backup.record_delete(self.root, tv, p)
-            self.bk.update(total=len(need), msg="TV 에서 %d개 받는 중…" % len(need))
+            total_mb = sum(int(tree[p].get("s") or 0) for p in need) / 1048576
+            self.bk.update(total=len(need), msg="TV 에서 %d개(%.1f MB) 받는 중…" % (len(need), total_mb))
             relay = self.relay()
             group: list[str] = []
             size = 0
+            got_mb = 0.0
+            fails: list[str] = []
 
             def flush() -> None:
-                nonlocal group, size
+                nonlocal group, size, got_mb
                 if not group:
                     return
                 job = Job()
                 for p in group:
                     job.op("get", path=p)
+                names = ", ".join(p.rsplit("/", 1)[-1] for p in group[:3]) + (" 외 %d개" % (len(group) - 3) if len(group) > 3 else "")
+                self.bk["msg"] = "TV 에서 받는 중… %.1f/%.1f MB · 지금: %s" % (got_mb, total_mb, names)
                 id_ = relay.submit(job)
-                r = relay.wait(id_, timeout=600)
+                r = relay.wait(id_, timeout=300 + size / 1048576 * 10)     # 큰 파일은 그만큼 더 기다림
                 if r is None:
-                    raise ValueError("TV 응답이 없습니다 — TV 가 켜져 있는지 확인하고 다시 누르세요 (받은 것은 남아 있음)")
+                    raise ValueError("TV 응답이 없습니다 — TV 가 켜져 있는지 확인하고 다시 누르세요 (받은 것은 남아 있어 이어서 받습니다)")
                 for item in r.get("results", []):
                     if "data" in item:
                         backup.record_put(self.root, tv, str(item.get("path")), item.pop("data"))
+                    elif not item.get("ok"):
+                        fails.append("%s(%s)" % (item.get("path"), item.get("error")))
                 self.bk["done"] += len(group)
-                self.bk["msg"] = "TV 에서 받는 중… %d/%d" % (self.bk["done"], self.bk["total"])
+                got_mb += size / 1048576
+                self.bk["msg"] = "TV 에서 받는 중… %.1f/%.1f MB" % (got_mb, total_mb)
                 group, size = [], 0
 
             for p in need:
@@ -486,7 +502,8 @@ class Api:
                 group.append(p)
                 size += n
             flush()
-            self.bk["msg"] = "백업 완료 — %d개 받음" % len(need)
+            self.bk["msg"] = ("백업 완료 — %d개 받음" % (len(need) - len(fails)) if need else "백업 완료 — TV 와 이미 같습니다") + \
+                (" · 받지 못한 파일 %d개: %s" % (len(fails), ", ".join(fails[:3])) if fails else "")
             echo(self.bk["msg"])
         return self._bk_run("pull", go)
 
@@ -505,24 +522,33 @@ class Api:
             data = grants.load(self.root)
             g_ops = [grants.grant_op(g) for g in data.values() if g.get("status") == "active"]
             parts = list(backup.batches(items))
-            self.bk.update(total=len(items), msg="새 TV 로 %d개 올리는 중…" % len(items))
+            total_mb = sum(f.stat().st_size for _, f in items) / 1048576
+            self.bk.update(total=len(items), msg="새 TV 로 %d개(%.1f MB) 올리는 중…" % (len(items), total_mb))
             relay = self.relay()
             vers = versions.load(self.root)
+            sent_mb = 0.0
+            fails: list[str] = []
             for part in parts:
                 job = Job()
+                part_mb = sum(f.stat().st_size for _, f in part) / 1048576
+                names = ", ".join(p.rsplit("/", 1)[-1] for p, _ in part[:3]) + (" 외 %d개" % (len(part) - 3) if len(part) > 3 else "")
+                self.bk["msg"] = "새 TV 로 올리는 중… %.1f/%.1f MB · 지금: %s" % (sent_mb, total_mb, names)
                 for p, f in part:
                     blob = f.read_bytes()
                     job.put(p, blob, True)
                     versions.remember(vers, p, blob)
                 id_ = relay.submit(job)
-                r = relay.wait(id_, timeout=900)
+                r = relay.wait(id_, timeout=300 + part_mb * 10)
                 if r is None:
-                    raise ValueError("TV 응답이 없습니다 — 다시 누르면 이어서 올립니다")
+                    versions.save(self.root, vers)
+                    raise ValueError("TV 응답이 없습니다 — 다시 누르면 올라간 것은 건너뛰고 이어서 올립니다")
                 bad = [x for x in r.get("results", []) if not x.get("ok")]
                 if bad:
-                    echo("복원 중 실패 %d개: %s" % (len(bad), ", ".join("%s(%s)" % (x.get("path"), x.get("error")) for x in bad[:5])))
+                    fails.extend("%s(%s)" % (x.get("path"), x.get("error")) for x in bad)
+                    echo("복원 중 실패 %d개: %s" % (len(bad), ", ".join(fails[-len(bad):][:5])))
                 self.bk["done"] += len(part)
-                self.bk["msg"] = "새 TV 로 올리는 중… %d/%d" % (self.bk["done"], self.bk["total"])
+                sent_mb += part_mb
+                self.bk["msg"] = "새 TV 로 올리는 중… %.1f/%.1f MB" % (sent_mb, total_mb)
             versions.save(self.root, vers)
             if src != tv:                                   # 다른 TV 의 백업을 올렸으면 이 TV 의 백업으로도 복사
                 for p, f in items:
@@ -543,8 +569,9 @@ class Api:
                 r = relay.wait(relay.submit(job), timeout=600)
                 if r is None:
                     raise ValueError("TV 응답이 없습니다 (파일은 모두 올라감) — 다시 누르면 설정만 적용합니다")
-            self.bk["msg"] = "복원 완료 — 파일 %d개%s%s" % (len(items), " · TV 설정" if m.get("settings") else "",
-                                                       " · 직원용 도구 %d개" % len(g_ops) if g_ops else "")
+            self.bk["msg"] = "복원 완료 — 파일 %d개%s%s%s" % (len(items) - len(fails), " · TV 설정" if m.get("settings") else "",
+                                                         " · 직원용 도구 %d개" % len(g_ops) if g_ops else "",
+                                                         " · 올리지 못한 파일 %d개: %s" % (len(fails), ", ".join(fails[:3])) if fails else "")
             echo(self.bk["msg"])
         r = self._bk_run("restore", go)
         r["from"] = src

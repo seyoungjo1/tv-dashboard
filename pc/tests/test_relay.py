@@ -322,6 +322,16 @@ class RepoRulesTest(unittest.TestCase):
 
 
 class BackupTest(unittest.TestCase):
+    def test_same_on_tv_big_files_without_version(self):
+        """TV 가 버전을 주지 않는 큰 파일은 크기가 같으면 같은 파일 — 백업할 때마다 다시 받지 않게"""
+        from tvrelay import backup
+        d = Path(tempfile.mkdtemp()); f = d / "1.mp4"; f.write_bytes(b"x" * 100)
+        self.assertTrue(backup.same_on_tv({"main/1.mp4": {"s": 100}}, "main/1.mp4", f))
+        self.assertFalse(backup.same_on_tv({"main/1.mp4": {"s": 99}}, "main/1.mp4", f))
+        self.assertFalse(backup.same_on_tv({"main/1.mp4": {"s": 100, "h": "00" * 32}}, "main/1.mp4", f))
+        self.assertTrue(backup.same_on_tv({"main/1.mp4": {"s": 100, "h": hashlib.sha256(b"x" * 100).hexdigest()}}, "main/1.mp4", f))
+        self.assertFalse(backup.same_on_tv({}, "main/1.mp4", f))
+
     def test_record_and_restore_to_new_tv(self):
         import os, threading, time as _t
         from tvrelay import backup, ui
