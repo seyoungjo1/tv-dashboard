@@ -597,7 +597,9 @@
   let ssVidsDirty = false;                                   // TV 내용을 받는 동안 목록을 직접 고쳤는가 (늦게 온 TV 내용으로 덮지 않게)
   const ssLines = () => $('#ssNotice').value.split('\n').map(s => s.trim()).filter(Boolean);
   const vidLabel = (v) => v.yt ? v.yt : v.file ? v.file.name : v.name;
-  const target = (v, i) => `${i + 1}.${ext(vidLabel(v)) || 'mp4'}`;
+  // 파일 이름은 올린 그대로 둔다 (순서는 설정.json 의 playlist 가 정함 — 이름을 1.mp4 2.mp4 로 바꾸지 않는다)
+  const target = (v) => v.file ? safeName(v.file.name) : v.name;
+  const safeName = (n) => (n.startsWith('_') || n.startsWith('.') ? 'v' + n : n).replace(/[\\/:*?"<>|]/g, '_');   // '_' 로 시작하면 TV 가 재생 목록에서 뺀다
   const isPhoto = (v) => !v.yt && PHOTO_EXT.includes(ext(vidLabel(v)));
   const optText = (v) => (v.fit === 'crop' ? '크롭·' + ({ top: '위', bottom: '아래' }[v.align] || '가운데')
     : v.fit === 'custom' ? `직접 ${v.scale || 100}%` : '확장·' + (v.fill === 'color' ? '단색' : '블러')) +
@@ -605,12 +607,12 @@
   const newItem = (o) => Object.assign({ fit: (ssConf.videoFit === 'crop' ? 'crop' : 'fit'), align: 'center', fill: 'blur', color: '#000000' }, o);
   function ssPush() {          // 미리보기에 저장 전 내용 반영
     $('#ssFrame').contentWindow?.postMessage({ ss: { notices: ssLines(),
-      videos: ssVids.map((v, i) => (v.yt ? '유튜브' : target(v, i)) + '(' + optText(v) + ')') } }, '*');
+      videos: ssVids.map((v) => (v.yt ? '유튜브' : target(v)) + '(' + optText(v) + ')') } }, '*');
   }
   function ssCount() { const n = ssLines().length; $('#ssCount').textContent = n ? `${n}개${n > 5 ? ' — 5개까지만 표시' : ''}` : '(없으면 공지 칸 숨김)'; ssPush(); }
   function ssRenderVids() {
     $('#ssVids').innerHTML = ssVids.map((v, i) => `<div class="v${v.file ? ' new' : ''}${v.yt ? ' yt' : ''}">
-      <span class="n">${v.yt ? '▶ 유튜브' : (isPhoto(v) ? '🖼 ' : '') + esc(target(v, i))}</span>
+      <span class="n">${v.yt ? '▶ 유튜브' : (isPhoto(v) ? '🖼 ' : '') + esc(target(v))}</span>
       <span class="f" title="${esc(vidLabel(v))}">${v.file ? '새 파일 · ' : ''}${esc(vidLabel(v))}${v.file ? ' (' + size(v.file.size) + ')' : ''}</span>
       <span class="o">
         <select data-k="fit" data-i="${i}">${[['crop', '크롭'], ['fit', '확장'], ['custom', '직접 조절']].map(([k, t]) => `<option value="${k}"${(v.fit || 'fit') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>
@@ -744,7 +746,9 @@
     ssRenderVids();
   });
   $('#ssAddVid').onclick = () => { $('#ssVidInput').value = ''; $('#ssVidInput').click(); };
-  $('#ssVidInput').onchange = (e) => { ssVidsDirty = true; [...e.target.files].sort((a, b) => natCmp(a.name, b.name)).forEach(f => ssVids.push(newItem({ file: f }))); ssRenderVids(); };
+  $('#ssVidInput').onchange = (e) => { ssVidsDirty = true; [...e.target.files].sort((a, b) => natCmp(a.name, b.name)).forEach(f => {
+    const i = ssVids.findIndex(v => !v.yt && target(v) === safeName(f.name));             // 같은 이름이 이미 있으면 그 자리를 새 파일로
+    if (i >= 0) ssVids[i] = Object.assign({}, ssVids[i], { file: f, name: undefined }); else ssVids.push(newItem({ file: f })); }); ssRenderVids(); e.target.value = ''; };
   $('#ssAddYt').onclick = () => {
     const u = (prompt('유튜브 주소를 붙여넣으세요 (쇼츠·일반 영상)\n예) https://www.youtube.com/shorts/KLkfruAh5yE') || '').trim();
     if (!u) return;
@@ -889,7 +893,7 @@
     const lines = ssLines();
     const conf = Object.assign({}, ssConf);
     delete conf.videoFit;                                     // 예전 전체 설정 → 영상별 설정으로
-    conf.playlist = ssVids.map((v, i) => Object.assign({ src: v.yt || target(v, i), fit: ['crop', 'custom'].includes(v.fit) ? v.fit : 'fit' },
+    conf.playlist = ssVids.map((v, i) => Object.assign({ src: v.yt || target(v), fit: ['crop', 'custom'].includes(v.fit) ? v.fit : 'fit' },
       v.fit === 'crop' ? { align: v.align || 'center' } : { fill: v.fill === 'color' ? 'color' : 'blur' },
       v.fit !== 'crop' && v.fill === 'color' ? { color: v.color || '#000000' } : {},
       v.fit === 'custom' ? { base: v.base || 'crop', scale: v.scale || 100, halign: v.halign || 'center', offsetX: v.offsetX || 0,
@@ -898,14 +902,10 @@
     const dir = ssDir, ops = [];
     try {
       $('#ssSave').disabled = true;
-      // 동영상: 지운 것 삭제 → 순서가 바뀐 것은 임시 이름 거쳐 1.mp4 2.mp4 … 로 → 새 파일은 그 번호로 올리기
-      const keep = new Set(ssVids.filter(v => v.name).map(v => v.name));   // 유튜브 항목은 파일이 아님
+      // 동영상·사진: 목록에서 뺀 파일은 삭제, 새 파일은 원래 이름 그대로 올리기 (같은 이름이면 덮어씀). 순서는 playlist 가 정한다
+      const keep = new Set(ssVids.map(target).filter(Boolean));            // 유튜브 항목은 파일이 아님
       kids(dir).filter(k => !k.d && isMedia(base(k.p)) && !keep.has(base(k.p))).forEach(k => ops.push({ op: 'delete', path: k.p }));
-      const tag = Date.now().toString(36);
-      const moving = ssVids.map((v, i) => ({ v, i })).filter(({ v, i }) => v.name && v.name !== target(v, i));
-      moving.forEach(({ v, i }) => ops.push({ op: 'rename', path: dir + '/' + v.name, to: `${dir}/_ss_${tag}_${i}.${ext(v.name)}` }));
-      moving.forEach(({ v, i }) => ops.push({ op: 'rename', path: `${dir}/_ss_${tag}_${i}.${ext(v.name)}`, to: dir + '/' + target(v, i) }));
-      for (const [i, v] of ssVids.entries()) if (v.file) { say((isPhoto(v) ? '사진' : '동영상') + ' 준비 중… ' + v.file.name); const st = await api('PUT', '/api/stage', v.file, true); ops.push({ op: 'put', path: dir + '/' + target(v, i), stage: st.id }); }
+      for (const v of ssVids) if (v.file) { say((isPhoto(v) ? '사진' : '동영상') + ' 준비 중… ' + v.file.name); const st = await api('PUT', '/api/stage', v.file, true); ops.push({ op: 'put', path: dir + '/' + target(v), stage: st.id }); }
       const txt = new File([lines.join('\n') + (lines.length ? '\n' : '')], '공지.txt', { type: 'text/plain' });
       const js = new File([JSON.stringify(conf, null, 2)], '설정.json', { type: 'application/json' });
       // TV 의 공지를 모르는 채로(불러오기 실패) 고치지도 않았으면 공지 파일은 건드리지 않는다 — 빈 공지로 덮어쓰기 방지
@@ -919,7 +919,7 @@
       }
       say('');
       // 이름을 옮기는 작업과 함께 보내므로 '바뀐 파일만' 비교는 끈다 (옮기기 전 이름과 비교하면 틀릴 수 있음)
-      await send(ops, '화면보호기 설정 저장' + (ssVids.some(v => v.file) ? ` (동영상·사진 ${ssVids.filter(v => v.file).length}개 올림)` : ''), moving.length > 0 || ops.some(o => o.op === 'delete'));
+      await send(ops, '화면보호기 설정 저장' + (ssVids.some(v => v.file) ? ` (동영상·사진 ${ssVids.filter(v => v.file).length}개 올림)` : ''), ops.some(o => o.op === 'delete'));
     } catch (e) { alert(e.message); } finally { $('#ssSave').disabled = false; }
     function say(t) { $('#ssSt').textContent = t; }
   };
