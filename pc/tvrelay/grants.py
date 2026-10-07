@@ -8,7 +8,7 @@
     HTML 파일만 가져가서는 아무것도 할 수 없고, 비밀번호가 맞아야 열쇠가 풀린다.
   · 공지사항 편집 도구(main 전용): 키 'main#공지' — main/공지.txt 하나만 읽기(get)·저장(put) 가능
   · 폴더 도구는 엑셀 붙여넣기용으로 그 폴더의 .json 을 읽을(get) 수 있다 (양식 확인 · 브라우저에 받아 둠)
-보관: 이 폴더의 grants.json (키가 들어 있으므로 레포에 올리지 않는다).
+보관: 이 폴더의 grants.json (키가 들어 있으므로 레포에 올리지 않는다). TV 마다 따로 — {"_v": 2, "tvs": {TV 이름: {폴더: 도구}}}
 """
 from __future__ import annotations
 
@@ -39,15 +39,45 @@ def _path(root: Path) -> Path:
     return root / FILE_NAME
 
 
-def load(root: Path) -> dict[str, dict[str, Any]]:
+def _read(root: Path) -> dict[str, Any]:
     try:
-        return json.loads(_path(root).read_text(encoding="utf-8"))
+        d = json.loads(_path(root).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
 
 
-def save(root: Path, data: dict[str, dict[str, Any]]) -> None:
-    _path(root).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+def _current_tv(root: Path) -> str:
+    from . import config
+    try:
+        cfg = config.load(root)
+    except config.ConfigError:
+        cfg = None
+    return cfg.tv if cfg else config.DEFAULT_TV
+
+
+def load(root: Path, tv: str | None = None) -> dict[str, dict[str, Any]]:
+    """그 TV(기본: 지금 고른 TV)에 발급한 도구들 {폴더: 도구}"""
+    d = _read(root)
+    if d.get("_v") != 2:                        # 예전 형식(TV 한 대) — migrate 전이면 지금 TV 의 것으로 본다
+        return d
+    return dict((d.get("tvs") or {}).get(tv or _current_tv(root)) or {})
+
+
+def save(root: Path, data: dict[str, dict[str, Any]], tv: str | None = None) -> None:
+    d = _read(root)
+    if d.get("_v") != 2:
+        d = {"_v": 2, "tvs": {}}
+    d.setdefault("tvs", {})[tv or _current_tv(root)] = data
+    _path(root).write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def migrate(root: Path, first_tv: str) -> None:
+    """예전 형식(TV 한 대) → 처음 TV 의 도구로"""
+    d = _read(root)
+    if not _path(root).is_file() or d.get("_v") == 2:
+        return
+    _path(root).write_text(json.dumps({"_v": 2, "tvs": {first_tv: d}}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def is_notice(key: str) -> bool:

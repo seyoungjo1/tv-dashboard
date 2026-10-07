@@ -48,11 +48,18 @@ def cmd_ui(port: int, open_browser: bool, child: bool) -> int:
         print("\n새 버전으로 화면을 다시 띄웁니다 (같은 주소 127.0.0.1:%d) — 브라우저는 저절로 새로고침됩니다.\n" % port, flush=True)
 
 
-def _relay() -> Relay:
+def _relay(tv: str = "", default_first: bool = False) -> Relay:
+    """tv: 그 TV 로 (자동 업로드 .bat 은 만들 때의 TV 이름을 넣는다).
+    비우면 지금 화면에서 고른 TV — 단 default_first 면 처음 연결한 TV (TV 이름 없이 만든 예전 .bat 이 엉뚱한 TV 로 가지 않게)"""
     cfg = config.load(ROOT)
     if cfg is None:
         raise SystemExit("설정이 없습니다. tvrun.bat 을 실행해 [처음 설정]을 마치세요.")
-    return Relay(cfg)
+    config.migrate(ROOT, cfg)
+    name = tv.strip() or (cfg.first_tv if default_first else cfg.tv)
+    try:
+        return Relay(cfg.with_tv(name))
+    except config.ConfigError as e:
+        raise SystemExit(str(e))
 
 
 def _ensure_deps(echo=print) -> None:
@@ -120,13 +127,16 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("local")
     s.add_argument("remote")
     s.add_argument("--wait", type=int, default=120, help="TV 결과를 기다릴 초 (0 = 기다리지 않음)")
+    s.add_argument("--tv", default="", help="TV 이름 (비우면 화면에서 고른 TV)")
     s = sub.add_parser("sync", help="PC 폴더를 스캔해 TV 폴더로 바뀐 파일만 올리기")
     s.add_argument("src")
     s.add_argument("--to", default="", help="TV 폴더 (예: 원가)")
     s.add_argument("--to-hex", default="", help=argparse.SUPPRESS)        # bat 은 ASCII 만 → 한글 폴더 이름을 16진수로
     s.add_argument("--wait", type=int, default=180)
     s.add_argument("--force", action="store_true", help="같은 파일도 다시 보내기")
-    sub.add_parser("status", help="TV 상태")
+    s.add_argument("--tv", default="", help="TV 이름 (비우면 처음 연결한 TV)")
+    s = sub.add_parser("status", help="TV 상태")
+    s.add_argument("--tv", default="")
     s = sub.add_parser("pair", help="TV 화면의 연결 코드로 TV 연결 (TV 에서는 설정할 것 없음)")
     s.add_argument("code")
     a = ap.parse_args(argv)
@@ -144,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         print("이 tvrelay.json 파일을 TV 의 설정 > '중계 설정 파일 불러오기'로 한 번 불러오세요.")
         return 0
     if a.cmd == "put":
-        r = _relay()
+        r = _relay(a.tv)
         from . import backup
         blob = read_local(a.local)
         id_ = r.submit(Job().put(a.remote, blob))
@@ -162,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import syncbat
         if not (a.to or a.to_hex):
             raise SystemExit("--to 로 TV 폴더를 정하세요")
-        return syncbat.main_sync(ROOT, _relay(), a.src, a.to, a.to_hex, a.wait, a.force)
+        return syncbat.main_sync(ROOT, _relay(a.tv, default_first=True), a.src, a.to, a.to_hex, a.wait, a.force)
     if a.cmd == "pair":
         from .relay import pair, pair_done
         import time as _t
@@ -179,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         print("TV 응답이 없습니다. TV 가 켜져 있고 인터넷에 연결돼 있는지, 코드가 맞는지 확인하세요.")
         return 3
     if a.cmd == "status":
-        st = _relay().state()
+        st = _relay(a.tv).state()
         if not st:
             print("TV 상태가 아직 없습니다 (TV 에 tvrelay.json 을 불러왔는지 확인).")
             return 1

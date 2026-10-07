@@ -13,17 +13,23 @@ from typing import Any
 FILE = Path("out") / "versions.json"
 
 
-def load(root: Path) -> dict[str, dict[str, Any]]:
+def _file(root: Path, tv: str | None) -> Path:
+    """TV 별 (out/tv/<TV>/versions.json). tv 를 모르면 예전 위치"""
+    from .config import tv_dir
+    return tv_dir(root, tv) / "versions.json" if tv else root / FILE
+
+
+def load(root: Path, tv: str | None = None) -> dict[str, dict[str, Any]]:
     try:
-        return json.loads((root / FILE).read_text(encoding="utf-8"))
+        return json.loads(_file(root, tv).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
-def save(root: Path, v: dict[str, dict[str, Any]]) -> None:
+def save(root: Path, v: dict[str, dict[str, Any]], tv: str | None = None) -> None:
     try:
-        (root / FILE).parent.mkdir(parents=True, exist_ok=True)
-        (root / FILE).write_text(json.dumps(v, ensure_ascii=False), encoding="utf-8")
+        _file(root, tv).parent.mkdir(parents=True, exist_ok=True)
+        _file(root, tv).write_text(json.dumps(v, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
 

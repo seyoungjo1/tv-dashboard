@@ -36,10 +36,13 @@ def _short_path(p: Path) -> str:
         return s
 
 
-def make(root: Path, folder: str) -> tuple[str, bytes]:
+def make(root: Path, folder: str, tv: str = "") -> tuple[str, bytes]:
+    """tv: 올릴 TV 이름 — bat 에 넣어 두므로 화면에서 다른 TV 를 골라도 항상 이 TV 로 올라간다"""
     folder = folder.strip().strip("/")
     if not folder:
         raise ValueError("TV 폴더를 고르세요")
+    if tv and not all(c.isascii() and (c.isalnum() or c in "-_.") for c in tv):
+        raise ValueError("TV 이름이 올바르지 않습니다: %s" % tv)
     prog = _short_path(root.resolve())
     utf8 = not prog.isascii()
     lines = [
@@ -52,6 +55,7 @@ def make(root: Path, folder: str) -> tuple[str, bytes]:
         "REM  to the TV folder below. Only changed files are sent.",
         "REM  Task Scheduler: add argument /q (no pause at the end).",
         "REM  Log: out\\sync.log in the program folder. Exit code 0 = done",
+        *(["REM  TV: " + tv] if tv else []),
         "REM ===========================================================",
         "setlocal",
         'set "SRC=%~dp0."',
@@ -60,7 +64,7 @@ def make(root: Path, folder: str) -> tuple[str, bytes]:
         'set "PYTHONUTF8=1"',
         'if not exist "%PROG%\\venv\\Scripts\\python.exe" goto NOPROG',
         'cd /d "%PROG%"',
-        '"%PROG%\\venv\\Scripts\\python.exe" -m tvrelay sync "%SRC%" --to-hex %TVDIR% --wait 180',
+        '"%PROG%\\venv\\Scripts\\python.exe" -m tvrelay sync "%SRC%" --to-hex %TVDIR% --wait 180' + (" --tv " + tv if tv else ""),
         'set "RC=%errorlevel%"',
         'if /i not "%~1"=="/q" pause',
         "exit /b %RC%",
@@ -73,7 +77,7 @@ def make(root: Path, folder: str) -> tuple[str, bytes]:
         "",
     ]
     text = "\r\n".join(lines)
-    name = "%s_자동업로드.bat" % folder.rsplit("/", 1)[-1]
+    name = "%s_자동업로드%s.bat" % (folder.rsplit("/", 1)[-1], "_" + tv if tv else "")
     return name, text.encode("utf-8" if utf8 else "ascii")
 
 
@@ -99,11 +103,12 @@ def run(root: Path, relay: Relay, src: Path, folder: str, wait: int = 180, force
         return 2
     files = scan(src)
     echo("[%s] %s → TV '%s' (파일 %d개 확인)" % (time.strftime("%Y-%m-%d %H:%M:%S"), src, folder, len(files)))
-    st = relay.state(root / "out" / "state-cache.json") or {}
+    from .config import tv_dir
+    st = relay.state(tv_dir(root, relay.tv) / "state-cache.json") or {}
     tree = {e["p"]: e for e in st.get("tree") or []}
     if st and not st.get("online"):
         echo("  (TV 가 지금 오프라인입니다 — 켜지면 반영됩니다)")
-    vers = versions.load(root)
+    vers = versions.load(root, relay.tv)
     job, sent, same, blobs = Job(), [], 0, []
     for rel, f in files:
         data = f.read_bytes()
@@ -121,7 +126,7 @@ def run(root: Path, relay: Relay, src: Path, folder: str, wait: int = 180, force
     for rel in sent:
         echo("  올림: %s" % rel)
     id_ = relay.submit(job)
-    versions.save(root, vers)
+    versions.save(root, vers, relay.tv)
     for path, data in blobs:                       # 백업(tv-backup)에도 — 새 TV 연결 때 그대로 올림
         backup.record_put(root, relay.tv, path, data)
     echo("보냄: %d개 (%.1f MB), 그대로 %d개 — 작업 %s" % (len(sent), job.size / 1048576, same, id_))

@@ -108,10 +108,12 @@
   .tvc { flex:1; position:relative; min-width:0; }
   .tvc iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:#eef1f4; }
   .tvc .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:34px; color:#6b7785; text-align:center; padding:60px; }
-  #jobsBar { position:fixed; right:14px; bottom:14px; width:360px; max-height:40vh; overflow:auto; background:#fff; border:1px solid var(--line); border-radius:10px; box-shadow:0 4px 18px rgba(0,0,0,.12); font-size:13px; }
-  #jobsBar .jh { padding:8px 12px; font-weight:800; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; }
+  /* 보낸 직후 잠깐 뜨는 알림 (결과는 [전송 결과] 탭에서) */
+  #toast { position:fixed; right:16px; bottom:16px; max-width:380px; padding:12px 16px; border-radius:10px; background:#1e2125; color:#fff; font-size:13px; font-weight:700; box-shadow:0 6px 20px rgba(0,0,0,.25); z-index:90; }
+  #toast.bad { background:var(--danger); }
+  #toast { white-space:pre-line; }
   .job { padding:7px 12px; border-bottom:1px solid #f0f2f5; display:flex; gap:8px; justify-content:space-between; }
-  .st.wait { color:#b07800; } .st.ok { color:var(--ok); } .st.bad { color:var(--danger); }
+  .st.wait { color:#5d7a99; } .st.ok { color:var(--ok); } .st.bad { color:var(--danger); }
   #pwModal { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:50; }
   #pwModal.hidden { display:none; }
   #pwModal .box { background:#fff; border-radius:12px; padding:22px 24px; width:min(380px, calc(100vw - 32px)); box-shadow:0 10px 40px rgba(0,0,0,.3); }
@@ -123,6 +125,8 @@
   #ssVids .v .n { width:56px; color:#0b7fae; font-weight:800; } #ssVids .v .f { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #ssVids .v.new { background:#f0fbf4; } #ssVids .v button { padding:4px 8px; }
   /* 엑셀 붙여넣기 → JSON */
+  #tvSel { margin-left:12px; padding:6px 10px; border-radius:8px; border:0; font:inherit; font-weight:800; background:#2b2f34; color:#fff; }
+  #tvList td { padding:6px 8px; border-bottom:1px solid #f0f2f5; }
   .xl { padding:14px; }
   .xl .form { padding:10px 12px; background:#f5f7fa; border-radius:8px; font-size:13px; color:var(--dim); white-space:pre-wrap; }
   .xl textarea { width:100%; box-sizing:border-box; min-height:140px; margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; font-family:Consolas,"D2Coding",monospace; white-space:pre; }
@@ -140,6 +144,7 @@
 <body>
 <header>
   <h1>대상 오산공장 Dashboard · 원격 관리</h1>
+  <select id="tvSel" class="hidden" title="관리할 TV (TV 마다 이름이 다르고, 토큰·열쇠는 같이 씁니다)"></select>
   <span class="pill" id="tvPill">TV 확인 중…</span>
   <span class="pill" id="verPill"></span>
   <button class="secondary" id="updBtn">프로그램 업데이트</button>
@@ -148,7 +153,7 @@
   <button data-tab="explorer" class="active">파일 탐색기</button>
   <button data-tab="settings">TV 설정</button>
   <button data-tab="update">앱 업데이트</button>
-  <button data-tab="jobs">작업 기록</button>
+  <button data-tab="jobs">전송 결과 <span class="pill off hidden" id="jobsBadge" style="font-size:11px;padding:1px 7px"></span></button>
   <button data-tab="conn">연결</button>
 </nav>
 
@@ -160,7 +165,7 @@
     <div class="grid2">
       <div><label>토큰 (tv-dashboard-relay · Contents 읽기·쓰기)</label><input type="password" id="sToken" placeholder="github_pat_…"></div>
       <div><label>중계 레포</label><input type="text" id="sRepo"></div>
-      <div><label>TV 이름 (영문, TV 여러 대면 다르게)</label><input type="text" id="sTv"></div>
+      <div><label>TV 이름 (영문 · 새 이름을 넣으면 TV 가 하나 더 추가되고, 기존 TV 는 그대로 관리됩니다)</label><input type="text" id="sTv"></div>
     </div>
     <div id="setupMsg"></div>
     <button style="margin-top:12px" id="setupBtn">저장</button>
@@ -269,13 +274,24 @@
 </div>
 
 <div id="jobsPage" class="page hidden">
-  <div class="card"><h3 style="margin-top:0">보낸 작업</h3><div id="jobsList" class="hint">아직 없습니다.</div></div>
+  <div class="card"><h3 style="margin-top:0">전송 결과</h3>
+    <p class="hint" style="margin-top:0">보내면 작업은 GitHub 에 암호화되어 맡겨지고 끝입니다 (자동 업로드 .bat 과 같음). TV 가 켜져 있으면 10~20초 안에, 꺼져 있으면 켜질 때 가져가 반영합니다.
+      <b>보냄</b> = TV 가 아직 가져가지 않음 · <b>반영됨</b> = TV 에 적용 완료 · <b>실패</b> = TV 가 적용하지 못함</p>
+    <div id="jobsList" class="hint">아직 없습니다.</div></div>
   <div class="card"><h3 style="margin-top:0">기록</h3><pre id="log" style="white-space:pre-wrap;max-height:400px;overflow:auto;padding:10px"></pre></div>
 </div>
 
 <div id="connPage" class="page hidden">
   <div class="card"><div id="connInfo" class="hint"></div>
-    <div style="margin-top:12px;display:flex;gap:8px"><button id="toSetupBtn" class="secondary">토큰·레포 바꾸기 / 다른 TV 연결</button></div></div>
+    <div style="margin-top:12px;display:flex;gap:8px"><button id="toSetupBtn" class="secondary">토큰·레포 바꾸기 / 다시 연결</button></div></div>
+  <div class="card">
+    <h3 style="margin-top:0">관리하는 TV</h3>
+    <p class="hint">TV 마다 이름이 다르고(우편함), GitHub 토큰·암호 열쇠는 같이 씁니다. 위쪽 TV 이름 칸에서 골라 관리하세요.
+      [+ TV 추가] → 새 이름 → 그 TV 화면의 연결 코드로 연결하면 기존 TV 연결은 그대로 둔 채 한 대가 늘어납니다.
+      <b>TV 두 대에 같은 이름을 쓰면 안 됩니다</b> (작업을 한 대만 가져가 다른 TV 에는 반영되지 않음).</p>
+    <table id="tvList" style="width:100%"></table>
+    <div style="margin-top:10px"><button id="tvAddBtn">+ TV 추가</button></div>
+  </div>
   <div class="card">
     <h3 style="margin-top:0">TV 백업 · 새 TV 로 옮기기</h3>
     <p class="hint">이 PC 에서 올린 파일·삭제·이름 변경·화면보호기·메뉴 순서·TV 설정은 <b>TV 이름별로 자동 백업</b>됩니다 (<code>tv-backup</code> 폴더).
@@ -305,7 +321,7 @@
   <div class="err" id="pwErr"></div>
   <div style="text-align:right;margin-top:8px"><button type="button" class="secondary" id="pwCancel">취소</button> <button type="submit">HTML 내려받기</button></div>
 </form></div>
-<div id="jobsBar" class="hidden"><div class="jh"><span>진행 중인 작업</span><button class="icon" id="jobsClose" style="font-size:14px">✕</button></div><div id="jobsMini"></div></div>
+<div id="toast" class="hidden"></div>
 
 <script src="/static/xlpaste.js"></script>
 <script>
@@ -322,7 +338,20 @@
   const prevUrl = (p) => '/preview/' + p.split('/').map(encodeURIComponent).join('/');
   let info = null, state = null, sel = '', replaceTarget = null, tab = 'explorer';
   const open = new Set(['']);
+  // 전송 결과: TV 별로 이 브라우저에 기억 (최근 100개). 다시 열면 아직 '보냄' 인 것의 결과를 이어서 확인
+  const JOBS_KEY = () => 'tvrelay.jobs.' + (info?.tv || '');
   const jobs = [];
+  function saveJobs() { try { localStorage.setItem(JOBS_KEY(), JSON.stringify(jobs.slice(0, 100))); } catch (_) {} }
+  function restoreJobs() {
+    try { jobs.splice(0, jobs.length, ...JSON.parse(localStorage.getItem(JOBS_KEY()) || '[]')); } catch (_) {}
+    renderJobs();
+    jobs.filter(j => j.st === 'wait' && !String(j.id).startsWith('skip-') && Date.now() - (j.at || 0) < 3 * 86400e3).forEach(j => poll(j.id));
+  }
+  let toastT = 0;
+  function toast(text, bad) {
+    const t = $('#toast'); t.textContent = text; t.className = bad ? 'bad' : '';
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), bad ? 6000 : 3000);
+  }
 
   async function api(method, url, body, raw) {
     const opt = { method, headers: {} };
@@ -343,8 +372,8 @@
     document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
     $('#explorer').classList.toggle('hidden', t !== 'explorer');
     for (const [id, name] of [['#settingsPage','settings'],['#updatePage','update'],['#jobsPage','jobs'],['#connPage','conn'],['#setupPage','setup']]) $(id).classList.toggle('hidden', t !== name);
-    if (t === 'jobs') loadLog();
-    if (t === 'conn') loadBackup();
+    if (t === 'jobs') { loadLog(); jobs.forEach(j => j.unseen = false); renderJobs(); }
+    if (t === 'conn') { loadBackup(); loadTvs(); }
   }
   document.querySelectorAll('#nav button').forEach(b => b.onclick = () => show(b.dataset.tab));
 
@@ -355,13 +384,21 @@
     if (info.disk_version && info.disk_version !== info.version)
       halt(`프로그램이 v${info.disk_version} 로 업데이트됐습니다. 화면을 다시 시작해야 새 버전이 돕니다.`, info.supervised ? { label: '지금 다시 시작', onclick: restartNow } : null);
     $('#sRepo').value = info.repo; $('#sTv').value = info.tv;
-    $('#connInfo').innerHTML = `중계 레포 <b>${esc(info.repo)}</b> · TV 이름 <b>${esc(info.tv)}</b><br>설정 파일: <code>${esc(info.cfgPath)}</code> (암호키·토큰이 들어 있으니 공유하지 마세요)`;
+    $('#connInfo').innerHTML = `중계 레포 <b>${esc(info.repo)}</b> · 지금 관리 중인 TV <b>${esc(info.tv)}</b>${(info.tvs || []).length > 1 ? ` (전체 ${info.tvs.length}대)` : ''}<br>설정 파일: <code>${esc(info.cfgPath)}</code> (암호키·토큰이 들어 있으니 공유하지 마세요)`;
     $('#pairCard').classList.toggle('hidden', !info.configured);
+    loadTvs(); restoreJobs();
     if (!info.configured) { $('#nav').classList.add('hidden'); show('setup'); return; }
     $('#nav').classList.remove('hidden');
     await loadState(true);                       // 저장해 둔 마지막 상태로 바로 그리고
-    if (state?.cached) { if (state.none) await loadState(); else loadState(); }   // TV 최신 상태는 한 번만 확인
+    if (state?.cached) { if (state.none) await loadState(); else loadState().then(loadTvs); }   // TV 최신 상태는 한 번만 확인
     if (state?.none) show('setup'); else if (tab === 'setup') show('explorer'); else show(tab);
+    const added = sessionStorage.getItem('tvAdded');
+    if (added) {
+      sessionStorage.removeItem('tvAdded');
+      show('setup');
+      msg($('#pairMsg'), `새 TV '${added}' 를 추가했습니다. 그 TV 화면(또는 TV ⚙ 설정 → 원격 중계 → 연결 코드)의 8글자 코드를 입력하세요. 기존 TV 연결은 그대로입니다.`, 'warn');
+      $('#pairCode').focus();
+    }
   }
   $('#setupBtn').onclick = async () => {
     try {
@@ -387,6 +424,41 @@
     } catch (e) { msg($('#pairMsg'), e.message, 'err'); }
   };
   $('#toSetupBtn').onclick = () => show('setup');
+
+  // ── 여러 TV: 위쪽에서 골라 관리 · 추가 · 목록에서 빼기 ──
+  async function loadTvs() {
+    let r;
+    try { r = await api('GET', '/api/tvs'); } catch (_) { return; }
+    const sel = $('#tvSel');
+    sel.innerHTML = r.items.map(t => `<option value="${esc(t.tv)}"${t.tv === r.current ? ' selected' : ''}>📺 ${esc(t.tv)}${t.age_sec == null ? '' : t.online ? ' · 온라인' : ' · 꺼짐'}</option>`).join('') +
+      '<option value="__add">+ TV 추가…</option>';
+    sel.classList.toggle('hidden', !r.items.length);
+    $('#tvList').innerHTML = r.items.map(t => `<tr><td><b>${esc(t.tv)}</b>${t.tv === r.current ? ' <span class="pill on" style="font-size:11px">지금 관리 중</span>' : ''}</td>
+      <td class="hint">${t.age_sec == null ? '아직 상태를 받지 않음' : (t.online ? '온라인' : '꺼짐') + ` · 마지막 응답 ${Math.round(t.age_sec / 60)}분 전` + (t.app ? ` · 앱 v${esc(t.app)}` : '') + (t.files != null ? ` · 파일 ${t.files}개` : '')}</td>
+      <td style="text-align:right">${t.tv === r.current ? '' : `<button class="secondary" data-tvsel="${esc(t.tv)}">관리하기</button> <button class="secondary" data-tvrm="${esc(t.tv)}" title="이 PC 의 목록에서만 뺍니다 (TV 의 자료·백업은 그대로)">목록에서 빼기</button>`}</td></tr>`).join('');
+  }
+  async function selectTv(tv) {
+    try { await api('POST', '/api/tv/select', { tv }); location.reload(); } catch (e) { alert(e.message); loadTvs(); }
+  }
+  async function addTv() {
+    const n = (prompt('추가할 TV 이름 (영문·숫자·-·_ , 다른 TV 와 다르게)\n예) osan2, factory1-a') || '').trim();
+    if (!n) { loadTvs(); return; }
+    try {
+      await api('POST', '/api/tv/add', { tv: n });
+      sessionStorage.setItem('tvAdded', n);
+      location.reload();
+    } catch (e) { alert(e.message); loadTvs(); }
+  }
+  $('#tvSel').onchange = (e) => { const v = e.target.value; if (v === '__add') addTv(); else selectTv(v); };
+  $('#tvAddBtn').onclick = addTv;
+  $('#tvList').addEventListener('click', async (e) => {
+    const s = e.target.closest('[data-tvsel]'), r = e.target.closest('[data-tvrm]');
+    if (s) return selectTv(s.dataset.tvsel);
+    if (r && confirm(`'${r.dataset.tvrm}' TV 를 이 PC 의 관리 목록에서 뺄까요?\n(TV 의 자료와 이 PC 의 백업은 그대로 남습니다. 다시 추가하면 그대로 이어집니다)`)) {
+      try { await api('POST', '/api/tv/remove', { tv: r.dataset.tvrm }); } catch (er) { alert(er.message); }
+      loadTvs();
+    }
+  });
 
   // ── TV 백업 · 새 TV 로 옮기기 ──
   let bkTimer = 0;
@@ -776,7 +848,7 @@
       if (pw === null) return;
       const r = await api('POST', '/api/grant', { folder, renew: !!renew });
       if (r.ready) { downloadTool(folder, pw); return; }
-      jobs.unshift({ id: r.id, desc: `${toolLabel(folder)} ${renew ? "새로 발급" : "등록"}`, st: 'wait', note: 'TV 가 등록하기를 기다리는 중… (보통 10~20초)' });
+      jobs.unshift({ id: r.id, at: Date.now(), desc: `${toolLabel(folder)} ${renew ? "새로 발급" : "등록"}`, st: 'wait', note: 'TV 가 등록하기를 기다리는 중… (보통 10~20초)' });
       renderJobs();
       for (let i = 0; i < 100; i++) {
         await new Promise(res => setTimeout(res, 3000));
@@ -1123,11 +1195,12 @@
         return r.id;
       }
       if (!r.id) {   // 모두 TV 와 같은 버전(또는 이미 보내 둔 내용) → 보낼 것이 없음
-        jobs.unshift({ id: 'skip-' + Date.now(), desc, st: 'ok', note: qd ? `같은 내용을 이미 보냈습니다 — TV 가 받으면 반영됩니다 (다시 보내지 않음)` : `바뀐 파일이 없습니다 — ${sk}개 모두 TV 와 같은 버전이라 보내지 않았습니다` });
-        renderJobs(); return null;
+        const note = qd ? `같은 내용을 이미 보냈습니다 — TV 가 받으면 반영됩니다 (다시 보내지 않음)` : `바뀐 파일이 없습니다 — ${sk}개 모두 TV 와 같은 버전이라 보내지 않았습니다`;
+        jobs.unshift({ id: 'skip-' + Date.now(), at: Date.now(), desc, st: 'ok', note });
+        renderJobs(); toast(desc + ' — ' + note); return null;
       }
-      jobs.unshift({ id: r.id, desc: desc + (sk ? ` (${qd ? `이미 보낸 ${qd}개 · ` : ''}바뀌지 않은 ${sk - qd}개 건너뜀)` : ''), st: 'wait', note: 'TV 가 가져가기를 기다리는 중…' });
-      renderJobs(); poll(r.id); return r.id;
+      jobs.unshift({ id: r.id, at: Date.now(), desc: desc + (sk ? ` (${qd ? `이미 보낸 ${qd}개 · ` : ''}바뀌지 않은 ${sk - qd}개 건너뜀)` : ''), st: 'wait', note: 'GitHub 에 맡김 — TV 가 가져가면 반영됩니다' });
+      renderJobs(); toast('보냈습니다 — ' + desc + '\nTV 가 가져가면 반영됩니다 (결과는 [전송 결과] 탭)'); poll(r.id); return r.id;
     } catch (e) { alert(e.message); }
     finally { setTimeout(() => inflight.delete(key), 1500); }
   }
@@ -1139,24 +1212,26 @@
         const r = await api('GET', '/api/result?id=' + encodeURIComponent(id));
         if (r.pending) continue;
         const fails = (r.results || []).filter(x => !x.ok);
-        j.st = r.ok ? 'ok' : 'bad';
-        j.note = r.ok ? '완료' : '실패: ' + fails.map(x => `${x.path || x.op} (${x.error})`).join(', ');
+        if (!j) return;
+        j.st = r.ok ? 'ok' : 'bad'; j.done = Date.now();
+        j.note = r.ok ? 'TV 에 반영됨' : '실패: ' + fails.map(x => `${x.path || x.op} (${x.error})`).join(', ');
+        if (!r.ok) { j.unseen = true; toast('실패 — ' + j.desc + ' ([전송 결과] 탭에서 확인)', true); }
         (r.results || []).filter(x => x.file).forEach(x => { const a = document.createElement('a'); a.href = x.file; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); j.note += ' · 저장: ' + x.saved; });
         (r.results || []).filter(x => x.message).forEach(x => j.note += ' · ' + x.message);
         renderJobs(); setTimeout(async () => { pb.dataset.for = '\u0000'; await loadState(); renderTv(true); if (ssActive) openScreensaver(ssDir); }, 1500);
         return;
       } catch (e) { j.note = e.message; renderJobs(); }
     }
-    j.note = 'TV 응답이 없습니다 (TV 가 켜지면 처리됩니다)'; renderJobs();
+    if (j) { j.note = 'TV 가 아직 가져가지 않았습니다 — GitHub 에 맡겨져 있어 TV 가 켜지면 반영됩니다'; renderJobs(); }
   }
   function renderJobs() {
-    const html = jobs.map(j => `<div class="job"><span>${esc(j.desc)}<br><span class="hint">${esc(j.note)}</span></span><span class="st ${j.st}">${j.st === 'wait' ? '대기' : j.st === 'ok' ? '완료' : '실패'}</span></div>`).join('');
+    const tm = (t) => t ? new Date(t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    const html = jobs.map(j => `<div class="job"><span>${esc(j.desc)} <span class="hint">${tm(j.at)}</span><br><span class="hint">${esc(j.note)}</span></span><span class="st ${j.st}">${j.st === 'wait' ? '보냄' : j.st === 'ok' ? '반영됨' : '실패'}</span></div>`).join('');
     $('#jobsList').innerHTML = html || '아직 없습니다.';
-    const active = jobs.filter(j => j.st === 'wait' || Date.now() - (j.shown || (j.shown = Date.now())) < 15000).slice(0, 6);
-    $('#jobsMini').innerHTML = active.map(j => `<div class="job"><span>${esc(j.desc)}<br><span class="hint">${esc(j.note)}</span></span><span class="st ${j.st}">${j.st === 'wait' ? '대기' : j.st === 'ok' ? '완료' : '실패'}</span></div>`).join('');
-    $('#jobsBar').classList.toggle('hidden', !active.length);
+    const bad = jobs.filter(j => j.unseen).length;
+    $('#jobsBadge').textContent = bad ? '실패 ' + bad : ''; $('#jobsBadge').classList.toggle('hidden', !bad);
+    saveJobs();
   }
-  $('#jobsClose').onclick = () => $('#jobsBar').classList.add('hidden');
   async function loadLog() { try { $('#log').textContent = (await api('GET', '/api/log')).lines.join('\n'); } catch (_) {} }
 
   const staging = new Set();

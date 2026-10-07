@@ -75,10 +75,15 @@ class Api:
         self.root = root
         self.stage = root / "out" / "stage"
         self.downloads = root / "downloads"
-        self.preview = root / "out" / "preview"
         self.stage.mkdir(parents=True, exist_ok=True)
         self.downloads.mkdir(parents=True, exist_ok=True)
-        self.preview.mkdir(parents=True, exist_ok=True)
+        try:
+            cfg = config.load(root)
+            if cfg:
+                config.migrate(root, cfg)                  # TV 한 대 시절 기록 → 처음 TV 의 것으로 (한 번만)
+        except config.ConfigError:
+            pass
+        self._tv = ""                                      # 지금 기록(미리보기·상태·작업)을 들고 있는 TV
         self.preview_jobs: dict[str, list[str]] = {}     # 미리보기 작업 id → 받는 경로들
         self.preview_done: set[str] = set()
         self.pending_paths: dict[str, str] = {}           # 받는 중인 경로 → 작업 id (같은 파일을 두 번 받지 않게)
@@ -87,13 +92,11 @@ class Api:
         self.bk: dict[str, Any] = {}                        # 백업/복원 진행 상황
         self._last_state: dict[str, Any] | None = None
         self._state_at = 0.0                               # 마지막으로 TV 상태를 확인한 시각
-        self.state_cache = root / "out" / "state-cache.json"
         self._relay: Relay | None = None
         self.lock = threading.Lock()
         # 두 번 누름 · 같은 내용 다시 보내기 막기
         self.send_lock = threading.Lock()                 # 보내기는 한 번에 하나씩 (동시에 온 두 요청이 서로를 보도록)
-        self.queued_file = root / "out" / "queued.json"
-        self.queued: dict[str, dict[str, Any]] = self._load_queued()   # 경로 → {h, id, at} TV 가 아직 반영 안 한 올리기
+        self.queued: dict[str, dict[str, Any]] = {}       # 경로 → {h, id, at} TV 가 아직 반영 안 한 올리기 (TV 별)
         self.recent: dict[str, tuple[float, str]] = {}    # 같은 작업(삭제·이름 변경 등)을 방금 보냈는가 → (시각, 작업 id)
 
     def relay(self) -> Relay:
@@ -102,7 +105,85 @@ class Api:
             raise ValueError("아직 설정되지 않았습니다. [처음 설정]에서 GitHub 토큰을 입력하세요.")
         if self._relay is None or self._relay.cfg != cfg:
             self._relay = Relay(cfg)
+        if cfg.tv != self._tv:
+            self._switch(cfg.tv)
         return self._relay
+
+    # ── TV 별 기록 (TV 를 바꾸면 그 TV 의 것으로) ──
+    def _cur_tv(self) -> str:
+        if not self._tv:
+            try:
+                cfg = config.load(self.root)
+                if cfg:
+                    self._switch(cfg.tv)
+            except config.ConfigError:
+                pass
+        return self._tv or config.DEFAULT_TV
+
+    def _switch(self, tv: str) -> None:
+        self._tv = tv
+        self.tree = {}
+        self._last_state = None
+        self._state_at = 0.0
+        self.preview_jobs, self.preview_done, self.pending_paths = {}, set(), {}
+        self.recent = {}
+        self.queued = self._load_queued()
+        self.preview.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def tvdir(self) -> Path:
+        return config.tv_dir(self.root, self._cur_tv())
+
+    @property
+    def preview(self) -> Path:
+        return self.tvdir / "preview"
+
+    @property
+    def state_cache(self) -> Path:
+        return self.tvdir / "state-cache.json"
+
+    @property
+    def queued_file(self) -> Path:
+        return self.tvdir / "queued.json"
+
+    def tvs(self) -> dict[str, Any]:
+        """이 PC 가 관리하는 TV 들과 마지막 상태 (저장해 둔 것 — 빠르게)"""
+        cfg = config.load(self.root)
+        if cfg is None:
+            return {"current": "", "items": []}
+        items = []
+        for t in cfg.all_tvs:
+            it: dict[str, Any] = {"tv": t, "online": False, "age_sec": None, "files": None, "app": ""}
+            try:
+                c = json.loads((config.tv_dir(self.root, t) / "state-cache.json").read_text(encoding="utf-8"))
+                st = Relay._with_age(dict(c["state"]))
+                it.update(online=bool(st.get("online")), age_sec=st.get("age_sec"), files=len(st.get("tree") or []),
+                          app=(st.get("status") or {}).get("versionName") or "")
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+            items.append(it)
+        return {"current": cfg.tv, "items": items}
+
+    def tv_select(self, body: dict[str, Any]) -> dict[str, Any]:
+        if self.bk.get("running"):
+            raise ValueError("백업/복원이 진행 중입니다 — 끝난 뒤 TV 를 바꾸세요")
+        config.select_tv(str(body.get("tv", "")), self.root)
+        self._relay = None
+        self.relay()
+        return self.tvs()
+
+    def tv_add(self, body: dict[str, Any]) -> dict[str, Any]:
+        if self.bk.get("running"):
+            raise ValueError("백업/복원이 진행 중입니다 — 끝난 뒤 TV 를 추가하세요")
+        config.add_tv(str(body.get("tv", "")), self.root)
+        self._relay = None
+        self.relay()
+        return self.tvs()
+
+    def tv_remove(self, body: dict[str, Any]) -> dict[str, Any]:
+        config.remove_tv(str(body.get("tv", "")), self.root)
+        self._relay = None
+        return self.tvs()
 
     def info(self) -> dict[str, Any]:
         try:
@@ -113,6 +194,7 @@ class Api:
         return {"version": __version__, "disk_version": update.local_version(self.root) or __version__,
                 "supervised": supervised(), "configured": cfg is not None, "error": err,
                 "repo": cfg.repo if cfg else config.DEFAULT_REPO, "tv": cfg.tv if cfg else config.DEFAULT_TV,
+                "tvs": list(cfg.all_tvs) if cfg else [],
                 "cfgPath": str(config.path(self.root)), "root": str(self.root)}
 
     def setup(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -121,6 +203,7 @@ class Api:
                            tool_token=None if tool is None else str(tool))
         Relay(cfg).gh.repo_info()        # 레포·토큰 확인
         self._relay = None
+        self.relay()
         return self.info()
 
     # ── 직원 업로드 도구 (폴더 전용 HTML) ──
@@ -331,7 +414,7 @@ class Api:
         used: list[Path] = []
         skipped: list[str] = []
         rec: list[tuple[str, Any]] = []                     # 보낸 뒤 백업(tv-backup)에 반영할 것
-        vers = versions.load(self.root)
+        vers = versions.load(self.root, self._cur_tv())
         queued_skip: list[str] = []
         if not force and any(op.get("op") == "put" for op in body.get("ops") or []):
             try:
@@ -381,7 +464,7 @@ class Api:
             raise ValueError("보낼 작업이 없습니다")
         if skipped:
             echo("바뀌지 않은 %d개는 건너뜀" % len(skipped))
-        versions.save(self.root, vers)
+        versions.save(self.root, vers, self._cur_tv())
         mb = job.size / 1048576
         echo("TV 로 작업 보내는 중… (%d개, %.1f MB)" % (len(job.ops), mb))
         id_ = self.relay().submit(job)
@@ -525,7 +608,7 @@ class Api:
             total_mb = sum(f.stat().st_size for _, f in items) / 1048576
             self.bk.update(total=len(items), msg="새 TV 로 %d개(%.1f MB) 올리는 중…" % (len(items), total_mb))
             relay = self.relay()
-            vers = versions.load(self.root)
+            vers = versions.load(self.root, self._cur_tv())
             sent_mb = 0.0
             fails: list[str] = []
             for part in parts:
@@ -540,7 +623,7 @@ class Api:
                 id_ = relay.submit(job)
                 r = relay.wait(id_, timeout=300 + part_mb * 10)
                 if r is None:
-                    versions.save(self.root, vers)
+                    versions.save(self.root, vers, self._cur_tv())
                     raise ValueError("TV 응답이 없습니다 — 다시 누르면 올라간 것은 건너뛰고 이어서 올립니다")
                 bad = [x for x in r.get("results", []) if not x.get("ok")]
                 if bad:
@@ -549,7 +632,7 @@ class Api:
                 self.bk["done"] += len(part)
                 sent_mb += part_mb
                 self.bk["msg"] = "새 TV 로 올리는 중… %.1f/%.1f MB" % (sent_mb, total_mb)
-            versions.save(self.root, vers)
+            versions.save(self.root, vers, self._cur_tv())
             if src != tv:                                   # 다른 TV 의 백업을 올렸으면 이 TV 의 백업으로도 복사
                 for p, f in items:
                     backup.record_put(self.root, tv, p, f.read_bytes())
@@ -681,6 +764,14 @@ class Api:
             return 200, self.do_update()
         if method == "POST" and path == "/api/restart":
             return 200, self.restart()
+        if method == "GET" and path == "/api/tvs":
+            return 200, self.tvs()
+        if method == "POST" and path == "/api/tv/select":
+            return 200, self.tv_select(body or {})
+        if method == "POST" and path == "/api/tv/add":
+            return 200, self.tv_add(body or {})
+        if method == "POST" and path == "/api/tv/remove":
+            return 200, self.tv_remove(body or {})
         if method == "POST" and path == "/api/pair":
             cfg = config.load(self.root)
             if cfg is None:
@@ -797,7 +888,7 @@ def make_handler(api: Api):
                     return self._send(400, {"error": "JSON 형식이 아닙니다"})
             if method == "GET" and u.path == "/api/syncbat":   # 관리자용 폴더 자동 업로드 .bat
                 try:
-                    name, data = syncbat.make(api.root, (parse_qs(u.query).get("folder") or [""])[0])
+                    name, data = syncbat.make(api.root, (parse_qs(u.query).get("folder") or [""])[0], api.relay().tv)
                 except ValueError as e:
                     return self._send(400, {"error": str(e)})
                 return self._send(200, data, "application/octet-stream",

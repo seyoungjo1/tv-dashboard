@@ -405,3 +405,44 @@ class PairTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MultiTvTest(unittest.TestCase):
+    """TV 여러 대: 토큰·키는 같이, 이름(우편함)만 다르게 — 새 TV 를 더해도 기존 TV 는 그대로"""
+
+    def test_add_select_and_migrate(self):
+        from tvrelay import grants, syncbat, versions
+        root = Path(tempfile.mkdtemp())
+        cfg = config.setup("tok", "o/relay", "osan", root)
+        # TV 한 대 시절의 기록
+        (root / "out" / "preview" / "main").mkdir(parents=True)
+        (root / "out" / "preview" / "main" / "공지.txt").write_text("a", encoding="utf-8")
+        (root / "out" / "versions.json").write_text('{"x/a.json": {"h": "1", "s": 1}}', encoding="utf-8")
+        (root / "grants.json").write_text(json.dumps({"원가": {"gid": "g1", "key": "k"}}), encoding="utf-8")
+        config.migrate(root, cfg)
+        self.assertTrue((config.tv_dir(root, "osan") / "preview" / "main" / "공지.txt").is_file())
+        self.assertEqual(versions.load(root, "osan"), {"x/a.json": {"h": "1", "s": 1}})
+        self.assertEqual(grants.load(root, "osan")["원가"]["gid"], "g1")
+        # TV 추가 → 그 TV 를 고른 상태, 기존 TV 는 목록에 남고 키는 같다
+        c2 = config.add_tv("osan2", root)
+        self.assertEqual(c2.tv, "osan2"); self.assertEqual(c2.all_tvs, ("osan", "osan2")); self.assertEqual(c2.key, cfg.key)
+        self.assertEqual(c2.first_tv, "osan")
+        self.assertEqual(grants.load(root), {})                                  # 새 TV 에는 아직 도구 없음
+        grants.save(root, {"품질": {"gid": "g2"}})
+        self.assertEqual(set(grants.load(root, "osan")), {"원가"})                 # 다른 TV 의 도구는 그대로
+        self.assertEqual(c2.with_tv("osan").tv, "osan")
+        with self.assertRaises(config.ConfigError):
+            c2.with_tv("nobody")
+        with self.assertRaises(config.ConfigError):
+            config.add_tv("한글", root)
+        # 이름을 바꿔 다시 설정해도 기존 TV 는 목록에 남는다
+        c3 = config.setup("", "", "lobby", root)
+        self.assertEqual(c3.all_tvs, ("osan", "osan2", "lobby"))
+        self.assertNotIn("tvs", c3.to_json(for_tv=True))                         # TV 에 보내는 연결 정보에는 목록을 넣지 않음
+        config.select_tv("osan", root)
+        with self.assertRaises(config.ConfigError):
+            config.remove_tv("osan", root)                                        # 지금 고른 TV 는 뺄 수 없음
+        self.assertEqual(config.remove_tv("lobby", root).all_tvs, ("osan", "osan2"))
+        # 자동 업로드 .bat 은 만들 때의 TV 로
+        name, data = syncbat.make(root, "원가", "osan2")
+        self.assertIn(b"--tv osan2", data); self.assertTrue(name.endswith("_osan2.bat"))
