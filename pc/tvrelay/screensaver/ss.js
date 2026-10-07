@@ -39,7 +39,7 @@
     try { TV.videoRect(r.left, r.top, r.width, r.height, innerWidth, innerHeight); } catch (e) {}
     reportEdit();
   }
-  /** [✎ 공지 수정] 버튼 위치 → TV 앱 (그 버튼을 누른 터치는 대시보드로 넘어가지 않고 이 페이지로 온다) */
+  /** 공지 수정 아이콘들의 위치 → TV 앱 (아이콘을 누른 터치는 대시보드로 넘어가지 않고 이 페이지로 온다) */
   function reportEdit() {
     if (!TV || !TV.editRects) return;
     var out = [];
@@ -590,7 +590,7 @@
     img.src = o.url || (BASE + encodeURIComponent(o.name));
   };
 
-  // ── 공지 간편 수정 (TV): [✎ 공지 수정] → 위쪽 팝업 ① 숫자패드로 비밀번호 6자리 ② 공지 입력 (화면 키보드) → 저장 ──
+  // ── 공지 간편 수정 (TV): 공지 줄 오른쪽 수정 아이콘 → 위쪽 팝업 ① 숫자패드로 비밀번호 6자리 ② 공지 입력 (화면 키보드) → 저장 ──
   var ntOpen = false, ntIdle = 0;
   function ntClose() {
     ntOpen = false; clearTimeout(ntIdle);
