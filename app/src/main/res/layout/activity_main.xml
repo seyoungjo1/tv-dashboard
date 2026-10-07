@@ -100,6 +100,34 @@
                     android:layout_height="1dp"
                     android:background="#FF3C4147" />
 
+                <!-- 대기화면 바로보기 (설정 바로 위) -->
+                <LinearLayout
+                    android:id="@+id/idleNowButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/side_item_bg"
+                    android:clickable="true"
+                    android:contentDescription="@string/idle_now"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:paddingVertical="12dp">
+
+                    <ImageView
+                        android:layout_width="34dp"
+                        android:layout_height="34dp"
+                        android:importantForAccessibility="no"
+                        android:src="@drawable/ic_idle_now" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/idle_now"
+                        android:textColor="@color/sidebar_text"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
                 <LinearLayout
                     android:id="@+id/settingsButton"
                     android:layout_width="match_parent"

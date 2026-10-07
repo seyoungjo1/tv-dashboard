@@ -176,6 +176,7 @@ class MainActivity : AppCompatActivity() {
         createWebView()
 
         settingsButton.setOnClickListener { openSettings() }
+        findViewById<View>(R.id.idleNowButton).setOnClickListener { showIdle() }   // 대기화면 바로보기 (기다리지 않고)
         findViewById<View>(R.id.sidebarToggle).setOnClickListener { setSidebar(!sidebarOpen) }
         setSidebar(AppSettings.prefs.getBoolean("sidebar_open", true), save = false)
         fullscreenButton.setOnClickListener { setFullscreen(!fullscreen) }

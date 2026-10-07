@@ -105,6 +105,8 @@
   .tvi.sel { background:#26292d; box-shadow:inset 6px 0 #fff; }
   .tvi span { margin-top:9px; text-align:center; word-break:break-all; }
   .tvset { margin-top:auto; border-top:1px solid #3c4147; padding:18px 0; text-align:center; color:#d5dae0; font-size:22px; }
+  .tvidle { margin-top:auto; border-top:1px solid #3c4147; padding:16px 0 6px; text-align:center; color:#d5dae0; font-size:22px; cursor:pointer; }
+  .tvidle + .tvset { margin-top:0; border-top:0; padding-top:10px; }
   .tvc { flex:1; position:relative; min-width:0; }
   .tvc iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:#eef1f4; }
   .tvc .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:34px; color:#6b7785; text-align:center; padding:60px; }
@@ -1110,7 +1112,7 @@
     if (!items.find(i => i.folder === tvFolder)) tvFolder = items[0]?.folder ?? null;
     $('#tvTitle').textContent = tvTitleText();
     const content = $('#tvContent');
-    const side = (iconsReady) => items.map((it, n) => `<div class="tvi ${it.folder === tvFolder ? 'sel' : ''}" draggable="true" title="끌어서 순서 바꾸기" data-tvf="${esc(it.folder)}"><div class="b">${it.image && iconsReady ? `<img src="${prevUrl(it.image)}">` : esc((it.title || '?').slice(0, 1))}</div><span>${esc(it.title)}</span></div>`).join('') + '<div class="tvset">⚙<br>설정</div>';
+    const side = (iconsReady) => items.map((it, n) => `<div class="tvi ${it.folder === tvFolder ? 'sel' : ''}" draggable="true" title="끌어서 순서 바꾸기" data-tvf="${esc(it.folder)}"><div class="b">${it.image && iconsReady ? `<img src="${prevUrl(it.image)}">` : esc((it.title || '?').slice(0, 1))}</div><span>${esc(it.title)}</span></div>`).join('') + '<div class="tvidle" title="TV 에서 누르면 바로 대기화면(화면보호기) — 여기서 누르면 화면보호기 미리보기">▶<br>대기화면</div><div class="tvset">⚙<br>설정</div>';
     $('#tvSide').innerHTML = side(false);
     $('#tvInfo').textContent = tvFolder ? `메뉴 ${items.length}개 · ${tvFolder}` : '';
     if (!fresh && content.dataset.for === tvFolder) { $('#tvSide').innerHTML = side(true); return; }
@@ -1128,7 +1130,14 @@
     content.innerHTML = cur.index ? `<iframe src="${prevUrl(cur.folder + '/' + cur.index)}?t=${Date.now()}"></iframe>`
       : `<div class="empty">「${esc(cur.title)}」<br><br>이 폴더에 index.html 이 없습니다</div>`;
   }
-  $('#tvSide').addEventListener('click', (e) => { const t = e.target.closest('[data-tvf]'); if (!t) return; tvFolder = t.dataset.tvf; select(tvFolder); });
+  $('#tvSide').addEventListener('click', (e) => {
+    if (e.target.closest('.tvidle')) {                        // 대기화면: main 폴더가 있으면 화면보호기 미리보기
+      const m = kids('').find(k => k.d && isMain(k.p));
+      if (m) select(m.p); else alert('main 폴더가 없어 TV 는 기본 대기화면(동영상·멘트)을 보여 줍니다.');
+      return;
+    }
+    const t = e.target.closest('[data-tvf]'); if (!t) return; tvFolder = t.dataset.tvf; select(tvFolder);
+  });
   let dragF = null;
   $('#tvSide').addEventListener('dragstart', (e) => { const t = e.target.closest('[data-tvf]'); if (!t) return; dragF = t.dataset.tvf; t.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragF); });
   $('#tvSide').addEventListener('dragend', () => { dragF = null; document.querySelectorAll('.tvi.dragging,.tvi.dragover').forEach(x => x.classList.remove('dragging', 'dragover')); });

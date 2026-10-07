@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">TV 대시보드</string>
     <string name="settings">설정</string>
+    <string name="idle_now">대기화면</string>
     <string name="default_header_title">오산공장 스마트 현황판</string>
     <string name="fullscreen">전체 화면</string>
     <string name="toggle_sidebar">메뉴 숨기기/열기</string>
