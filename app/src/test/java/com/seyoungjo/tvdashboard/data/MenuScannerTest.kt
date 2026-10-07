@@ -60,6 +60,16 @@ class MenuScannerTest {
         assertEquals("dQw4w9WgXcQ", MenuScanner.youtubeId("https://www.youtube.com/watch?app=desktop&v=dQw4w9WgXcQ"))
     }
 
+    @Test fun photosInPlaylistWithDurationAndEffect() {
+        file("main/1.mp4"); file("main/2.jpg"); file("main/3.png"); file("main/icon.png"); file("main/logo.png"); file("main/_임시.jpg")
+        file("main/설정.json", """{"playlist":[{"src":"3.png","dur":15,"effect":"wipe"},{"src":"2.jpg","effect":"없는효과","dur":1}]}""")
+        val p = MenuScanner.mainPlaylist(MenuScanner.mainDir(root))
+        assertEquals(listOf("3.png", "2.jpg", "1.mp4"), p.map { it.file!!.name })     // icon · logo · '_' 파일은 빠짐
+        assertTrue(p[0].image); assertEquals(15, p[0].duration); assertEquals("wipe", p[0].effect)
+        assertEquals("morph", p[1].effect); assertEquals(2, p[1].duration)             // 모르는 효과 → 모핑, 최소 2초
+        assertTrue(!p[2].image)
+    }
+
     @Test fun signatureChangesWhenFilesChange() {
         val idx = file("A/index.html")
         val s1 = MenuScanner.signature(MenuScanner.scan(root))

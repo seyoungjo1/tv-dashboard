@@ -19,7 +19,7 @@ header { position: absolute; left: 0; right: 0; top: 0; height: 118px; display: 
 .clock b { font-size: 44px; font-weight: 800; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
 
 main { position: absolute; left: 38px; right: 38px; top: 122px; bottom: 82px; display: flex; gap: 22px; }
-#left { width: 58.5%; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+#left { width: 58.5%; min-width: 0; display: flex; flex-direction: column; gap: 22px; position: relative; }
 #right { flex: 1; position: relative; }
 
 .card { background: #fff; border-radius: 22px; box-shadow: 0 4px 18px rgba(29, 43, 58, .07); }
@@ -83,3 +83,45 @@ main { position: absolute; left: 38px; right: 38px; top: 122px; bottom: 82px; di
 /* 숫자·차트 등장 */
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 .rise { animation: rise .7s cubic-bezier(.2, .7, .2, 1) both; }
+
+/* 공지 간편 수정 (TV): 카드 윗변에 걸친 [✎ 공지 수정] → 위쪽 팝업: ① 숫자패드로 비밀번호 6자리 ② 공지 입력 + 화면 키보드
+   (키보드는 아래쪽에 뜨므로 팝업은 위쪽에 둔다) */
+#noticeEdit { display: none; position: absolute; z-index: 5; top: -22px; right: 26px; height: 38px; padding: 0 20px; border: 0; border-radius: 19px;
+              background: #2f7be6; color: #fff; font: 700 21px/38px "Pretendard", sans-serif; box-shadow: 0 3px 10px rgba(47, 123, 230, .35); }
+html.tv #noticeEdit { display: block; }
+#ntDim { position: absolute; inset: 0; z-index: 50; background: rgba(15, 25, 38, .45); }
+#ntPop { position: absolute; z-index: 51; left: 50%; top: 24px; width: 1180px; margin-left: -590px; background: #fff; border-radius: 26px;
+         box-shadow: 0 18px 60px rgba(0, 0, 0, .35); padding: 26px 34px 26px; animation: popIn .28s cubic-bezier(.2, .8, .2, 1); }
+@keyframes popIn { from { opacity: 0; transform: translateY(-30px) scale(.97); } to { opacity: 1; transform: none; } }
+#ntPop h3 { margin: 0 0 6px; font-size: 34px; font-weight: 800; }
+#ntPop .sub { font-size: 23px; color: #6b7785; margin-bottom: 16px; }
+#ntPop .sub.err { color: #d83b3b; }
+#ntPop.shake { animation: shake .35s; }
+@keyframes shake { 20%, 60% { transform: translateX(-14px); } 40%, 80% { transform: translateX(14px); } }
+.pinrow { display: flex; gap: 14px; align-items: center; }
+.dots { display: flex; gap: 14px; padding: 6px 0 18px; }
+.dots i { width: 30px; height: 30px; border-radius: 50%; border: 3px solid #b9c4d0; }
+.dots i.on { background: #2f7be6; border-color: #2f7be6; }
+.pad { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+.pad button { height: 76px; border: 0; border-radius: 16px; background: #eef2f6; color: #1d2b3a; font: 800 36px "Pretendard", sans-serif; }
+.pad button:active { background: #d6e4f7; }
+.pad button.fn { font-size: 26px; background: #e2e7ee; }
+.pad button.ok { background: #2f7be6; color: #fff; font-size: 28px; }
+#ntTa { width: 100%; height: 250px; resize: none; padding: 14px 20px; border: 2px solid #d9e1ea; border-radius: 14px; background: #f8fafc;
+        font: 600 32px/1.55 "Pretendard", sans-serif; color: #1d2b3a; outline: none; caret-color: #2f7be6; }
+#ntTa:focus { border-color: #2f7be6; }
+.edbar { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+.edhint { flex: 1; font-size: 21px; color: #7a8796; }
+.edhint.err { color: #d83b3b; }
+.edbar button { border: 0; border-radius: 14px; padding: 14px 40px; font: 700 28px "Pretendard", sans-serif; background: #e6ebf1; color: #2b3440; }
+.edbar button.save { background: #2f7be6; color: #fff; }
+.edbar button:disabled { opacity: .5; }
+
+/* 사진 (전환 효과) — 칸 안의 층. 새 사진이 위에 올라오며 아래 층(앞 장면)은 효과가 끝나면 지운다 */
+.sslayer { position: absolute; inset: 0; overflow: hidden; }
+.sslayer .ytbg { position: absolute; inset: -8%; width: 116%; height: 116%; object-fit: cover; filter: blur(40px) brightness(.75); }
+.sslayer .imgfg { position: absolute; display: block; max-width: none; }
+.sslayer.prev img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sswipe { position: absolute; top: -10%; bottom: -10%; left: 0; width: 140px; z-index: 3; pointer-events: none;
+          background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.55) 45%, rgba(255,255,255,.95) 50%, rgba(255,255,255,.55) 55%, rgba(255,255,255,0));
+          filter: blur(2px); }

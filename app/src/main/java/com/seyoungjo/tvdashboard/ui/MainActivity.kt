@@ -94,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     private var resumed = false
     private var lastBack = 0L
     private var swallowGesture = false
+    private var passGesture = false                       // 이번 터치는 화면보호기 페이지로 (공지 수정)
     private lateinit var reveal: View
     private var clearHistoryPending = false
     private var idleVideos: List<File> = emptyList()
@@ -671,6 +672,17 @@ class MainActivity : AppCompatActivity() {
     // ── 대기 화면 (루트 동영상 + 멘트) ────────────────────────────────────
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            passGesture = false
+            if (idleOverlay.visibility == View.VISIBLE && hasMain && !morphing) {
+                // 화면보호기의 [✎ 공지 수정] 버튼 · 수정 중인 화면: 대시보드로 넘어가지 않고 화면보호기 페이지가 받는다
+                val (rx, ry) = toRoot(ev.x, ev.y)
+                if (screensaver.editing || screensaver.hitsEditButton(rx, ry, reveal.parent as View)) {
+                    disarmTap()
+                    swallowGesture = false
+                    passGesture = true
+                    return super.dispatchTouchEvent(ev)
+                }
+            }
             if (idleOverlay.visibility == View.VISIBLE) {
                 swallowGesture = true
                 val armed = tapArmedAt != 0L && android.os.SystemClock.uptimeMillis() - tapArmedAt <= TAP_WINDOW_MS
@@ -685,6 +697,10 @@ class MainActivity : AppCompatActivity() {
             }
             resetIdle()
         }
+        if (passGesture) {
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) passGesture = false
+            return super.dispatchTouchEvent(ev)
+        }
         if (swallowGesture) {
             if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) {
                 swallowGesture = false
@@ -697,6 +713,14 @@ class MainActivity : AppCompatActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val volume = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
             event.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE
+        if (idleOverlay.visibility == View.VISIBLE && screensaver.editing) {
+            // 공지 수정 중: 외부 키보드 입력은 화면보호기 페이지로. 뒤로(리모컨) = 수정 취소
+            if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                if (event.action == KeyEvent.ACTION_UP) screensaver.cancelEdit()
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
         if (!volume && idleOverlay.visibility == View.VISIBLE) {
             if (event.action == KeyEvent.ACTION_UP) morphTransition { hideIdle() }   // 리모컨: 모핑으로 대시보드에
             return true

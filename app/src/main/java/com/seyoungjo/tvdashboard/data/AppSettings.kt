@@ -34,6 +34,9 @@ object AppSettings {
     val autoRefresh get() = prefs.getBoolean("auto_refresh", true)
     val storageMode: String get() = prefs.getString("storage_mode", "app") ?: "app"
     val settingsPin: String get() = prefs.getString("settings_pin", "")?.trim() ?: ""
+    /** 화면보호기 공지 수정 비밀번호 (숫자 6자리, 비우면 화면보호기에서 고칠 수 없음) */
+    val noticePin: String get() = prefs.getString("notice_pin", "")?.trim() ?: ""
+    fun validNoticePin(v: String): Boolean = v.trim().isEmpty() || Regex("^\\d{6}$").matches(v.trim())
     val updateUrl: String get() = prefs.getString("update_url", null)?.trim().orEmpty()
         .ifEmpty { BuildConfig.DEFAULT_UPDATE_URL }
 
@@ -66,6 +69,7 @@ object AppSettings {
         "keep_screen_on" to Boolean::class,
         "update_url" to String::class,
         "settings_pin" to String::class,
+        "notice_pin" to String::class,
     )
 
     /** 관리 웹 · 원격 PC 에 보여 주는 설정값 */
@@ -93,7 +97,11 @@ object AppSettings {
                     require(v >= 0) { "$k 는 0 이상이어야 합니다." }
                     e.putString(k, v.toString())
                 }
-                else -> e.putString(k, body.getString(k))
+                else -> {
+                    val v = body.getString(k)
+                    if (k == "notice_pin") require(validNoticePin(v)) { "공지 수정 비밀번호는 숫자 6자리여야 합니다 (비우면 사용 안 함)." }
+                    e.putString(k, v.trim().takeIf { k == "notice_pin" } ?: v)
+                }
             }
         }
         e.apply()

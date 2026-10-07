@@ -6,7 +6,7 @@
 <title>화면보호기</title>
 <!-- 대상 오산공장 Dashboard — 화면보호기 (자료/main 폴더가 있으면 대기 화면으로 표시)
      main/생산.json · sd.json · fi.json · plan.json  실적 대시보드 생성기의 JSON 4개 그대로
-     main/1.mp4 2.mp4 …  오른쪽 동영상 (이름 오름차순, TV 기본 플레이어로 재생)
+     main/1.mp4 2.jpg …  오른쪽 동영상·사진 (이름 오름차순, 동영상은 TV 기본 플레이어, 사진은 전환 효과)
      main/공지.txt        왼쪽 위 공지 (한 줄에 하나)
      main/제목.txt        상단 제목 (없으면 '오산공장 스마트 현황판') -->
 <link rel="stylesheet" href="ss.css">
@@ -21,6 +21,7 @@
 
   <main>
     <section id="left">
+      <button type="button" id="noticeEdit">✎ 공지 수정</button>
       <div class="card" id="notice"></div>
 
       <div class="card" id="perf">
@@ -47,7 +48,7 @@
     </section>
 
     <section id="right">
-      <div id="video"><div class="ph" id="videoPh">main 폴더에 1.mp4, 2.mp4 … 를 넣으면<br>여기에 순서대로 재생됩니다</div></div>
+      <div id="video"><div class="ph" id="videoPh">main 폴더에 1.mp4, 2.jpg … 를 넣으면<br>여기에 순서대로 재생됩니다</div></div>
     </section>
   </main>
   <div id="hint"></div>

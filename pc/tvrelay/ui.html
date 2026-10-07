@@ -218,13 +218,14 @@
 </div>
         </div>
         <div>
-          <h4>동영상 <span class="hint">위에서부터 순서대로 반복 재생 · 영상마다 표시 방식</span></h4>
+          <h4>동영상 · 사진 <span class="hint">위에서부터 순서대로 반복 재생 · 항목마다 표시 방식 · 사진은 보여 줄 시간과 전환 효과</span></h4>
           <div id="ssVids"></div>
-          <button type="button" class="secondary" id="ssAddVid">+ 동영상 추가</button>
+          <button type="button" class="secondary" id="ssAddVid">+ 동영상·사진 추가</button>
           <button type="button" class="secondary" id="ssAddYt">+ 유튜브 링크 추가</button>
           <div class="hint" style="margin-top:6px">크롭 = 칸을 꽉 채우고 긴 쪽을 자름(위·가운데·아래 맞춤) · 확장 = 작은 쪽을 맞춰 전체가 보이고 남는 곳은 블러/단색<br>
+          사진 전환 효과: 모핑 · 쉐이딩 · 닦아내기 · 원형 · 블라인드 · 랜덤 (앞 장면에서 그 사진으로 바뀔 때)<br>
           유튜브는 TV 가 인터넷에 연결돼 있어야 하고, 퍼가기가 막힌 영상은 건너뜁니다</div>
-          <input type="file" id="ssVidInput" accept="video/*,.mp4,.m4v,.webm,.mkv,.mov,.3gp,.ts" multiple class="hidden">
+          <input type="file" id="ssVidInput" accept="video/*,image/*,.mp4,.m4v,.webm,.mkv,.mov,.3gp,.ts,.jpg,.jpeg,.png,.webp,.gif,.bmp" multiple class="hidden">
         </div>
       </div>
     </div>
@@ -249,6 +250,7 @@
       <label><input type="checkbox" name="keep_screen_on"> 앱 실행 중 화면 꺼짐 방지</label>
       <div class="grid2">
         <div><label>TV 설정 잠금 PIN (숫자, 비우면 없음)</label><input type="text" name="settings_pin"></div>
+        <div><label>공지 수정 비밀번호 (숫자 6자리 · 화면보호기 [✎ 공지 수정], 비우면 사용 안 함)</label><input type="text" name="notice_pin" inputmode="numeric" maxlength="6"></div>
         <div><label>업데이트 주소 (update.json)</label><input type="url" name="update_url"></div>
       </div>
       <div id="settingsMsg"></div>
@@ -467,15 +469,23 @@
 
   // ── 화면보호기 설정: 미리보기 + 공지(main/공지.txt) + 재생 목록(동영상·유튜브, 영상별 크롭/확장 → main/설정.json playlist) ──
   const VID_EXT = ['mp4', 'm4v', 'webm', 'mkv', '3gp', 'mov', 'ts'];
+  const PHOTO_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'];
+  // TV 와 같은 규칙: main 안의 동영상 + 사진 (icon · logo · 대표이미지 그림과 '_' 로 시작하는 파일은 제외)
+  const isMedia = (n) => !n.startsWith('_') && !n.startsWith('.') && (VID_EXT.includes(ext(n)) ||
+    (PHOTO_EXT.includes(ext(n)) && !['icon', 'logo', '대표이미지'].includes(n.replace(/\.[^.]+$/, '').toLowerCase())));
+  const EFFECTS = [['morph', '모핑'], ['shade', '쉐이딩'], ['wipe', '닦아내기'], ['circle', '원형'], ['blinds', '블라인드'], ['random', '랜덤']];
   const natCmp = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
   const YT_RE = /(?:youtu\.be\/|youtube\.com\/(?:shorts\/|embed\/|live\/|watch\?(?:.*&)?v=))([A-Za-z0-9_-]{11})/;
   // ssVids: [{ name(TV 의 지금 파일 이름) | file(새 파일) | yt(유튜브 주소), fit: fit|crop, align: top|center|bottom, fill: blur|color, color }]
   let ssDir = 'main', ssConf = {}, ssVids = [];
+  let ssVidsDirty = false;                                   // TV 내용을 받는 동안 목록을 직접 고쳤는가 (늦게 온 TV 내용으로 덮지 않게)
   const ssLines = () => $('#ssNotice').value.split('\n').map(s => s.trim()).filter(Boolean);
   const vidLabel = (v) => v.yt ? v.yt : v.file ? v.file.name : v.name;
   const target = (v, i) => `${i + 1}.${ext(vidLabel(v)) || 'mp4'}`;
-  const optText = (v) => v.fit === 'crop' ? '크롭·' + ({ top: '위', bottom: '아래' }[v.align] || '가운데')
-    : v.fit === 'custom' ? `직접 ${v.scale || 100}%` : '확장·' + (v.fill === 'color' ? '단색' : '블러');
+  const isPhoto = (v) => !v.yt && PHOTO_EXT.includes(ext(vidLabel(v)));
+  const optText = (v) => (v.fit === 'crop' ? '크롭·' + ({ top: '위', bottom: '아래' }[v.align] || '가운데')
+    : v.fit === 'custom' ? `직접 ${v.scale || 100}%` : '확장·' + (v.fill === 'color' ? '단색' : '블러')) +
+    (isPhoto(v) ? `·${v.dur || 8}초·${(EFFECTS.find(e => e[0] === (v.effect || 'morph')) || EFFECTS[0])[1]}` : '');
   const newItem = (o) => Object.assign({ fit: (ssConf.videoFit === 'crop' ? 'crop' : 'fit'), align: 'center', fill: 'blur', color: '#000000' }, o);
   function ssPush() {          // 미리보기에 저장 전 내용 반영
     $('#ssFrame').contentWindow?.postMessage({ ss: { notices: ssLines(),
@@ -484,7 +494,7 @@
   function ssCount() { const n = ssLines().length; $('#ssCount').textContent = n ? `${n}개${n > 5 ? ' — 5개까지만 표시' : ''}` : '(없으면 공지 칸 숨김)'; ssPush(); }
   function ssRenderVids() {
     $('#ssVids').innerHTML = ssVids.map((v, i) => `<div class="v${v.file ? ' new' : ''}${v.yt ? ' yt' : ''}">
-      <span class="n">${v.yt ? '▶ 유튜브' : esc(target(v, i))}</span>
+      <span class="n">${v.yt ? '▶ 유튜브' : (isPhoto(v) ? '🖼 ' : '') + esc(target(v, i))}</span>
       <span class="f" title="${esc(vidLabel(v))}">${v.file ? '새 파일 · ' : ''}${esc(vidLabel(v))}${v.file ? ' (' + size(v.file.size) + ')' : ''}</span>
       <span class="o">
         <select data-k="fit" data-i="${i}">${[['crop', '크롭'], ['fit', '확장'], ['custom', '직접 조절']].map(([k, t]) => `<option value="${k}"${(v.fit || 'fit') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>
@@ -492,10 +502,12 @@
           ? `<select data-k="align" data-i="${i}">${[['top', '위쪽 맞춤'], ['center', '가운데 맞춤'], ['bottom', '아래쪽 맞춤']].map(([k, t]) => `<option value="${k}"${(v.align || 'center') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>`
           : `<select data-k="fill" data-i="${i}"><option value="blur"${v.fill !== 'color' ? ' selected' : ''}>남는 곳 블러</option><option value="color"${v.fill === 'color' ? ' selected' : ''}>남는 곳 단색</option></select>` +
             (v.fill === 'color' ? `<input type="color" data-k="color" data-i="${i}" value="${esc(v.color || '#000000')}" title="채울 색">` : '')}
+        ${isPhoto(v) ? `<input type="number" data-k="dur" data-i="${i}" value="${v.dur || 8}" min="2" max="3600" step="1" title="보여 줄 시간(초)" style="width:52px">초
+          <select data-k="effect" data-i="${i}" title="이 사진으로 바뀔 때 전환 효과">${EFFECTS.map(([k, t]) => `<option value="${k}"${(v.effect || 'morph') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>` : ''}
       </span>
       <button class="secondary" data-vp="${i}" title="미리보기에서 재생${!v.yt && !v.file && !ssHave.has(v.name) ? ' (TV 에서 받아 옴)' : ''}">▶</button>
       <button class="secondary" data-vu="${i}">▲</button><button class="secondary" data-vd="${i}">▼</button><button class="danger" data-vx="${i}">✕</button></div>`).join('')
-      || '<div class="hint">동영상이 없습니다.</div>';
+      || '<div class="hint">동영상·사진이 없습니다.</div>';
     ssPush();
   }
   // 직접 조절: 100% 기준(크롭/확장) · 크기(%) · 가로 기준+px · 세로 기준+px · 남는 곳(블러/단색)
@@ -515,6 +527,10 @@
     if (v.ar) return { ar: v.ar, exact: true };
     if (v.yt) return { ar: /\/shorts\//.test(v.yt) ? 9 / 16 : 16 / 9, exact: true };
     const src = ssSrc(v);
+    if (src && src.kind === 'image') {
+      const ar = await new Promise((res) => { const im = new Image(); im.onload = () => res(im.naturalWidth / im.naturalHeight || 0); im.onerror = () => res(0); im.src = src.url; setTimeout(() => res(0), 8000); });
+      if (ar) { v.ar = ar; return { ar, exact: true }; }
+    }
     if (src && src.kind === 'file') {
       const ar = await new Promise((res) => { const el = document.createElement('video'); el.preload = 'metadata'; el.muted = true;
         el.onloadedmetadata = () => res(el.videoWidth && el.videoHeight ? el.videoWidth / el.videoHeight : 0); el.onerror = () => res(0); el.src = src.url; setTimeout(() => res(0), 8000); });
@@ -544,8 +560,10 @@
   $('#ssVids').addEventListener('change', async (e) => {
     const k = e.target.dataset.k, i = e.target.dataset.i; if (!k || i === undefined) return;
     const v = ssVids[+i];
+    ssVidsDirty = true;
     if (k === 'valign' || k === 'halign') await convertAnchor(v, k, e.target.value);
     else if (['scale', 'offsetX', 'offsetY'].includes(k)) v[k] = Math.round(+e.target.value || (k === 'scale' ? 100 : 0));
+    else if (k === 'dur') v.dur = Math.max(2, Math.min(3600, Math.round(+e.target.value || 8)));
     else v[k] = e.target.value;
     ssRenderVids();
     if (+i === ssPlayIdx) ssPlay(+i);                       // 보고 있는 영상이면 바뀐 방식으로 다시 재생
@@ -556,8 +574,9 @@
   let ssSeq = 0, ssPlayIdx = -1, ssHave = new Set();         // ssHave: PC 에 받아 둔 TV 동영상 이름
   function ssSrc(v) {
     if (v.yt) { const m = v.yt.match(YT_RE); return m ? { kind: 'yt', id: m[1], vertical: /\/shorts\//.test(v.yt) } : null; }
-    if (v.file) { if (!ssUrls.has(v.file)) ssUrls.set(v.file, URL.createObjectURL(v.file)); return { kind: 'file', url: ssUrls.get(v.file) }; }
-    return ssHave.has(v.name) ? { kind: 'file', url: prevUrl(ssDir + '/' + v.name) } : null;
+    const kind = isPhoto(v) ? 'image' : 'file';
+    if (v.file) { if (!ssUrls.has(v.file)) ssUrls.set(v.file, URL.createObjectURL(v.file)); return { kind, url: ssUrls.get(v.file) }; }
+    return ssHave.has(v.name) ? { kind, url: prevUrl(ssDir + '/' + v.name) } : null;
   }
   function ssPlay(from) {
     const n = ssVids.length, win = $('#ssFrame').contentWindow;
@@ -569,7 +588,8 @@
       win.postMessage({ ss: { play: Object.assign(src, { seq: ++ssSeq, crop: v.fit === 'crop', align: v.align || 'center',
         custom: v.fit === 'custom', base: v.base || 'crop', scale: v.scale || 100, halign: v.halign || 'center', offsetX: v.offsetX || 0,
         valign: v.valign || 'center', offsetY: v.offsetY || 0,
-        fill: v.fill === 'color' ? 'color' : 'blur', color: v.color || '#000000', loop: false }) } }, '*');
+        fill: v.fill === 'color' ? 'color' : 'blur', color: v.color || '#000000', loop: false,
+        dur: v.dur || 8, effect: v.effect || 'morph' }) } }, '*');
       document.querySelectorAll('#ssVids .v').forEach((r, j) => r.classList.toggle('playing', j === i));
       return;
     }
@@ -592,6 +612,7 @@
   $('#ssVids').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     const u = b.dataset.vu, d = b.dataset.vd, x = b.dataset.vx;
+    if (u !== undefined || d !== undefined || x !== undefined) ssVidsDirty = true;
     if (u !== undefined && +u > 0) [ssVids[+u - 1], ssVids[+u]] = [ssVids[+u], ssVids[+u - 1]];
     if (d !== undefined && +d < ssVids.length - 1) [ssVids[+d + 1], ssVids[+d]] = [ssVids[+d], ssVids[+d + 1]];
     if (x !== undefined) ssVids.splice(+x, 1);
@@ -599,11 +620,12 @@
     ssRenderVids();
   });
   $('#ssAddVid').onclick = () => { $('#ssVidInput').value = ''; $('#ssVidInput').click(); };
-  $('#ssVidInput').onchange = (e) => { [...e.target.files].sort((a, b) => natCmp(a.name, b.name)).forEach(f => ssVids.push(newItem({ file: f }))); ssRenderVids(); };
+  $('#ssVidInput').onchange = (e) => { ssVidsDirty = true; [...e.target.files].sort((a, b) => natCmp(a.name, b.name)).forEach(f => ssVids.push(newItem({ file: f }))); ssRenderVids(); };
   $('#ssAddYt').onclick = () => {
     const u = (prompt('유튜브 주소를 붙여넣으세요 (쇼츠·일반 영상)\n예) https://www.youtube.com/shorts/KLkfruAh5yE') || '').trim();
     if (!u) return;
     if (!YT_RE.test(u)) { alert('유튜브 영상 주소가 아닙니다.'); return; }
+    ssVidsDirty = true;
     ssVids.push(newItem({ yt: u, fit: /\/shorts\//.test(u) ? 'fit' : undefined })); ssRenderVids();
   };
   let ssNoticeDirty = false, ssNoticeKnown = false;          // 직접 고쳤는지 · TV 의 지금 공지를 알고 있는지
@@ -621,8 +643,8 @@
   }
   $('#ssFrame').addEventListener('load', () => setTimeout(() => { ssPush(); if (ssActive) ssPlay(0); }, 400));
   async function openScreensaver(dir) {
-    ssDir = dir; ssConf = {};
-    const tvVids = () => kids(dir).filter(k => !k.d && VID_EXT.includes(ext(k.p))).map(k => base(k.p)).sort(natCmp);
+    ssDir = dir; ssConf = {}; ssVidsDirty = false;
+    const tvVids = () => kids(dir).filter(k => !k.d && isMedia(base(k.p))).map(k => base(k.p)).sort(natCmp);
     ssVids = tvVids().map(n => newItem({ name: n }));
     const ta = $('#ssNotice');
     ta.value = ''; ssNoticeDirty = false; $('#ssSave').disabled = true;
@@ -660,7 +682,7 @@
     const files = tvVids(), used = new Set(), list = [];
     for (const o of Array.isArray(ssConf.playlist) ? ssConf.playlist : []) {
       const src = String(o.src || '').trim(), opt = { fit: ['crop', 'fit', 'custom'].includes(o.fit) ? o.fit : undefined, align: o.align, fill: o.fill, color: o.color,
-        base: o.base, scale: o.scale, halign: o.halign, offsetX: o.offsetX, valign: o.valign, offsetY: o.offsetY };
+        base: o.base, scale: o.scale, halign: o.halign, offsetX: o.offsetX, valign: o.valign, offsetY: o.offsetY, dur: o.dur, effect: o.effect };
       Object.keys(opt).forEach(k => opt[k] === undefined && delete opt[k]);
       if (YT_RE.test(src)) list.push(newItem(Object.assign({ yt: src }, opt)));
       else if (files.includes(src) && !used.has(src)) { used.add(src); list.push(newItem(Object.assign({ name: src }, opt))); }
@@ -668,7 +690,8 @@
     files.filter(n => !used.has(n)).forEach(n => list.push(newItem({ name: n })));
     ssHave = new Set();
     await Promise.all(files.map(async (n) => { try { const r = await fetch(prevUrl(dir + '/' + n), { method: 'HEAD' }); if (r.ok) ssHave.add(n); } catch (_) {} }));
-    ssVids = list; ssRenderVids();
+    if (!ssVidsDirty) { ssVids = list; ssRenderVids(); }           // 받는 동안 직접 고쳤으면 고친 목록을 그대로 둔다
+    else say('TV 에서 받은 재생 목록 대신, 지금 고치고 있는 목록을 그대로 둡니다.');
     $('#ssFrame').src = `/ss/index.html?preview=1&folder=${encodeURIComponent(dir)}&title=${encodeURIComponent(tvTitleText())}` +
       `&message=${encodeURIComponent(((m) => !m || m === '오산공장 dashboard 터치시 접속됩니다' ? '' : m)((state?.settings?.idle_message || '').trim()))}&t=${Date.now()}`;
     ssCount(); $('#ssSave').disabled = false;
@@ -681,18 +704,19 @@
       v.fit === 'crop' ? { align: v.align || 'center' } : { fill: v.fill === 'color' ? 'color' : 'blur' },
       v.fit !== 'crop' && v.fill === 'color' ? { color: v.color || '#000000' } : {},
       v.fit === 'custom' ? { base: v.base || 'crop', scale: v.scale || 100, halign: v.halign || 'center', offsetX: v.offsetX || 0,
-                             valign: v.valign || 'center', offsetY: v.offsetY || 0 } : {}));
+                             valign: v.valign || 'center', offsetY: v.offsetY || 0 } : {},
+      isPhoto(v) ? { dur: v.dur || 8, effect: v.effect || 'morph' } : {}));
     const dir = ssDir, ops = [];
     try {
       $('#ssSave').disabled = true;
       // 동영상: 지운 것 삭제 → 순서가 바뀐 것은 임시 이름 거쳐 1.mp4 2.mp4 … 로 → 새 파일은 그 번호로 올리기
       const keep = new Set(ssVids.filter(v => v.name).map(v => v.name));   // 유튜브 항목은 파일이 아님
-      kids(dir).filter(k => !k.d && VID_EXT.includes(ext(k.p)) && !keep.has(base(k.p))).forEach(k => ops.push({ op: 'delete', path: k.p }));
+      kids(dir).filter(k => !k.d && isMedia(base(k.p)) && !keep.has(base(k.p))).forEach(k => ops.push({ op: 'delete', path: k.p }));
       const tag = Date.now().toString(36);
       const moving = ssVids.map((v, i) => ({ v, i })).filter(({ v, i }) => v.name && v.name !== target(v, i));
       moving.forEach(({ v, i }) => ops.push({ op: 'rename', path: dir + '/' + v.name, to: `${dir}/_ss_${tag}_${i}.${ext(v.name)}` }));
       moving.forEach(({ v, i }) => ops.push({ op: 'rename', path: `${dir}/_ss_${tag}_${i}.${ext(v.name)}`, to: dir + '/' + target(v, i) }));
-      for (const [i, v] of ssVids.entries()) if (v.file) { say('동영상 준비 중… ' + v.file.name); const st = await api('PUT', '/api/stage', v.file, true); ops.push({ op: 'put', path: dir + '/' + target(v, i), stage: st.id }); }
+      for (const [i, v] of ssVids.entries()) if (v.file) { say((isPhoto(v) ? '사진' : '동영상') + ' 준비 중… ' + v.file.name); const st = await api('PUT', '/api/stage', v.file, true); ops.push({ op: 'put', path: dir + '/' + target(v, i), stage: st.id }); }
       const txt = new File([lines.join('\n') + (lines.length ? '\n' : '')], '공지.txt', { type: 'text/plain' });
       const js = new File([JSON.stringify(conf, null, 2)], '설정.json', { type: 'application/json' });
       // TV 의 공지를 모르는 채로(불러오기 실패) 고치지도 않았으면 공지 파일은 건드리지 않는다 — 빈 공지로 덮어쓰기 방지
@@ -700,7 +724,7 @@
       ops.push({ op: 'put', path: dir + '/설정.json', stage: (await api('PUT', '/api/stage', js, true)).id });
       say('');
       // 이름을 옮기는 작업과 함께 보내므로 '바뀐 파일만' 비교는 끈다 (옮기기 전 이름과 비교하면 틀릴 수 있음)
-      await send(ops, '화면보호기 설정 저장' + (ssVids.some(v => v.file) ? ` (동영상 ${ssVids.filter(v => v.file).length}개 올림)` : ''), moving.length > 0 || ops.some(o => o.op === 'delete'));
+      await send(ops, '화면보호기 설정 저장' + (ssVids.some(v => v.file) ? ` (동영상·사진 ${ssVids.filter(v => v.file).length}개 올림)` : ''), moving.length > 0 || ops.some(o => o.op === 'delete'));
     } catch (e) { alert(e.message); } finally { $('#ssSave').disabled = false; }
     function say(t) { $('#ssSt').textContent = t; }
   };
@@ -1148,6 +1172,7 @@
     const values = {};
     for (const el of e.target.elements) if (el.name) values[el.name] = el.type === 'checkbox' ? el.checked : el.value;
     if (values.settings_pin && !/^\d+$/.test(values.settings_pin)) return msg($('#settingsMsg'), 'PIN 은 숫자만 가능합니다.', 'err');
+    if (values.notice_pin && !/^\d{6}$/.test(values.notice_pin.trim())) return msg($('#settingsMsg'), '공지 수정 비밀번호는 숫자 6자리여야 합니다 (비우면 사용 안 함).', 'err');
     send([{ op: 'settings', values }], 'TV 설정 변경'); msg($('#settingsMsg'), '보냈습니다. TV 가 가져가면 바로 적용됩니다.', 'warn');
   };
 

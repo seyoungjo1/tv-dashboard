@@ -68,6 +68,17 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<EditTextPreference>("settings_pin")?.setOnBindEditTextListener {
             it.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
         }
+        findPreference<EditTextPreference>("notice_pin")?.apply {
+            setOnBindEditTextListener {
+                it.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                it.filters = arrayOf(android.text.InputFilter.LengthFilter(6))
+            }
+            setOnPreferenceChangeListener { _, v ->
+                val ok = AppSettings.validNoticePin(v.toString())
+                if (!ok) toast("공지 수정 비밀번호는 숫자 6자리여야 합니다 (비우면 사용 안 함).")
+                ok
+            }
+        }
         findPreference<EditTextPreference>("update_url")?.setOnBindEditTextListener {
             it.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }

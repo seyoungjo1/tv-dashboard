@@ -43,6 +43,10 @@ import kotlin.math.roundToInt
  *  · 크롭: 칸을 꽉 채우고 긴 쪽을 자른다 — 위쪽/가운데/아래쪽 맞춤 (가로가 넘치면 왼쪽/가운데/오른쪽)
  *  · 유튜브(쇼츠 포함): 화면보호기 페이지가 유튜브 공식 플레이어로 재생하고 끝나면 ytDone 으로 알려 준다
  *    (인터넷이 없거나 퍼가기가 막힌 영상은 건너뜀)
+ *  · 사진: 페이지가 전환 효과(모핑·쉐이딩·닦아내기·원형·블라인드)로 띄우고 정한 초만큼 보여 준 뒤 ytDone.
+ *    동영상 → 사진은 마지막 장면을 떠서(PixelCopy) 페이지에 넘겨 그 장면에서 사진으로 전환된다
+ *  · 공지 간편 수정: 페이지의 [✎ 공지 수정] 버튼 → 위쪽 팝업에 숫자패드로 공지 수정 비밀번호(6자리, TV 설정) →
+ *    맞으면 공지 입력란 + 화면 키보드 → main/공지.txt 저장. 수정 중에는 화면을 눌러도 대시보드로 넘어가지 않는다
  */
 class Screensaver(
     private val activity: Activity,
@@ -67,7 +71,14 @@ class Screensaver(
     private val mask = CornerMask(activity)
     private var stagePx = 1f                             // 화면보호기 1080p 기준 1px 이 실제 몇 px 인지 (위아래 이동용)
     private var blurBmp: Bitmap? = null
+    private var webItem = false                          // 지금 페이지가 보여 주는 항목(사진 · 유튜브)인가
+    private var pageW = 0.0                              // 페이지 폭(CSS px) — WebView 픽셀 ↔ CSS px 환산
+    private var editBtn: DoubleArray? = null             // [✎ 공지 수정] 버튼 위치 (CSS px: x, y, w, h)
+    private var savedSoftInput = 0
     var active = false
+        private set
+    /** 공지 수정 중 — 터치·키는 화면보호기 페이지로 (대시보드로 넘어가지 않음) */
+    var editing = false
         private set
 
     /** 자료 폴더 안의 실제 이름 (main / Main …) — 페이지가 그 이름으로 JSON 을 읽는다 */
@@ -151,11 +162,14 @@ class Screensaver(
     }
 
     fun hide() {
+        if (editing) setEditing(false)
         active = false
         handler.removeCallbacks(blurTick)
         releasePlayer()
         ytSeq++
-        web?.evaluateJavascript("window.ssYoutubeStop&&ssYoutubeStop()", null)
+        webItem = false
+        box.animate().cancel(); box.alpha = 1f
+        web?.evaluateJavascript("window.ssWebStop&&ssWebStop(0)", null)
         layer.visibility = View.GONE
         web?.onPause()
     }
@@ -163,6 +177,71 @@ class Screensaver(
     /** 아래 멘트를 잠시 바꾼다 (한 번 터치 → '한 번 더 눌러 주세요'), null 이면 원래 멘트로 */
     fun prompt(msg: String?) {
         if (active) web?.evaluateJavascript("window.ssPrompt&&ssPrompt(${JSONObject.quote(msg ?: "")})", null)
+    }
+
+    /** 수정 중이던 공지를 닫는다 (리모컨 뒤로 등) */
+    fun cancelEdit() {
+        pinOkUntil = 0
+        web?.evaluateJavascript("window.ssNoticeCancel&&ssNoticeCancel()", null)
+        setEditing(false)
+    }
+
+    /**
+     * 이 점(앱 화면 좌표, root 기준)이 [✎ 공지 수정] 버튼 위인가 — 그 터치는 화면보호기 페이지로 보낸다.
+     * 앱 화면 안의 뷰들은 따로 확대/이동하지 않으므로 left/top 을 더해 WebView 안 좌표로, 다시 CSS px 로 바꾼다.
+     */
+    fun hitsEditButton(x: Float, y: Float, root: View): Boolean {
+        val wv = web ?: return false
+        val r = editBtn ?: return false
+        if (!active || pageW <= 0 || wv.width <= 0) return false
+        var ox = 0f
+        var oy = 0f
+        var v: View = wv
+        while (v !== root) {
+            ox += v.left + v.translationX
+            oy += v.top + v.translationY
+            v = v.parent as? View ?: return false
+        }
+        val k = wv.width / pageW
+        val cx = (x - ox) / k
+        val cy = (y - oy) / k
+        val pad = 14                                        // 손가락이 살짝 빗나가도 버튼으로
+        return cx >= r[0] - pad && cx <= r[0] + r[2] + pad && cy >= r[1] - pad && cy <= r[1] + r[3] + pad
+    }
+
+    /**
+     * 수정 시작/끝: WebView 가 키(화면 키보드 · 외부 키보드)를 받게 한다.
+     * 키보드가 떠도 화면을 줄이지 않는다(ADJUST_NOTHING) — 팝업이 위쪽에 있어 가리지 않고, 화면보호기 배치도 그대로
+     */
+    private fun setEditing(on: Boolean) {
+        if (editing == on) return
+        editing = on
+        val wv = web
+        val win = activity.window
+        if (on) {
+            savedSoftInput = win.attributes.softInputMode
+            win.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+            wv?.isFocusable = true
+            wv?.isFocusableInTouchMode = true
+            wv?.requestFocus()
+        } else {
+            hideKeyboard()
+            wv?.clearFocus()
+            wv?.isFocusable = false
+            wv?.isFocusableInTouchMode = false
+            win.setSoftInputMode(savedSoftInput)
+        }
+    }
+
+    // 공지 수정 비밀번호: 5번 틀리면 1분 동안 막는다
+    private var pinFails = 0
+    private var pinLockUntil = 0L
+    @Volatile private var pinOkUntil = 0L                // 비밀번호가 맞은 뒤 저장할 수 있는 시각 (10분)
+
+    private fun hideKeyboard() {
+        val wv = web ?: return
+        val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        imm?.hideSoftInputFromWindow(wv.windowToken, 0)
     }
 
     /** main 폴더 내용이 바뀌었을 때 (숫자·그래프 다시 읽기) */
@@ -229,6 +308,81 @@ class Screensaver(
             .put("title", AppSettings.headerTitle)
             .toString()
 
+        /** [✎ 공지 수정] 버튼 위치 (CSS px). 버튼이 없으면 w=0 */
+        @JavascriptInterface
+        fun editRect(x: Double, y: Double, w: Double, h: Double, vw: Double) {
+            handler.post { editBtn = if (w > 0) doubleArrayOf(x, y, w, h) else null; if (vw > 0) pageW = vw }
+        }
+
+        /** 공지 수정 시작/끝 */
+        @JavascriptInterface
+        fun noticeEdit(on: Boolean) {
+            handler.post { if (active || !on) setEditing(on) }
+        }
+
+        /** 공지 입력란에 커서가 들어갔을 때 화면 키보드를 띄운다 */
+        @JavascriptInterface
+        fun showKeys() {
+            handler.post {
+                val wv = web ?: return@post
+                val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+                wv.requestFocus()
+                imm?.showSoftInput(wv, 0)
+            }
+        }
+
+        /** 공지 수정 비밀번호가 정해져 있는가 (없으면 페이지가 'TV 설정에서 먼저 정하세요' 안내) */
+        @JavascriptInterface
+        fun pinSet(): Boolean = AppSettings.noticePin.length == 6
+
+        /** 비밀번호 확인 → "ok" · "wrong:<남은 횟수>" · "locked:<초>" · "unset" (비밀번호는 페이지에 넘기지 않는다) */
+        @JavascriptInterface
+        fun checkPin(pin: String): String {
+            val want = AppSettings.noticePin
+            if (want.length != 6) return "unset"
+            val now = System.currentTimeMillis()
+            synchronized(this) {
+                if (now < pinLockUntil) return "locked:" + ((pinLockUntil - now) / 1000 + 1)
+                if (java.security.MessageDigest.isEqual(pin.trim().toByteArray(), want.toByteArray())) {
+                    pinFails = 0; pinOkUntil = now + 10 * 60_000; return "ok"
+                }
+                pinFails++
+                if (pinFails >= 5) { pinFails = 0; pinLockUntil = now + 60_000; return "locked:60" }
+                return "wrong:" + (5 - pinFails)
+            }
+        }
+
+        /** 공지 저장 → main/공지.txt (끝나면 페이지의 ssNoticeSaved 로 알려 줌) */
+        @JavascriptInterface
+        fun saveNotice(text: String) {
+            val app = activity.applicationContext
+            val path = "$folder/공지.txt"
+            if (System.currentTimeMillis() > pinOkUntil) {         // 비밀번호를 거치지 않았거나 너무 오래됨
+                handler.post { web?.evaluateJavascript("window.ssNoticeSaved&&ssNoticeSaved(false,${JSONObject.quote("비밀번호를 다시 입력하세요.")})", null) }
+                return
+            }
+            Thread {
+                val err = try {
+                    val data = text.replace("\r\n", "\n").toByteArray(Charsets.UTF_8)
+                    com.seyoungjo.tvdashboard.data.FileOps(app).put(path, data.size.toLong(), data.inputStream(), true)
+                    null
+                } catch (e: Exception) {
+                    Log.w(TAG, "notice save failed", e)
+                    e.message ?: e.javaClass.simpleName
+                }
+                handler.post {
+                    web?.evaluateJavascript("window.ssNoticeSaved&&ssNoticeSaved(${err == null},${JSONObject.quote(err ?: "")})", null)
+                    if (err == null) { pinOkUntil = 0; setEditing(false) }
+                }
+            }.start()
+        }
+
+        /** 사진: 페이지가 앞 장면(동영상 마지막 장면)을 깔았다 → 이제 동영상 칸을 내려도 끊김 없음 */
+        @JavascriptInterface
+        fun prevShown(seq: Int) {
+            handler.post { if (seq == ytSeq && webItem) { releasePlayer(); box.visibility = View.INVISIBLE } }
+        }
+
         /** 유튜브 한 편이 끝났거나(ok) 재생할 수 없을 때(!ok) → 다음 항목 */
         @JavascriptInterface
         fun ytDone(seq: Int, ok: Boolean) {
@@ -243,7 +397,7 @@ class Screensaver(
         /** 동영상 칸 위치 (CSS px) — 페이지 폭 vw 기준이라 WebView 실제 픽셀로 환산 */
         @JavascriptInterface
         fun videoRect(x: Double, y: Double, w: Double, h: Double, vw: Double, vh: Double) {
-            handler.post { placeBox(x, y, w, h, vw, vh) }
+            handler.post { if (vw > 0) pageW = vw; placeBox(x, y, w, h, vw, vh) }
         }
     }
 
@@ -258,11 +412,11 @@ class Screensaver(
         radiusPx = (22 * min(vw / 1920, vh / 1080) * k).toFloat()
         stagePx = (min(vw / 1920, vh / 1080) * k).toFloat()
         box.layoutParams = lp
-        box.visibility = if (items.isEmpty() || current?.youtube != null) View.INVISIBLE else View.VISIBLE
+        box.visibility = if (items.isEmpty() || webItem) View.INVISIBLE else View.VISIBLE
         mask.radius = radiusPx
         box.post {
             player?.let { fitVideo(it.videoWidth, it.videoHeight) }
-            if (active && player == null) play()
+            if (active && player == null && !webItem) play()     // 사진·유튜브는 페이지가 보여 주는 중 — 칸이 바뀌어도 다시 시작하지 않음
         }
     }
 
@@ -280,24 +434,47 @@ class Screensaver(
         }
         val item = list[index % list.size]
         current = item
+        fun opts(o: JSONObject) = o.put("crop", item.crop).put("align", item.align).put("fill", if (item.blur) "blur" else "color")
+            .put("color", String.format("#%06X", item.color and 0xFFFFFF)).put("loop", list.size == 1)
+            .put("custom", item.custom).put("base", if (item.cropBase) "crop" else "fit")
+            .put("scale", item.scale).put("halign", item.hAlign).put("offsetX", item.offsetX)
+            .put("valign", item.vAlign).put("offsetY", item.offsetY)
         if (item.youtube != null) {                      // 유튜브: 페이지가 재생
             releasePlayer()
+            webItem = true
             box.visibility = View.INVISIBLE
-            val o = JSONObject().put("seq", ++ytSeq).put("id", item.youtube).put("vertical", item.vertical)
-                .put("crop", item.crop).put("align", item.align).put("fill", if (item.blur) "blur" else "color")
-                .put("color", String.format("#%06X", item.color and 0xFFFFFF)).put("loop", list.size == 1)
-                .put("custom", item.custom).put("base", if (item.cropBase) "crop" else "fit")
-                .put("scale", item.scale).put("halign", item.hAlign).put("offsetX", item.offsetX)
-                .put("valign", item.vAlign).put("offsetY", item.offsetY)
+            val o = opts(JSONObject().put("seq", ++ytSeq).put("id", item.youtube).put("vertical", item.vertical))
             web?.evaluateJavascript("window.ssYoutube&&ssYoutube($o)", null)
             return
         }
         val f = item.file ?: run { next(); return }
+        if (item.image) {                                // 사진: 페이지가 전환 효과로 띄움
+            if (pageW <= 0) return                       // 페이지가 아직 준비 전 — 칸 위치를 알려 오면(placeBox) 다시 불린다
+            val seq = ++ytSeq
+            val o = opts(JSONObject().put("seq", seq).put("name", f.name).put("dur", item.duration).put("effect", item.effect))
+            val fromVideo = player != null && box.visibility == View.VISIBLE && box.width > 0
+            webItem = true
+            if (fromVideo) snapshotBox { prev ->         // 동영상 마지막 장면에서 사진으로 전환
+                if (seq != ytSeq || !active) return@snapshotBox
+                if (prev != null) o.put("prev", prev) else { releasePlayer(); box.visibility = View.INVISIBLE }
+                web?.evaluateJavascript("window.ssImage&&ssImage($o)", null)
+                handler.postDelayed({ if (seq == ytSeq && webItem && player != null) { releasePlayer(); box.visibility = View.INVISIBLE } }, 1500)
+            } else {
+                releasePlayer()
+                box.visibility = View.INVISIBLE
+                web?.evaluateJavascript("window.ssImage&&ssImage($o)", null)
+            }
+            return
+        }
         val s = surface
         if (s == null || box.width <= 0) return          // 칸·화면이 준비되면 다시 불린다
         ytSeq++
-        web?.evaluateJavascript("window.ssYoutubeStop&&ssYoutubeStop()", null)
+        val afterWeb = webItem                           // 사진·유튜브 다음: 동영상 칸을 서서히 나타나게
+        webItem = false
+        web?.evaluateJavascript("window.ssWebStop&&ssWebStop(${if (afterWeb) 900 else 0})", null)
         applyFill(item)
+        box.animate().cancel()
+        box.alpha = if (afterWeb) 0f else 1f
         box.visibility = View.VISIBLE
         releasePlayer()
         val mp = MediaPlayer()
@@ -314,6 +491,7 @@ class Screensaver(
                 errors = 0
                 fitVideo(it.videoWidth, it.videoHeight)
                 it.start()
+                if (box.alpha < 1f) box.animate().alpha(1f).setStartDelay(120).setDuration(550).start()
             }
             mp.setOnCompletionListener {
                 if (player !== it) return@setOnCompletionListener
@@ -329,6 +507,33 @@ class Screensaver(
         } catch (e: Exception) {
             Log.w(TAG, "video open failed: ${f.name}", e)
             next()
+        }
+    }
+
+    /** 동영상 칸에 보이는 그대로(블러 채움 포함)를 떠서 JPEG data URL 로 (Android 8+, 실패하면 null) */
+    private fun snapshotBox(done: (String?) -> Unit) {
+        if (Build.VERSION.SDK_INT < 26) { done(null); return }
+        try {
+            val loc = IntArray(2)
+            box.getLocationInWindow(loc)
+            var sc = 1f
+            var v: View? = box
+            while (v != null) { sc *= v.scaleX; v = v.parent as? View }
+            val w = (box.width * sc).roundToInt()
+            val h = (box.height * sc).roundToInt()
+            if (w <= 0 || h <= 0) { done(null); return }
+            val k = min(1f, 960f / max(w, h))
+            val bmp = Bitmap.createBitmap(max(1, (w * k).roundToInt()), max(1, (h * k).roundToInt()), Bitmap.Config.ARGB_8888)
+            android.view.PixelCopy.request(activity.window, android.graphics.Rect(loc[0], loc[1], loc[0] + w, loc[1] + h), bmp, { r ->
+                if (r != android.view.PixelCopy.SUCCESS) { bmp.recycle(); done(null); return@request }
+                val out = java.io.ByteArrayOutputStream()
+                bmp.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                bmp.recycle()
+                done("data:image/jpeg;base64," + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP))
+            }, handler)
+        } catch (e: Exception) {
+            Log.w(TAG, "snapshot failed", e)
+            done(null)
         }
     }
 

@@ -14,9 +14,12 @@ import java.io.File
  *  5) 버튼 선택 시 폴더의 index.html (없으면 index.htm) 표시
  *  6) 'main' 폴더는 메뉴가 아니라 화면보호기 (실적 JSON 4개 + 1.mp4 2.mp4 … )
  */
-/** 화면보호기 재생 항목: main 의 동영상 파일 또는 유튜브 영상, 영상별 표시 방식 */
+/** 화면보호기 재생 항목: main 의 동영상 · 사진 파일 또는 유튜브 영상, 항목별 표시 방식 */
 data class PlayItem(
     val file: File?,
+    val image: Boolean = false,       // 사진 (페이지가 보여 주고 전환 효과)
+    val duration: Int = 8,            // 사진: 보여 줄 시간(초)
+    val effect: String = "morph",     // 사진: 전환 효과 morph · shade · wipe · circle · blinds · random
     val youtube: String? = null,      // 유튜브 영상 id
     val vertical: Boolean = false,    // 쇼츠(세로 9:16)
     val crop: Boolean = false,        // true = 크롭(긴 쪽을 자름) / false = 확장(작은 쪽을 맞춤, 남는 곳 채움)
@@ -31,7 +34,7 @@ data class PlayItem(
     val vAlign: String = "center",    // 직접 조절 세로 기준: top · center · bottom
     val offsetY: Int = 0,             //   그 기준선에서 안쪽으로 px (가운데 기준은 + = 아래)
 ) {
-    val key: String get() = (file?.let { it.path + ":" + it.lastModified() } ?: "yt:$youtube") + ":$crop:$custom:$cropBase:$align:$blur:$color:$scale:$hAlign:$offsetX:$vAlign:$offsetY"
+    val key: String get() = (file?.let { it.path + ":" + it.lastModified() } ?: "yt:$youtube") + ":$crop:$custom:$cropBase:$align:$blur:$color:$scale:$hAlign:$offsetX:$vAlign:$offsetY:$duration:$effect"
 }
 
 data class MenuEntry(
@@ -45,6 +48,9 @@ data class MenuEntry(
 object MenuScanner {
     val VIDEO_EXT = setOf("mp4", "m4v", "webm", "mkv", "3gp", "mov", "ts")
     val ICON_EXT = setOf("png", "jpg", "jpeg", "webp")
+    val PHOTO_EXT = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
+    val EFFECTS = setOf("morph", "shade", "wipe", "circle", "blinds", "random")
+    private val NOT_PHOTO = setOf("icon", "대표이미지", "logo")       // main 안이라도 사진 목록에 넣지 않는 이름
     val ICON_NAMES = listOf("icon", "대표이미지")
     const val MAIN_FOLDER = "main"
     const val ORDER_FILE = "메뉴순서.txt"
@@ -102,8 +108,19 @@ object MenuScanner {
         dir?.listFiles()?.filter { it.isFile && it.extension.lowercase() in VIDEO_EXT && !it.name.startsWith(".") }
             ?.sortedWith { a, b -> naturalCompare(a.name, b.name) } ?: emptyList()
 
+    /** 화면보호기 재생 파일: main 안의 동영상 + 사진, 이름 오름차순 (icon · logo 그림과 '_' 로 시작하는 파일 제외) */
+    fun mainMedia(dir: File?): List<File> =
+        dir?.listFiles()?.filter {
+            val e = it.extension.lowercase()
+            it.isFile && !it.name.startsWith(".") && !it.name.startsWith("_") &&
+                (e in VIDEO_EXT || (e in PHOTO_EXT && it.nameWithoutExtension.lowercase() !in NOT_PHOTO))
+        }?.sortedWith { a, b -> naturalCompare(a.name, b.name) } ?: emptyList()
+
+    fun isPhoto(f: File): Boolean = f.extension.lowercase() in PHOTO_EXT
+
     /**
      * 화면보호기 재생 목록 (main/설정.json 의 "playlist", PC 프로그램에서 정함).
+     *  사진: "dur": 보여 줄 초(기본 8), "effect": morph|shade|wipe|circle|blinds|random (전환 효과)
      *  [{ "src": "1.mp4" 또는 유튜브 주소, "fit": "crop"|"fit", "align": "center"|"top"|"bottom",
      *     "fill": "blur"|"color", "color": "#000000" }]
      *  직접 조절: "fit": "custom", "base": "crop"|"fit"(100% 기준), "scale": 100(%),
@@ -111,7 +128,7 @@ object MenuScanner {
      * 목록에 없는 main 의 동영상은 그 뒤에 이름 오름차순으로 붙는다 (자동 업로드 .bat 으로 올린 것 등).
      */
     fun mainPlaylist(dir: File?): List<PlayItem> {
-        val files = mainVideos(dir)
+        val files = mainMedia(dir)
         val conf = try {
             val f = dir?.let { File(it, "설정.json") }
             if (f != null && f.isFile) org.json.JSONObject(f.readText(Charsets.UTF_8).removePrefix("\uFEFF")) else org.json.JSONObject()
@@ -131,6 +148,8 @@ object MenuScanner {
             vAlign = o?.optString("valign")?.takeIf { it in setOf("top", "bottom", "center") } ?: "center",
             offsetX = (o?.optInt("offsetX", 0) ?: 0).coerceIn(-4000, 4000),
             offsetY = (o?.optInt("offsetY", 0) ?: 0).coerceIn(-4000, 4000),
+            duration = (o?.optInt("dur", 8) ?: 8).coerceIn(2, 3600),
+            effect = o?.optString("effect")?.takeIf { it in EFFECTS } ?: "morph",
         )
         val out = ArrayList<PlayItem>()
         val used = HashSet<String>()
@@ -143,10 +162,10 @@ object MenuScanner {
                 out.add(opts(o, PlayItem(file = null, youtube = yt, vertical = src.contains("/shorts/") || o.optBoolean("vertical"))))
             } else {
                 val f = files.firstOrNull { it.name == src } ?: continue
-                if (used.add(f.name)) out.add(opts(o, PlayItem(file = f)))
+                if (used.add(f.name)) out.add(opts(o, PlayItem(file = f, image = isPhoto(f))))
             }
         }
-        for (f in files) if (f.name !in used) out.add(opts(null, PlayItem(file = f)))
+        for (f in files) if (f.name !in used) out.add(opts(null, PlayItem(file = f, image = isPhoto(f))))
         return out
     }
 

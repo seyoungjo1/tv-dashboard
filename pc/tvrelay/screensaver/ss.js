@@ -37,6 +37,13 @@
     if (!TV) return;
     var r = $('video').getBoundingClientRect();
     try { TV.videoRect(r.left, r.top, r.width, r.height, innerWidth, innerHeight); } catch (e) {}
+    reportEdit();
+  }
+  /** [✎ 공지 수정] 버튼 위치 → TV 앱 (그 버튼을 누른 터치는 대시보드로 넘어가지 않고 이 페이지로 온다) */
+  function reportEdit() {
+    if (!TV || !TV.editRect) return;
+    var b = $('noticeEdit'), r = b.getBoundingClientRect();
+    try { TV.editRect(r.left, r.top, b.offsetParent ? r.width : 0, r.height, innerWidth); } catch (e) {}
   }
 
   // ── 시계 ──
@@ -250,7 +257,7 @@
     return { message: Q.get('message') || '화면을 터치하면 대시보드로 들어갑니다', videos: 0, folder: Q.get('folder') || 'main', title: Q.get('title') || '' };
   }
 
-  var lastKey = '', lastA = null, cfg = {};
+  var lastKey = '', lastA = null, cfg = {}, noticeText = '';
   function paint(a) {
     if (!promptOn) {
       $('hint').textContent = cfg.message || '';
@@ -262,6 +269,7 @@
       : (a[4] || '').replace(/^\uFEFF/, '').split(/\r?\n/);
     lines = lines.map(function (s) { return String(s).trim(); }).filter(Boolean).slice(0, 5);
     var nb = $('notice');
+    noticeText = (a[4] || '').replace(/^\uFEFF/, '').replace(/\s+$/, '');
     nb.className = 'card' + (lines.length ? (lines.length >= 4 ? ' n' + lines.length : '') : ' none');
     nb.innerHTML = '';
     lines.forEach(function (t) { var d = document.createElement('div'); d.className = 'row'; d.textContent = t; nb.appendChild(d); });
@@ -270,9 +278,9 @@
     $('video').classList.toggle('playing', !!TV && (cfg.videos || 0) > 0);
     if (!TV && vids) {
       $('videoPh').innerHTML = '<div>' + (vids.length
-        ? '▶ 동영상 ' + vids.length + '개 (TV 에서 재생)' +
+        ? '▶ 동영상·사진 ' + vids.length + '개 (TV 에서 재생)' +
           '<br><span style="font-size:.85em;opacity:.8">' + vids.map(function (n) { return n.replace(/[&<>]/g, ''); }).join(' → ') + '</span>'
-        : 'main 폴더에 1.mp4, 2.mp4 … 를 넣으면<br>여기에 순서대로 재생됩니다') + '</div>';
+        : 'main 폴더에 1.mp4, 2.jpg … 를 넣으면<br>여기에 순서대로 재생됩니다') + '</div>';
     }
     requestAnimationFrame(reportVideo);
     return lines;
@@ -334,7 +342,8 @@
     if (!e.data || !e.data.ss) return;
     var d = e.data.ss;
     if (d.play || d.stop) {
-      pvStop(); window.ssYoutubeStop();
+      if (d.play && d.play.kind === 'image') { window.ssImage(d.play); return; }   // 사진: 앞 장면에서 전환
+      pvStop(); window.ssWebStop(d.stop ? 0 : 900);
       if (d.stop) { $('video').classList.remove('playing'); return; }
       if (d.play.kind === 'yt') window.ssYoutube(d.play); else pvFile(d.play);
       return;
@@ -381,9 +390,16 @@
     if (ytPlayer) { try { ytPlayer.destroy(); } catch (e) {} ytPlayer = null; }
     var w = $('yt'); if (w) w.remove();
   };
+  /** 페이지가 보여 주던 것(유튜브 · 사진)을 내린다. delay 만큼 사진을 남겨 두면 그 위로 다음 동영상이 서서히 나타난다 */
+  window.ssWebStop = function (delay) {
+    window.ssYoutubeStop();
+    clearTimeout(imgTimer); imgCur = null;
+    clearLayers(delay || 0);
+  };
   /** o = {seq, id, vertical, crop, align: top|center|bottom, fill: blur|color, color, loop} */
   window.ssYoutube = function (o) {
     window.ssYoutubeStop();
+    clearTimeout(imgTimer); imgCur = null;              // 사진은 유튜브가 재생을 시작하면 내린다
     ytCur = o;
     var box = $('video'), bw = box.clientWidth, bh = box.clientHeight;
     var ar = o.vertical ? 9 / 16 : 16 / 9;                     // 영상 가로/세로
@@ -425,15 +441,250 @@
         events: {
           onReady: function (e) { try { e.target.mute(); noCaptions(e.target); e.target.playVideo(); } catch (er) {} },
           onApiChange: function (e) { noCaptions(e.target); },
-          onStateChange: function (e) { if (e.data === 1) { clearTimeout(ytTimer); noCaptions(e.target); } if (e.data === 0 && !o.loop) ytDone(true); },
+          onStateChange: function (e) { if (e.data === 1) { clearTimeout(ytTimer); noCaptions(e.target); clearLayers(400); } if (e.data === 0 && !o.loop) ytDone(true); },
           onError: function () { ytDone(false); }
         }
       });
     });
   };
 
+  // ── 사진: 전환 효과로 띄우고 정한 초만큼 보여 준 뒤 다음 항목 ──
+  //    o = {seq, name | url, dur(초), effect: morph|shade|wipe|circle|blinds|random, prev(앞 장면 data URL), loop,
+  //         crop · align · fill · color · custom · base · scale · halign · offsetX · valign · offsetY (동영상과 같은 표시 방식)}
+  var imgTimer = 0, imgCur = null;
+  var EFFECTS = ['morph', 'shade', 'wipe', 'circle', 'blinds'];
+  function webDone(seq, ok) {
+    if (TV) { try { TV.ytDone(seq, ok); } catch (e) {} }
+    else if (PREVIEW) parent.postMessage({ ssEnded: seq, ok: ok }, '*');
+  }
+  /** 크기·위치 (칸 안, px): 크롭 = 꽉 채우고 넘치는 쪽 맞춤 / 확장 = 전체 보임 / 직접 조절 = 기준 × % + 기준선 px */
+  function placeRect(o, bw, bh, ar) {
+    var cover = Math.max(bw / ar, bh), contain = Math.min(bw / ar, bh);
+    var h = o.custom ? (o.base === 'fit' ? contain : cover) * (o.scale || 100) / 100 : o.crop ? cover : contain, w = h * ar;
+    var x = (bw - w) / 2, y = (bh - h) / 2;
+    if (o.crop && !o.custom) {
+      if (h > bh + .5) y = o.align === 'top' ? 0 : o.align === 'bottom' ? bh - h : y;
+      else x = o.align === 'top' ? 0 : o.align === 'bottom' ? bw - w : x;
+    }
+    if (o.custom) { var c = customPos(o, bw, bh, w, h); x = c[0]; y = c[1]; }
+    return [x, y, w, h];
+  }
+  function clearLayers(delay) {
+    var box = $('video'), ls = [].slice.call(box.querySelectorAll('.sslayer'));
+    ls.forEach(function (l) {
+      l.classList.remove('sslayer'); l.classList.add('gone');
+      var bye = function () { if (l._dispose) l._dispose(); l.remove(); };
+      if (delay) { l.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, delay: delay, fill: 'forwards' }).onfinish = bye; }
+      else bye();
+    });
+  }
+  function buildLayer(o, img) {
+    var box = $('video'), bw = box.clientWidth, bh = box.clientHeight;
+    var L = document.createElement('div');
+    L.className = 'sslayer ssimg';
+    L.style.background = !o.crop && o.fill === 'color' ? o.color : '#0d1620';
+    if ((!o.crop || o.custom) && o.fill !== 'color') {
+      var bg = document.createElement('img'); bg.className = 'ytbg'; bg.src = img.src; L.appendChild(bg);
+    }
+    var r = placeRect(o, bw, bh, (img.naturalWidth || 16) / (img.naturalHeight || 9));
+    img.className = 'imgfg';
+    img.style.cssText = 'left:' + r[0] + 'px;top:' + r[1] + 'px;width:' + r[2] + 'px;height:' + r[3] + 'px';
+    L.appendChild(img);
+    return L;
+  }
+  var EASE = 'cubic-bezier(.45,0,.2,1)';
+  /** 새 층 L 이 올라오며 앞 장면(olds)을 바꾼다 → 걸리는 시간(ms) */
+  function transition(L, olds, eff) {
+    var box = $('video'), bw = box.clientWidth;
+    if (eff === 'random' || EFFECTS.indexOf(eff) < 0) eff = eff === 'random' ? EFFECTS[Math.floor(Math.random() * EFFECTS.length)] : 'morph';
+    var fadeOld = function (kf, opt) { olds.forEach(function (o) { o.animate(kf, Object.assign({ fill: 'forwards' }, opt)); }); };
+    if (!olds.length) { L.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 700, easing: EASE }); return 700; }
+    if (eff === 'morph') {                        // 모핑: 앞 장면은 작아지며 흐려지고, 새 사진은 크게 번진 채로 들어와 또렷해짐
+      fadeOld([{ opacity: 1, transform: 'scale(1)', filter: 'blur(0px)' }, { opacity: 0, transform: 'scale(.88)', filter: 'blur(28px)' }], { duration: 1300, easing: EASE });
+      L.animate([{ opacity: 0, transform: 'scale(1.18)', filter: 'blur(28px) saturate(1.6)' }, { opacity: 1, transform: 'scale(1)', filter: 'blur(0px) saturate(1)' }], { duration: 1300, easing: EASE });
+      return 1300;
+    }
+    if (eff === 'shade') {                        // 쉐이딩: 앞 장면이 어둠 속으로 가라앉고, 새 사진이 빛을 받으며 떠오름
+      fadeOld([{ filter: 'brightness(1) saturate(1)' }, { filter: 'brightness(.04) saturate(.3)' }], { duration: 750, easing: 'ease-in' });
+      L.animate([{ opacity: 0, filter: 'brightness(0)' }, { opacity: 1, filter: 'brightness(0)', offset: .02 },
+                 { filter: 'brightness(1.35) contrast(1.15)', offset: .7 }, { opacity: 1, filter: 'brightness(1) contrast(1)' }],
+                { duration: 1100, delay: 650, easing: 'ease-out', fill: 'backwards' });
+      return 1750;
+    }
+    if (eff === 'wipe') {                         // 닦아내기: 빛나는 막대가 지나가며 새 사진을 닦아 냄
+      L.animate([{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)' }], { duration: 1150, easing: EASE });
+      var bar = document.createElement('div'); bar.className = 'sswipe'; box.appendChild(bar);
+      bar.animate([{ transform: 'translateX(-140px)' }, { transform: 'translateX(' + (bw) + 'px)' }], { duration: 1150, easing: EASE }).onfinish = function () { bar.remove(); };
+      return 1150;
+    }
+    if (eff === 'circle') {                       // 원형: 가운데에서 동그랗게 펼쳐짐
+      L.animate([{ clipPath: 'circle(0% at 50% 50%)', transform: 'scale(1.1)' }, { clipPath: 'circle(75% at 50% 50%)', transform: 'scale(1)' }], { duration: 1250, easing: EASE });
+      fadeOld([{ filter: 'brightness(1)' }, { filter: 'brightness(.45)' }], { duration: 1250 });
+      return 1250;
+    }
+    // 블라인드: 세로 띠들이 차례로 열리며 새 사진
+    var N = 9, w = 100 / N, T = 650 + (N - 1) * 75;
+    L.style.visibility = 'hidden';
+    for (var i = 0; i < N; i++) {
+      var st = L.cloneNode(true); st.style.visibility = 'visible'; st.classList.remove('sslayer'); st.classList.add('strip');
+      box.appendChild(st);
+      var a = i * w, m = a + w / 2;
+      st.animate([{ clipPath: 'inset(0 ' + (100 - m) + '% 0 ' + m + '%)' }, { clipPath: 'inset(0 ' + (100 - a - w) + '% 0 ' + a + '%)' }],
+                 { duration: 650, delay: i * 75, easing: EASE, fill: 'backwards' });
+    }
+    setTimeout(function () { L.style.visibility = 'visible'; [].slice.call(box.querySelectorAll('.strip')).forEach(function (x) { x.remove(); }); }, T + 30);
+    return T;
+  }
+  window.ssImage = function (o) {
+    clearTimeout(imgTimer);
+    imgCur = o;
+    var box = $('video');
+    box.classList.add('playing');
+    var olds = [].slice.call(box.querySelectorAll('.sslayer'));
+    var yt = $('yt');                              // 유튜브 → 사진: 멈추고 앞 장면으로
+    if (yt) {
+      var pl = ytPlayer; ytPlayer = null; ytCur = null; clearTimeout(ytTimer);
+      try { pl && pl.pauseVideo(); } catch (e) {}
+      yt.id = ''; yt.classList.add('sslayer'); yt._dispose = function () { try { pl && pl.destroy(); } catch (e) {} };
+      olds.push(yt);
+    }
+    var pv = $('pvv');                             // PC 미리보기의 동영상 → 사진
+    if (pv) { pv.id = ''; pv.classList.add('sslayer'); pv._dispose = function () { pv.querySelectorAll('video').forEach(function (v) { try { v.pause(); } catch (e) {} }); }; olds.push(pv); }
+    if (o.prev) {                                  // TV: 동영상의 마지막 장면을 깔고 → 동영상 칸을 내림
+      var P = document.createElement('div'); P.className = 'sslayer prev';
+      var pi = document.createElement('img'); pi.src = o.prev; P.appendChild(pi);
+      box.appendChild(P); olds.push(P);
+      pi.decode ? pi.decode().then(function () { if (TV && TV.prevShown) TV.prevShown(o.seq); }, function () { if (TV && TV.prevShown) TV.prevShown(o.seq); })
+                : setTimeout(function () { if (TV && TV.prevShown) TV.prevShown(o.seq); }, 60);
+    }
+    var img = new Image();
+    img.decoding = 'async';
+    img.onload = function () {
+      if (imgCur !== o) return;
+      var L = buildLayer(o, img);
+      box.appendChild(L);
+      var T = transition(L, olds, o.effect);
+      setTimeout(function () { olds.forEach(function (l) { if (l._dispose) l._dispose(); l.remove(); }); }, T + 80);
+      if (!o.loop) imgTimer = setTimeout(function () { if (imgCur === o) { imgCur = null; webDone(o.seq, true); } }, T + Math.max(2, +o.dur || 8) * 1000);
+    };
+    img.onerror = function () {
+      if (imgCur !== o) return;
+      imgCur = null;
+      olds.forEach(function (l) { if (l._dispose) l._dispose(); l.remove(); });
+      webDone(o.seq, false);
+    };
+    img.src = o.url || (BASE + encodeURIComponent(o.name));
+  };
+
+  // ── 공지 간편 수정 (TV): [✎ 공지 수정] → 위쪽 팝업 ① 숫자패드로 비밀번호 6자리 ② 공지 입력 (화면 키보드) → 저장 ──
+  var ntOpen = false, ntIdle = 0;
+  function ntClose() {
+    ntOpen = false; clearTimeout(ntIdle);
+    ['ntDim', 'ntPop'].forEach(function (id) { var e = $(id); if (e) e.remove(); });
+    $('noticeEdit').classList.remove('hide');
+    if (TV && TV.noticeEdit) { try { TV.noticeEdit(false); } catch (e) {} }
+    reportEdit();
+  }
+  function ntTouch() { clearTimeout(ntIdle); ntIdle = setTimeout(ntClose, 3 * 60 * 1000); }   // 3분 동안 손대지 않으면 닫음
+  function ntPop(html) {
+    var p = $('ntPop');
+    if (!p) {
+      var d = document.createElement('div'); d.id = 'ntDim'; $('stage').appendChild(d);
+      p = document.createElement('div'); p.id = 'ntPop'; $('stage').appendChild(p);
+      p.addEventListener('pointerdown', ntTouch);
+    }
+    p.innerHTML = html;
+    return p;
+  }
+  function ntPin() {
+    if (TV.pinSet && !TV.pinSet()) {
+      ntPop('<h3>공지사항 수정</h3><div class="sub err">공지 수정 비밀번호가 정해져 있지 않습니다.<br>TV ⚙ 설정 → \'공지 수정 비밀번호\' 또는 PC 프로그램의 TV 설정에서 숫자 6자리로 정하세요.</div>' +
+            '<div class="edbar"><span class="edhint"></span><button type="button" id="ntX">닫기</button></div>');
+      $('ntX').onclick = ntClose;
+      return;
+    }
+    var pin = '';
+    var p = ntPop('<h3>공지사항 수정</h3><div class="sub" id="ntSub">공지 수정 비밀번호 6자리를 입력하세요</div>' +
+      '<div class="pinrow"><div class="dots" id="ntDots">' + '<i></i>'.repeat(6) + '</div></div>' +
+      '<div class="pad">' + ['1', '2', '3', '4', '5', '지우기', '6', '7', '8', '9', '0', '취소'].map(function (k) {
+        return '<button type="button" data-k="' + k + '" class="' + (k === '지우기' ? 'fn' : k === '취소' ? 'fn' : '') + '">' + k + '</button>';
+      }).join('') + '</div>');
+    var dots = function () { [].forEach.call($('ntDots').children, function (d, i) { d.className = i < pin.length ? 'on' : ''; }); };
+    var check = function () {
+      var r = 'wrong:0';
+      try { r = String(TV.checkPin(pin)); } catch (e) {}
+      if (r === 'ok') return ntEditor();
+      pin = ''; dots();
+      var sub = $('ntSub'); sub.className = 'sub err';
+      sub.textContent = r.indexOf('locked') === 0 ? '여러 번 틀려서 잠겼습니다. ' + r.split(':')[1] + '초 뒤에 다시 하세요.'
+        : r === 'unset' ? '공지 수정 비밀번호가 정해져 있지 않습니다.' : '비밀번호가 틀렸습니다. (남은 횟수 ' + r.split(':')[1] + '번)';
+      p.classList.remove('shake'); void p.offsetWidth; p.classList.add('shake');
+    };
+    p.querySelector('.pad').addEventListener('click', function (e) {
+      var k = e.target.dataset && e.target.dataset.k; if (!k) return;
+      if (k === '취소') return ntClose();
+      if (k === '지우기') pin = pin.slice(0, -1);
+      else if (pin.length < 6) pin += k;
+      dots();
+      if (pin.length === 6) setTimeout(check, 120);
+    });
+    p.addEventListener('keydown', function (e) {             // 외부 키보드 숫자도
+      if (!$('ntDots')) return;
+      if (/^[0-9]$/.test(e.key) && pin.length < 6) { pin += e.key; dots(); if (pin.length === 6) setTimeout(check, 120); }
+      else if (e.key === 'Backspace') { pin = pin.slice(0, -1); dots(); }
+      else if (e.key === 'Escape') ntClose();
+    });
+  }
+  function ntEditor() {
+    ntPop('<h3>공지사항 수정</h3><div class="sub">한 줄에 공지 하나 · 위에서부터 5개까지 화면에 표시됩니다</div>' +
+      '<textarea id="ntTa" spellcheck="false" placeholder="예) 10월 정기교육은 14일에 진행됩니다."></textarea>' +
+      '<div class="edbar"><span class="edhint" id="ntHint"></span><button type="button" id="ntCancel">취소</button><button type="button" class="save" id="ntSave">저장</button></div>');
+    var ta = $('ntTa');
+    ta.value = noticeText;
+    var count = function () {
+      var n = ta.value.split('\n').filter(function (s) { return s.trim(); }).length;
+      $('ntHint').className = 'edhint'; $('ntHint').textContent = n ? '공지 ' + n + '개' + (n > 5 ? ' — 5개까지만 표시됩니다' : '') : '비우고 저장하면 공지 칸이 사라집니다';
+    };
+    count();
+    ta.addEventListener('input', function () { count(); ntTouch(); });
+    ta.addEventListener('focus', function () { if (TV && TV.showKeys) TV.showKeys(); });
+    ta.addEventListener('keydown', function (e) {
+      ntTouch();
+      if (e.key === 'Escape') ntClose();
+      else if ((e.ctrlKey || e.metaKey) && (e.key === 'Enter' || e.key === 's')) { e.preventDefault(); $('ntSave').click(); }
+    });
+    $('ntCancel').onclick = ntClose;
+    $('ntSave').onclick = function () {
+      $('ntSave').disabled = $('ntCancel').disabled = true;
+      $('ntHint').textContent = '저장하는 중…';
+      var t = ta.value.split('\n').map(function (s) { return s.replace(/\s+$/, ''); }).join('\n').replace(/^\n+|\n+$/g, '');
+      try { TV.saveNotice(t ? t + '\n' : ''); } catch (e) { window.ssNoticeSaved(false, e.message); }
+    };
+    setTimeout(function () { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); if (TV && TV.showKeys) TV.showKeys(); }, 60);
+  }
+  $('noticeEdit').addEventListener('click', function () {
+    if (!TV || ntOpen) return;
+    ntOpen = true; ntTouch();
+    $('noticeEdit').classList.add('hide');
+    try { TV.noticeEdit(true); } catch (e) {}
+    ntPin();
+  });
+  window.ssNoticeSaved = function (ok, msg) {
+    if (!ok) {
+      var h = $('ntHint'); if (h) { h.className = 'edhint err'; h.textContent = '저장하지 못했습니다: ' + msg; }
+      if ($('ntSave')) $('ntSave').disabled = $('ntCancel').disabled = false;
+      return;
+    }
+    var t = $('ntTa') ? $('ntTa').value : '';
+    ntClose();
+    if (lastA) { lastA[4] = t; paint(lastA); }
+    promptOn = true; $('hint').textContent = '공지사항을 저장했습니다'; $('hint').className = 'prompt';
+    setTimeout(function () { if ($('hint').textContent === '공지사항을 저장했습니다') window.ssPrompt(''); }, 3000);
+  };
+  window.ssNoticeCancel = function () { if (ntOpen) ntClose(); };
+
   // TV 앱이 부른다: 화면보호기를 다시 띄울 때(show) · main 폴더가 바뀌었을 때(refresh)
-  window.ssShow = function () { load(true); };
+  window.ssShow = function () { if (ntOpen) ntClose(); load(true); };
   window.ssRefresh = function () { load(false); };
   // 한 번 터치했을 때 TV 앱이 부른다: 아래 멘트를 '한 번 더 눌러 주세요' 로 잠시 바꾼다 (빈 값이면 원래대로)
   var promptOn = false;
