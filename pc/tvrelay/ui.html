@@ -905,6 +905,8 @@
       // 동영상·사진: 목록에서 뺀 파일은 삭제, 새 파일은 원래 이름 그대로 올리기 (같은 이름이면 덮어씀). 순서는 playlist 가 정한다
       const keep = new Set(ssVids.map(target).filter(Boolean));            // 유튜브 항목은 파일이 아님
       kids(dir).filter(k => !k.d && isMedia(base(k.p)) && !keep.has(base(k.p))).forEach(k => ops.push({ op: 'delete', path: k.p }));
+      // 예전 버전이 이름을 바꾸다 남긴 임시 파일(_ss_…)은 재생 목록에 안 보이므로 같이 지운다
+      kids(dir).filter(k => !k.d && /^_ss_/.test(base(k.p))).forEach(k => ops.push({ op: 'delete', path: k.p }));
       for (const v of ssVids) if (v.file) { say((isPhoto(v) ? '사진' : '동영상') + ' 준비 중… ' + v.file.name); const st = await api('PUT', '/api/stage', v.file, true); ops.push({ op: 'put', path: dir + '/' + target(v), stage: st.id }); }
       const txt = new File([lines.join('\n') + (lines.length ? '\n' : '')], '공지.txt', { type: 'text/plain' });
       const js = new File([JSON.stringify(conf, null, 2)], '설정.json', { type: 'application/json' });
