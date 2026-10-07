@@ -548,7 +548,7 @@ class Api:
             for p in [p for p in local if p not in tree]:  # TV 에서 지워진 파일은 백업에서도 지움
                 backup.record_delete(self.root, tv, p)
             total_mb = sum(int(tree[p].get("s") or 0) for p in need) / 1048576
-            self.bk.update(total=len(need), msg="TV 에서 %d개(%.1f MB) 받는 중…" % (len(need), total_mb))
+            self.bk.update(total=len(need), msg="백업 파일 넣는 중… TV 에서 %d개(%.1f MB) 받기" % (len(need), total_mb))
             relay = self.relay()
             group: list[str] = []
             size = 0
@@ -585,7 +585,7 @@ class Api:
                 group.append(p)
                 size += n
             flush()
-            self.bk["msg"] = ("백업 완료 — %d개 받음" % (len(need) - len(fails)) if need else "백업 완료 — TV 와 이미 같습니다") + \
+            self.bk["msg"] = ("백업 파일 넣기 완료 — %d개 받음" % (len(need) - len(fails)) if need else "백업 파일 넣기 완료 — TV 와 이미 같습니다") + \
                 (" · 받지 못한 파일 %d개: %s" % (len(fails), ", ".join(fails[:3])) if fails else "")
             echo(self.bk["msg"])
         return self._bk_run("pull", go)
@@ -606,7 +606,7 @@ class Api:
             g_ops = [grants.grant_op(g) for g in data.values() if g.get("status") == "active"]
             parts = list(backup.batches(items))
             total_mb = sum(f.stat().st_size for _, f in items) / 1048576
-            self.bk.update(total=len(items), msg="새 TV 로 %d개(%.1f MB) 올리는 중…" % (len(items), total_mb))
+            self.bk.update(total=len(items), msg="백업 파일 보내는 중… %d개(%.1f MB)" % (len(items), total_mb))
             relay = self.relay()
             vers = versions.load(self.root, self._cur_tv())
             sent_mb = 0.0
@@ -615,7 +615,7 @@ class Api:
                 job = Job()
                 part_mb = sum(f.stat().st_size for _, f in part) / 1048576
                 names = ", ".join(p.rsplit("/", 1)[-1] for p, _ in part[:3]) + (" 외 %d개" % (len(part) - 3) if len(part) > 3 else "")
-                self.bk["msg"] = "새 TV 로 올리는 중… %.1f/%.1f MB · 지금: %s" % (sent_mb, total_mb, names)
+                self.bk["msg"] = "백업 파일 보내는 중… %.1f/%.1f MB · 지금: %s" % (sent_mb, total_mb, names)
                 for p, f in part:
                     blob = f.read_bytes()
                     job.put(p, blob, True)
@@ -628,10 +628,10 @@ class Api:
                 bad = [x for x in r.get("results", []) if not x.get("ok")]
                 if bad:
                     fails.extend("%s(%s)" % (x.get("path"), x.get("error")) for x in bad)
-                    echo("복원 중 실패 %d개: %s" % (len(bad), ", ".join(fails[-len(bad):][:5])))
+                    echo("백업 파일 보내기 중 실패 %d개: %s" % (len(bad), ", ".join(fails[-len(bad):][:5])))
                 self.bk["done"] += len(part)
                 sent_mb += part_mb
-                self.bk["msg"] = "새 TV 로 올리는 중… %.1f/%.1f MB" % (sent_mb, total_mb)
+                self.bk["msg"] = "백업 파일 보내는 중… %.1f/%.1f MB" % (sent_mb, total_mb)
             versions.save(self.root, vers, self._cur_tv())
             if src != tv:                                   # 다른 TV 의 백업을 올렸으면 이 TV 의 백업으로도 복사
                 for p, f in items:
@@ -652,9 +652,9 @@ class Api:
                 r = relay.wait(relay.submit(job), timeout=600)
                 if r is None:
                     raise ValueError("TV 응답이 없습니다 (파일은 모두 올라감) — 다시 누르면 설정만 적용합니다")
-            self.bk["msg"] = "복원 완료 — 파일 %d개%s%s%s" % (len(items) - len(fails), " · TV 설정" if m.get("settings") else "",
+            self.bk["msg"] = "백업 파일 보내기 완료 — 파일 %d개%s%s%s" % (len(items) - len(fails), " · TV 설정" if m.get("settings") else "",
                                                          " · 직원용 도구 %d개" % len(g_ops) if g_ops else "",
-                                                         " · 올리지 못한 파일 %d개: %s" % (len(fails), ", ".join(fails[:3])) if fails else "")
+                                                         " · 보내지 못한 파일 %d개: %s" % (len(fails), ", ".join(fails[:3])) if fails else "")
             echo(self.bk["msg"])
         r = self._bk_run("restore", go)
         r["from"] = src
