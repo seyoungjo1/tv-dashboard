@@ -48,8 +48,14 @@ main { position: absolute; left: 38px; right: 38px; top: 122px; bottom: 82px; di
 .nv small { font-size: 27px; font-weight: 600; margin-left: 4px; color: #3b4855; }
 .badge { margin-top: 12px; height: 46px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; }
 .badge:empty { visibility: hidden; }
-#sales .badge { background: #fdeee2; color: #e8731c; }
-#prod .badge { background: #e4efff; color: #2f74e0; }
+/* 배지 색은 항목 색(현황판.json)으로 ss.js 가 칠한다 */
+/* 항목이 3·4개면 숫자·제목을 줄여 칸에 맞춘다 */
+#perf.p3 .nv .count { font-size: 32px; } #perf.p3 .nv small { font-size: 19px; } #perf.p3 .half h2 { font-size: 27px; } #perf.p3 .badge { font-size: 18px; height: 38px; }
+#perf.p3 .nl { font-size: 20px; } #perf.p3 .n + .n { padding-left: 12px; } #perf.p3 .n { padding-right: 8px; } #perf.p3 .vline { margin: 30px 14px 10px; }
+#perf.p4 .nv .count { font-size: 26px; } #perf.p4 .nv small { font-size: 16px; } #perf.p4 .half h2 { font-size: 23px; } #perf.p4 .badge { font-size: 15px; height: 32px; }
+#perf.p4 .nl { font-size: 17px; } #perf.p4 .n + .n { padding-left: 8px; } #perf.p4 .n { padding-right: 4px; } #perf.p4 .vline { margin: 30px 8px 10px; }
+#perf.p3 .n, #perf.p4 .n { min-width: 0; } #perf.p3 .badge, #perf.p4 .badge { white-space: nowrap; overflow: hidden; padding: 0 6px; }
+#perf.p3 .nv, #perf.p4 .nv { overflow: hidden; }
 .badge.low { filter: saturate(.6); opacity: .85; }
 /* 그래프 칸: 크기는 칸이 정하고(내용과 무관), 그 크기로 SVG 를 그린다 — 칸이 바뀌면 다시 그림 */
 .chartbox { flex: 1; min-height: 60px; position: relative; margin-top: 8px; }
@@ -155,8 +161,6 @@ html.dark .n + .n { background: none; }
 html.dark .asof, html.dark .empty { color: #8592a1; }
 html.dark .nl { color: #a9b5c2; }
 html.dark .nv small { color: #b7c2ce; }
-html.dark #sales .badge { background: #3a2617; color: #ff9a4d; }
-html.dark #prod .badge { background: #17294a; color: #6aa5ff; }
 html.dark #video { box-shadow: 0 6px 22px rgba(0, 0, 0, .5); }
 html.dark #hint { color: #b7c2ce; }
 html.dark #hint.prompt { color: #5fb0ff; }

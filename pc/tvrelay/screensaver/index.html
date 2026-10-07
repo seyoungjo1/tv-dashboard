@@ -6,6 +6,7 @@
 <title>화면보호기</title>
 <!-- 대상 오산공장 Dashboard — 화면보호기 (자료/main 폴더가 있으면 대기 화면으로 표시)
      main/생산.json · sd.json · fi.json · plan.json  실적 대시보드 생성기의 JSON 4개 그대로
+     main/현황판.json (선택)  항목 정의 — 어떤 JSON 을 어떤 제목·단위·색·비교(전년비/목표)로 보여 줄지 (전력량 등 추가, 앱 업데이트 없이)
      main/1.mp4 2.jpg …  오른쪽 동영상·사진 (이름 오름차순, 동영상은 TV 기본 플레이어, 사진은 전환 효과)
      main/공지.txt        왼쪽 위 공지 (한 줄에 하나)
      main/제목.txt        상단 제목 (없으면 '오산공장 스마트 현황판') -->
@@ -26,24 +27,8 @@
       <div class="card" id="perf">
         <div class="nedit" id="noticeAdd" title="공지 추가"></div>
         <div class="asof" id="asOf"></div>
-        <div class="half" id="sales">
-          <h2>매출</h2>
-          <div class="nums">
-            <div class="n"><div class="nl">당월</div><div class="nv"><span class="count" id="s_m">0</span><small>억원</small></div><div class="badge" id="s_m_b"></div></div>
-            <div class="n"><div class="nl">누계</div><div class="nv"><span class="count" id="s_y">0</span><small>억원</small></div><div class="badge" id="s_y_b"></div></div>
-          </div>
-          <div class="chartbox"><svg class="chart" id="s_chart"></svg></div>
-        </div>
-        <div class="vline"></div>
-        <div class="half" id="prod">
-          <h2>생산량</h2>
-          <div class="nums">
-            <div class="n"><div class="nl">당월</div><div class="nv"><span class="count" id="p_m">0</span><small>톤</small></div><div class="badge" id="p_m_b"></div></div>
-            <div class="n"><div class="nl">누계</div><div class="nv"><span class="count" id="p_y">0</span><small>톤</small></div><div class="badge" id="p_y_b"></div></div>
-          </div>
-          <div class="chartbox"><svg class="chart" id="p_chart"></svg></div>
-        </div>
-        <div class="empty" id="perfEmpty">main 폴더에 생산.json · sd.json · fi.json · plan.json 을 넣으면 매출·생산 실적이 표시됩니다</div>
+        <!-- 항목 칸(매출·생산량·전력량 …)은 ss.js 가 main/현황판.json 대로 만든다 -->
+        <div class="empty" id="perfEmpty">main 폴더에 생산.json · sd.json · fi.json · plan.json 을 넣으면 매출·생산 실적이 표시됩니다<br>(항목을 바꾸려면 현황판.json)</div>
       </div>
     </section>
 

@@ -65,8 +65,7 @@
   // ── 실적 계산 (생성기의 DashCore 와 같은 규칙) ──
   var RAWMAP = { '당류': '당류', '음용식초': '음용식초', '조미식초': '조미식초', '가공식품(유통)': '조미식초',
                  '밀가루/프리믹스': '프리믹스', '향신료': '향신료', '커피류': '시럽류' };
-  var EXCLUDE = { '면류': 1 };
-  function included(raw) { return !EXCLUDE[String(raw || '').trim()]; }
+  function excluder(list) { var m = {}; (list || []).forEach(function (x) { m[String(x).trim()] = 1; }); return function (raw) { return !m[String(raw || '').trim()]; }; }
   function daysIn(y, m) { return new Date(y, m, 0).getDate(); }
   function ratioFor(fi, y, mm, raw) {
     var cur = fi[y + '.' + mm + '|' + raw];
@@ -76,7 +75,7 @@
     return 1;
   }
   /** 일별 합계 {Y:{MM:[일별]}} */
-  function daily(store, conv) {
+  function daily(store, conv, included) {
     var out = {};
     Object.keys(store || {}).forEach(function (k) {
       var p = k.split('|'), dt = p[0].split('.'), raw = p[1];
@@ -87,13 +86,13 @@
     });
     return out;
   }
-  function planByMonth(plan) {   // 원 → 천원, 면류 제외
+  function planByMonth(plan, included, divide) {   // 계획: 원 → 실적 단위(천원)
     var out = {};
     Object.keys(plan || {}).forEach(function (k) {
       var p = k.split('|'); if (!included(p[1])) return;
       var ym = p[0].split('.'); if (ym.length !== 2) return;
       var key = ym[0] + '.' + pad(+ym[1]);
-      out[key] = (out[key] || 0) + (+plan[k] || 0) / 1000;
+      out[key] = (out[key] || 0) + (+plan[k] || 0) / (divide || 1);
     });
     return out;
   }
@@ -119,7 +118,7 @@
     if (month) return m[1] + '.' + pad(+m[2]);
     return m[3] ? m[1] + '.' + pad(+m[2]) + '.' + pad(+m[3]) : null;
   }
-  function toStore(j, kind) {
+  function toStore(j, kind, valueRe) {
     var rows = Array.isArray(j) ? j : j && Array.isArray(j.rows) ? j.rows : null;
     if (!rows) return j || {};                                         // 생성기 형식 그대로
     var cols = j && Array.isArray(j.columns) ? j.columns : rows.length && !Array.isArray(rows[0]) && rows[0] ? Object.keys(rows[0]) : [];
@@ -138,7 +137,7 @@
     var fiC = nums.filter(function (i) { return /fi/i.test(name(i)); })[0], sdC = nums.filter(function (i) { return /sd/i.test(name(i)); })[0];
     if (kind === 'fi' && (fiC == null || sdC == null)) { fiC = nums[0]; sdC = nums[1]; }   // 생성기 순서: FI, SD
     // 값 칸: 생산은 수량(KG), SD 는 매출실적·금액(천원), 계획은 금액 — 이름으로 못 찾으면 마지막 숫자 칸
-    var want = kind === 'prod' ? /수량|kg|생산/i : /매출|실적|금액|천원|원|sd|계획|plan/i;
+    var want = valueRe || (kind === 'prod' ? /수량|kg|생산/i : /매출|실적|금액|천원|원|sd|계획|plan/i);
     var valC = nums.filter(function (i) { return want.test(name(i)); }).pop();
     if (valC == null) valC = nums[nums.length - 1];
     rows.forEach(function (r) {
@@ -150,36 +149,66 @@
     return out;
   }
 
-  function compute(st) {
+  // ── 현황판 항목 (main/현황판.json 의 "panels", 없으면 매출·생산량 2개) ──
+  //  { "title": "전력량", "file": "전력.json", "unit": "MWh", "divide": 1000, "decimals": 1, "color": "#2fb36a",
+  //    "compare": "prev"(전년비) | "plan"(목표 달성율, "plan": "계획파일.json") | "none", "badge": 배지 글자(선택),
+  //    "value": 값 칸 이름 찾기(정규식, 선택), "exclude": ["면류"](제외할 구분, 선택), "adjust": "fi.json"(매출 보정, 선택) }
+  var DEFAULT_PANELS = [
+    { title: '매출', file: 'sd.json', unit: '억원', divide: 100000, decimals: 1, color: '#f2801f', compare: 'plan', plan: 'plan.json',
+      planDivide: 1000, adjust: 'fi.json', exclude: ['면류'], value: '매출|실적|금액|천원|원|sd' },
+    { title: '생산량', file: '생산.json', unit: '톤', divide: 1000, decimals: 0, color: '#2f7be6', compare: 'prev', exclude: ['면류'], value: '수량|kg|생산' }
+  ];
+  function normPanels(cfgJson) {
+    var arr = cfgJson && Array.isArray(cfgJson.panels) ? cfgJson.panels : null;
+    if (!arr || !arr.length) return DEFAULT_PANELS;
+    var out = [];
+    arr.slice(0, 4).forEach(function (p, i) {
+      if (!p || !p.file) return;
+      var compare = p.compare === 'plan' ? 'plan' : p.compare === 'none' ? 'none' : 'prev';
+      out.push({
+        title: String(p.title || p.file).trim(), file: String(p.file), unit: String(p.unit || ''),
+        divide: +p.divide > 0 ? +p.divide : 1, decimals: Math.max(0, Math.min(3, +p.decimals || 0)),
+        color: /^#[0-9a-fA-F]{6}$/.test(String(p.color || '')) ? p.color : ['#f2801f', '#2f7be6', '#2fb36a', '#9b59e0'][i % 4],
+        compare: compare, plan: compare === 'plan' ? String(p.plan || 'plan.json') : null,
+        planDivide: +p.planDivide > 0 ? +p.planDivide : 1, badge: p.badge ? String(p.badge) : '',
+        adjust: p.adjust ? String(p.adjust) : null, exclude: Array.isArray(p.exclude) ? p.exclude : [],
+        value: p.value ? String(p.value) : ''
+      });
+    });
+    return out.length ? out : DEFAULT_PANELS;
+  }
+  function valueRe(p) { if (!p.value) return null; try { return new RegExp(p.value, 'i'); } catch (e) { return null; } }
+
+  /** panels: 설정, files: {파일이름: JSON} → 기준일 · 항목별 당월/누계/배지/월별 */
+  function compute(panels, files) {
+    var stores = panels.map(function (p) { return toStore(files[p.file], p.file === '생산.json' ? 'prod' : 'sd', valueRe(p)); });
     var latest = '';
-    [st.sd, st.prod].forEach(function (s) { Object.keys(s || {}).forEach(function (k) { var d = k.split('|')[0]; if (d > latest) latest = d; }); });
+    stores.forEach(function (st) { Object.keys(st || {}).forEach(function (k) { var d = k.split('|')[0]; if (d > latest) latest = d; }); });
     if (!latest) return null;
     var L = latest.split('.'), y = +L[0], m = +L[1], d = defaultDay(y, m), days = daysIn(y, m);
-    var sales = daily(st.sd, function (Y, MM, raw, v) { return v * ratioFor(st.fi || {}, Y, MM, raw); });
-    var prod = daily(st.prod);
-    var plan = planByMonth(st.plan);
+    var r = { y: y, m: m, d: d, days: days, panels: [] };
     function ytd(idx, Y) { var s = monthSum(idx, Y, m, d); for (var mm = 1; mm < m; mm++) s += monthSum(idx, Y, mm); return s; }
-    var r = { y: y, m: m, d: d, days: days };
-    r.sM = monthSum(sales, y, m, d); r.sY = ytd(sales, y);
-    r.pM = monthSum(prod, y, m, d); r.pY = ytd(prod, y);
-    // 매출 달성율 (계획 대비, 당월은 경과일 일할)
-    var pm = (plan[y + '.' + pad(m)] || 0) * (d / days), py = pm;
-    for (var mm = 1; mm < m; mm++) py += plan[y + '.' + pad(mm)] || 0;
-    r.sMr = pm > 0 ? r.sM / pm * 100 : null;
-    r.sYr = py > 0 ? r.sY / py * 100 : null;
-    // 생산 전년 대비 (같은 기간)
-    var pmPrev = monthSum(prod, y - 1, m, d), pyPrev = ytd(prod, y - 1);
-    r.pMr = pmPrev > 0 ? r.pM / pmPrev * 100 : null;
-    r.pYr = pyPrev > 0 ? r.pY / pyPrev * 100 : null;
-    // 그 해 월별 (당월은 MTD, 데이터 없는 달은 빈칸)
-    r.sSeries = []; r.pSeries = [];
-    for (var i = 1; i <= 12; i++) {
-      var dd = i === m ? d : null;
-      r.sSeries.push(i <= m && hasMonth(sales, y, i) ? monthSum(sales, y, i, dd) / 1e5 : null);
-      r.pSeries.push(i <= m && hasMonth(prod, y, i) ? monthSum(prod, y, i, dd) / 1e3 : null);
-    }
-    r.hasSales = Object.keys(st.sd || {}).length > 0;
-    r.hasProd = Object.keys(st.prod || {}).length > 0;
+    panels.forEach(function (p, i) {
+      var inc = excluder(p.exclude);
+      var fi = p.adjust ? toStore(files[p.adjust], 'fi') : null;
+      var idx = daily(stores[i], fi ? function (Y, MM, raw, v) { return v * ratioFor(fi, Y, MM, raw); } : null, inc);
+      var o = { m: monthSum(idx, y, m, d), y: ytd(idx, y), mr: null, yr: null, series: [], label: p.badge };
+      if (p.compare === 'plan') {                       // 목표 달성율 (계획 대비, 당월은 경과일 일할)
+        var plan = planByMonth(toStore(files[p.plan], 'plan'), inc, p.planDivide);
+        var pm = (plan[y + '.' + pad(m)] || 0) * (d / days), py = pm;
+        for (var mm = 1; mm < m; mm++) py += plan[y + '.' + pad(mm)] || 0;
+        o.mr = pm > 0 ? o.m / pm * 100 : null; o.yr = py > 0 ? o.y / py * 100 : null;
+        o.label = o.label || '목표';
+      } else if (p.compare === 'prev') {                // 전년 대비 (같은 기간)
+        var pmPrev = monthSum(idx, y - 1, m, d), pyPrev = ytd(idx, y - 1);
+        o.mr = pmPrev > 0 ? o.m / pmPrev * 100 : null; o.yr = pyPrev > 0 ? o.y / pyPrev * 100 : null;
+        o.label = o.label || '전년비';
+      }
+      for (var k = 1; k <= 12; k++) {                   // 그 해 월별 (당월은 MTD, 데이터 없는 달은 빈칸)
+        o.series.push(k <= m && hasMonth(idx, y, k) ? monthSum(idx, y, k, k === m ? d : null) / p.divide : null);
+      }
+      r.panels.push(o);
+    });
     return r;
   }
 
@@ -278,18 +307,68 @@
   }
 
   // ── 표시 ──
-  var lastR = null;
+  var lastR = null, panelsKey = '', panels = DEFAULT_PANELS;
+  /** 항목 칸들을 설정대로 만든다 (설정이 바뀔 때만) */
+  function buildPanels(list) {
+    var key = JSON.stringify(list);
+    if (key === panelsKey) return;
+    panelsKey = key;
+    var perf = $('perf');
+    [].slice.call(perf.querySelectorAll('.half, .vline')).forEach(function (e) { e.remove(); });
+    var anchor = $('perfEmpty');
+    list.forEach(function (p, i) {
+      if (i) { var v = document.createElement('div'); v.className = 'vline'; perf.insertBefore(v, anchor); }
+      var h = document.createElement('div'); h.className = 'half'; h.id = 'panel' + i;
+      h.innerHTML = '<h2></h2><div class="nums">' +
+        '<div class="n"><div class="nl">당월</div><div class="nv"><span class="count" id="p' + i + '_m">0</span><small></small></div><div class="badge" id="p' + i + '_mb"></div></div>' +
+        '<div class="n"><div class="nl">누계</div><div class="nv"><span class="count" id="p' + i + '_y">0</span><small></small></div><div class="badge" id="p' + i + '_yb"></div></div>' +
+        '</div><div class="chartbox"><svg class="chart" id="p' + i + '_chart"></svg></div>';
+      h.querySelector('h2').textContent = p.title;
+      [].forEach.call(h.querySelectorAll('small'), function (e) { e.textContent = p.unit; });
+      [].forEach.call(h.querySelectorAll('.badge'), function (e) { e.style.color = p.color; });
+      perf.insertBefore(h, anchor);
+    });
+    perf.className = perf.className.replace(/\bp[2-4]\b/g, '').trim() + ' p' + Math.max(2, list.length);
+    if (window.ResizeObserver) [].forEach.call(perf.querySelectorAll('.chartbox'), function (b) { new ResizeObserver(redrawCharts).observe(b); });
+  }
+  function paintBadges() {
+    panels.forEach(function (p, i) {
+      [].forEach.call(document.querySelectorAll('#panel' + i + ' .badge'), function (e) { e.style.background = p.color + (DARK ? '33' : '22'); });
+    });
+  }
+  function drawCharts() {
+    if (!lastR) return;
+    lastR.panels.forEach(function (o, i) { var svg = $('p' + i + '_chart'); if (svg) chart(svg, o.series, panels[i].color, 'g' + i, panels[i].decimals ? 1 : 0); });
+  }
   function render(r) {
     lastR = r;
     $('perf').classList.toggle('nodata', !r);
     if (!r) { $('asOf').textContent = ''; return; }
     $('asOf').textContent = r.y + '년 ' + r.m + '월 ' + r.d + '일 기준';
-    countUp($('s_m'), r.sM / 1e5, 1); countUp($('s_y'), r.sY / 1e5, 1);
-    countUp($('p_m'), r.pM / 1e3, 0); countUp($('p_y'), r.pY / 1e3, 0);
-    badge($('s_m_b'), '목표', r.sMr); badge($('s_y_b'), '목표', r.sYr);
-    badge($('p_m_b'), '전년비', r.pMr); badge($('p_y_b'), '전년비', r.pYr);
-    chart($('s_chart'), r.sSeries, '#f2801f', 'gs', 1);
-    chart($('p_chart'), r.pSeries, '#2f7be6', 'gp', 0);
+    paintBadges();
+    r.panels.forEach(function (o, i) {                 // 최종 숫자를 먼저 넣어 칸에 맞게 글자 크기를 정한 뒤 올라가는 애니메이션
+      var p = panels[i];
+      $('p' + i + '_m').textContent = fmt(o.m / p.divide, p.decimals); $('p' + i + '_y').textContent = fmt(o.y / p.divide, p.decimals);
+    });
+    fitNums();
+    r.panels.forEach(function (o, i) {
+      var p = panels[i];
+      countUp($('p' + i + '_m'), o.m / p.divide, p.decimals); countUp($('p' + i + '_y'), o.y / p.divide, p.decimals);
+      badge($('p' + i + '_mb'), o.label, o.mr); badge($('p' + i + '_yb'), o.label, o.yr);
+    });
+    drawCharts();
+  }
+  /** 숫자가 칸보다 길면(항목이 많거나 자릿수가 클 때) 글자를 줄여 넘치지 않게 */
+  function fitNums() {
+    [].forEach.call(document.querySelectorAll('#perf .nv'), function (nv) {
+      var c = nv.querySelector('.count'), u = nv.querySelector('small');
+      c.style.fontSize = ''; u.style.fontSize = '';
+      var size = parseFloat(getComputedStyle(c).fontSize), us = parseFloat(getComputedStyle(u).fontSize), k = 1;
+      while (nv.scrollWidth > nv.clientWidth && size * k > 16) {
+        k -= 0.06; c.style.fontSize = (size * k) + 'px'; u.style.fontSize = (us * Math.max(.7, k)) + 'px';
+      }
+      if (nv.scrollWidth > nv.clientWidth) { k -= 0.06; c.style.fontSize = (size * k) + 'px'; }   // 1px 라도 넘치면 한 단계 더
+    });
   }
 
   function getJson(name) {
@@ -357,24 +436,29 @@
     setDark(!DARK);
     var b = $('darkBtn'); b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap');
     if (TV && TV.setDark) { try { TV.setDark(DARK); } catch (e) {} }   // TV 설정에 저장 (다음에도 그대로)
-    if (lastR) {                                                     // 그래프 색도 바로
-      [['s_chart', lastR.sSeries, '#f2801f', 'gs', 1], ['p_chart', lastR.pSeries, '#2f7be6', 'gp', 0]].forEach(function (c) { chart($(c[0]), c[1], c[2], c[3], c[4]); });
-    }
+    paintBadges(); drawCharts();                                     // 배지·그래프 색도 바로
     lastKey = lastKey.replace(/:dark$/, '') + (DARK ? ':dark' : '');
   }
   function load(force) {
     cfg = config();
     setDark(TV ? cfg.dark : Q.get('dark') === '1');
     BASE = '/data/' + encodeURIComponent(cfg.folder || 'main') + '/';
-    Promise.all([getJson('생산.json'), getJson('sd.json'), getJson('fi.json'), getJson('plan.json'),
-                 getText('공지.txt'), getText('제목.txt')]).then(function (a) {
-      lastA = a;
-      var lines = paint(a);
-      var key = JSON.stringify([a[0], a[1], a[2], a[3]]).length + ':' + lines.join('|') + (DARK ? ':dark' : '');   // 다크 모드가 바뀌면 그래프도 다시
-      if (force || key !== lastKey) {
-        lastKey = key;
-        render(compute({ prod: toStore(a[0], 'prod'), sd: toStore(a[1], 'sd'), fi: toStore(a[2], 'fi'), plan: toStore(a[3], 'plan') }));
-      }
+    getJson('현황판.json').then(function (pc) {
+      var list = normPanels(pc), names = [];
+      list.forEach(function (p) { [p.file, p.plan, p.adjust].forEach(function (n) { if (n && names.indexOf(n) < 0) names.push(n); }); });
+      return Promise.all(names.map(getJson).concat([getText('공지.txt'), getText('제목.txt')])).then(function (a) {
+        var files = {}; names.forEach(function (n, i) { files[n] = a[i]; });
+        var notice = a[names.length], title = a[names.length + 1];
+        lastA = [null, null, null, null, notice, title];
+        var lines = paint(lastA);
+        var key = JSON.stringify(list) + ':' + names.map(function (n) { return JSON.stringify(files[n]).length; }).join(',') + ':' + lines.join('|') + (DARK ? ':dark' : '');
+        if (force || key !== lastKey) {
+          lastKey = key;
+          panels = list;
+          buildPanels(list);
+          render(compute(list, files));
+        }
+      });
     });
   }
   // ── PC 미리보기: 동영상 파일을 TV 와 같은 방식(크롭/확장 · 블러/단색)으로 재생 ──
@@ -860,14 +944,14 @@
     clearTimeout(rt);
     rt = setTimeout(function () {
       if (!lastR) return;
-      [['s_chart', lastR.sSeries, '#f2801f', 'gs', 1], ['p_chart', lastR.pSeries, '#2f7be6', 'gp', 0]].forEach(function (c) {
-        var svg = $(c[0]), b = svg.parentNode;
-        if (svg.dataset.size !== Math.round(b.clientWidth) + 'x' + Math.round(b.clientHeight)) chart(svg, c[1], c[2], c[3], c[4]);
+      lastR.panels.forEach(function (o, i) {
+        var svg = $('p' + i + '_chart'); if (!svg) return;
+        var b = svg.parentNode;
+        if (svg.dataset.size !== Math.round(b.clientWidth) + 'x' + Math.round(b.clientHeight)) chart(svg, o.series, panels[i].color, 'g' + i, panels[i].decimals ? 1 : 0);
       });
     }, 150);
   }
   addEventListener('resize', function () { fit(); redrawCharts(); });
-  if (window.ResizeObserver) document.querySelectorAll('.chartbox').forEach(function (b) { new ResizeObserver(redrawCharts).observe(b); });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(redrawCharts);
   fit(); clock();
   if (window.ResizeObserver) new ResizeObserver(fit).observe(document.documentElement);   // 화면 크기가 바뀌면 다시 맞춤

@@ -353,6 +353,24 @@ git push origin v1.0.1
 | `공지.txt` | 왼쪽 위 공지 (한 줄에 하나, 5개까지). 없으면 공지 칸 숨김 |
 | `설정.json` | **재생 목록** — 동영상·유튜브 링크의 순서와 영상별 표시 방식 (PC 프로그램에서 설정) |
 | `제목.txt` (선택) | 상단 제목 (없으면 `오산공장 스마트 현황판`) |
+| `현황판.json` (선택) | 실적 칸 정의 — 어떤 JSON 을 어떤 제목·단위·색·비교로 보여 줄지. 전력량 같은 항목을 **앱 업데이트 없이** 추가·변경 (아래 예시) |
+
+`현황판.json` 예시 (없으면 매출 · 생산량 2개, 최대 4개):
+
+```json
+{ "panels": [
+  { "title": "매출",   "file": "sd.json",   "unit": "억원", "divide": 100000, "decimals": 1, "color": "#f2801f",
+    "compare": "plan", "plan": "plan.json", "planDivide": 1000, "adjust": "fi.json", "exclude": ["면류"] },
+  { "title": "생산량", "file": "생산.json", "unit": "톤",   "divide": 1000,   "decimals": 0, "color": "#2f7be6", "compare": "prev", "exclude": ["면류"] },
+  { "title": "전력량", "file": "전력.json", "unit": "MWh",  "divide": 1000,   "decimals": 1, "color": "#2fb36a", "compare": "prev", "value": "사용량" }
+] }
+```
+
+- `file`: 일별 표 JSON (날짜 칸 · 구분 칸 · 숫자 칸을 값 모양으로 찾음. 생성기 형식 `{"2025.01.02|구분": 값}` 도 됨) · `value`: 숫자 칸이 여럿이면 이름으로 고르는 정규식
+- `divide` · `decimals` · `unit`: 표시 단위 (값 ÷ divide, 소수 자리) · `color`: 그래프·배지 색
+- `compare`: `prev` = 전년 같은 기간 대비 % · `plan` = 월 계획(`plan`, 원 단위면 `planDivide`) 대비 달성율 (당월은 경과일 일할) · `none` = 배지 없음 · `badge`: 배지 글자 바꾸기
+- `exclude`: 제외할 구분 · `adjust`: fi.json 식 보정 비율 (매출만)
+
 
 - 매출 = SD × 환산비율(그 달 FI÷SD, 없으면 전년 동월, 둘 다 없으면 1), 면류 제외 — 생성기와 같은 계산. 단위 **억원**
 - 생산량 = KG ÷ 1,000 = **톤**
