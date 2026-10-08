@@ -70,6 +70,12 @@ object RelayWorker {
                     cycle(ctx)
                     wait = RelaySettings.intervalSec * 1000L
                 }
+            } catch (e: java.io.IOException) {
+                // 인터넷이 끊김 — 받던 작업은 GitHub 에 그대로 있으니 연결될 때까지 15초마다 다시 해 본다
+                status = "인터넷 연결 기다리는 중 (${e.message ?: e.javaClass.simpleName})"
+                Log.w(TAG, "network down, waiting", e)
+                client = null
+                wait = 15_000L
             } catch (e: Throwable) {
                 status = "오류: ${e.message ?: e.javaClass.simpleName}"
                 Log.w(TAG, "cycle failed", e)
@@ -186,6 +192,8 @@ object RelayWorker {
                     allOk = false; r.put("ok", false).put("error", e.message)
                 } catch (e: GitHubApi.ApiError) {
                     throw e
+                } catch (e: java.io.IOException) {
+                    throw e                                   // 인터넷 끊김: 작업을 실패로 적지 않고 남겨 두었다가 연결되면 다시
                 } catch (e: Exception) {
                     allOk = false; r.put("ok", false).put("error", e.message ?: e.javaClass.simpleName)
                 }
@@ -233,6 +241,8 @@ object RelayWorker {
                 allOk = false; r.put("ok", false).put("status", 400).put("error", e.message)
             } catch (e: GitHubApi.ApiError) {
                 throw e                                       // 네트워크 문제는 작업을 남겨 두고 다음 주기에 다시
+            } catch (e: java.io.IOException) {
+                throw e                                       // 인터넷 끊김(unexpected end of stream 등): 실패로 적지 않고, 연결되면 이어서 받는다
             } catch (e: Exception) {
                 allOk = false; r.put("ok", false).put("status", 500).put("error", "${e.javaClass.simpleName}: ${e.message}")
             }
