@@ -43,7 +43,7 @@
   function reportEdit() {
     if (!TV || !TV.editRects) return;
     var out = [];
-    [].forEach.call(document.querySelectorAll('.nedit, #darkBtn'), function (b) {
+    [].forEach.call(document.querySelectorAll('.nedit, #darkBtn, #restBtn'), function (b) {
       if (!b.offsetParent) return;                       // 안 보이는 아이콘
       var r = b.getBoundingClientRect();
       out.push([r.left, r.top, r.width, r.height]);
@@ -430,7 +430,15 @@
     DARK = on;
     document.documentElement.classList.toggle('dark', DARK);
     $('darkBtn').innerHTML = DARK ? SUN_SVG : MOON_SVG;            // 지금 어두우면 해(밝게), 밝으면 달(어둡게)
+    if (!$('restBtn').innerHTML) $('restBtn').innerHTML = EYE_SVG;
     return true;
+  }
+  var EYE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  /** 눈 버튼: 지금 바로 쉬는 화면으로 (TV 앱이 동영상을 멈추고 그때부터 쉬는 시간을 잰다 · 예전 앱/PC 미리보기는 페이지만) */
+  function restNow() {
+    var b = $('restBtn'); b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap');
+    if (TV && TV.restNow) { try { TV.restNow(); return; } catch (e) {} }
+    window.ssRest(true);
   }
   function toggleDark() {
     setDark(!DARK);
@@ -1024,6 +1032,7 @@
   var ntLine = -1;                                     // 누른 아이콘의 공지 줄 (입력란을 열 때 그 줄 끝에 커서)
   document.addEventListener('click', function (e) {
     if (e.target.closest && e.target.closest('#darkBtn')) { if (!ntOpen) toggleDark(); return; }
+    if (e.target.closest && e.target.closest('#restBtn')) { if (!ntOpen && !restOn) restNow(); return; }
     var b = e.target.closest && e.target.closest('.nedit');
     if (b && !TV && PREVIEW) {                           // PC 미리보기: 아래 공지사항 입력칸의 그 줄로
       parent.postMessage({ ssEditNotice: b.dataset.line != null ? +b.dataset.line : -1 }, '*');
