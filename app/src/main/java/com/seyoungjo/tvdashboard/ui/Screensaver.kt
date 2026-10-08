@@ -86,6 +86,7 @@ class Screensaver(
         private set
     /** 공지 수정 중 — 터치·키는 화면보호기 페이지로 (대시보드로 넘어가지 않음) */
     var editing = false
+        private set
     /** 쉬는 시간(로고 화면) 중 — 동영상 칸을 터치하면 다시 재생 */
     var resting = false
         private set
