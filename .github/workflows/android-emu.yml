@@ -30,6 +30,8 @@ jobs:
         run: ./gradlew -q assembleDirectDebug -PappVersion=$(cat pc/tvrelay/VERSION | sed 's/_p.*//')
       - name: 시험 자료 만들기 (동영상 · 설정.json · 공지)
         run: |
+          set -x
+          command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
           mkdir -p emu-content/main
           ffmpeg -loglevel error -f lavfi -i testsrc=size=1280x720:rate=30 -f lavfi -i sine=frequency=440 -t 12 -c:v libx264 -profile:v main -level 4.0 -pix_fmt yuv420p -c:a aac -movflags +faststart emu-content/main/test.mp4
           printf '{"playlist":[{"src":"test.mp4"}],"rest":{"slides":["widget1","image"],"slideSec":5,"enabled":false,"runMin":10,"restMin":1,"city":"오산시","lat":37.1499,"lon":127.0771}}' > emu-content/main/설정.json
