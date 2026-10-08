@@ -93,8 +93,9 @@ button{font-family:inherit;font-weight:inherit;color:inherit;border:0;background
 .st span{display:block;font-size:14px;margin-top:6px;opacity:.85}
 
 /* 상태 배지 · 오류 */
-#badge{position:absolute;right:16px;bottom:10px;font-size:12px;font-weight:700;color:#fff;background:rgba(31,42,68,.55);padding:5px 11px;border-radius:999px;pointer-events:none;z-index:5}
-#badge.bad{background:rgba(214,72,59,.92)}
+/* 상태 배지: 평소엔 숨김, 읽기 실패 등 오류일 때만 빨갛게 표시 */
+#badge{display:none;position:absolute;right:16px;bottom:10px;font-size:12px;font-weight:700;color:#fff;padding:5px 11px;border-radius:999px;pointer-events:none;z-index:5}
+#badge.bad{display:block;background:rgba(214,72,59,.92)}
 #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;background:rgba(255,255,255,.75);border-radius:22px;z-index:4;font-size:20px;color:#b42318;padding:40px;line-height:1.6}
 #err.show{display:flex}
 #err .box{max-width:760px}
@@ -121,7 +122,7 @@ button{font-family:inherit;font-weight:inherit;color:inherit;border:0;background
     <div id="dow"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
     <div id="grid"></div>
     <div id="err"></div>
-    <div id="badge">읽는 중…</div>
+    <div id="badge"></div>
   </section>
   <aside id="side">
     <div id="dayp">
