@@ -957,15 +957,17 @@
   window.ssNoticeCancel = function () { if (ntOpen) ntClose(); };
 
   // TV 앱이 부른다: 화면보호기를 다시 띄울 때(show) · main 폴더가 바뀌었을 때(refresh)
-  window.ssShow = function () { if (ntOpen) ntClose(); load(true); };
+  window.ssShow = function () { if (ntOpen) ntClose(); promptOn = false; clearTimeout(promptTimer); load(true); };
   window.ssRefresh = function () { load(false); };
   // 한 번 터치했을 때 TV 앱이 부른다: 아래 멘트를 '한 번 더 눌러 주세요' 로 잠시 바꾼다 (빈 값이면 원래대로)
-  var promptOn = false;
+  var promptOn = false, promptTimer = 0;
   window.ssPrompt = function (msg) {
     var h = $('hint');
     promptOn = !!msg;
     h.textContent = msg || cfg.message || '';
     h.className = msg ? 'prompt' : (cfg.blink ? 'blink' : '');
+    clearTimeout(promptTimer);
+    if (msg) promptTimer = setTimeout(function () { window.ssPrompt(''); }, 6000);   // 두 번 터치 창(5초)이 지나면 스스로 원래 멘트로
   };
 
   if (TV) document.documentElement.classList.add('tv');
