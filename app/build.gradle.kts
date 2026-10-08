@@ -111,3 +111,19 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }
+
+// 내장 화면보호기의 버전 표시: pc/tvrelay/VERSION 을 assets/screensaver/version.txt 로 넣는다 (커밋하지 않는 생성 파일).
+// TV 는 PC 가 보낸 _screensaver/version.txt 와 비교해 더 새 쪽을 쓴다
+val ssVersionDir = layout.buildDirectory.dir("generated/ssversion")
+val genSsVersion = tasks.register("genSsVersion") {
+    val src = rootProject.file("pc/tvrelay/VERSION")
+    inputs.file(src)
+    outputs.dir(ssVersionDir)
+    doLast {
+        val out = ssVersionDir.get().file("screensaver/version.txt").asFile
+        out.parentFile.mkdirs()
+        out.writeText(src.readText().trim())
+    }
+}
+android.sourceSets.getByName("main").assets.srcDir(ssVersionDir)
+tasks.named("preBuild") { dependsOn(genSsVersion) }

@@ -43,13 +43,6 @@
             app:useSimpleSummaryProvider="true" />
         <SwitchPreferenceCompat app:key="idle_video_sound" app:defaultValue="false"
             app:dependency="idle_enabled" app:title="동영상 소리 켜기" />
-        <SwitchPreferenceCompat app:key="video_rest_enabled" app:defaultValue="false"
-            app:dependency="idle_enabled" app:title="동영상 쉬는 시간 사용"
-            app:summary="동영상을 '재생 시간' 만큼 튼 뒤 '쉬는 시간' 동안은 로고 화면을 보여 줍니다 (터치하면 다시 재생)" />
-        <EditTextPreference app:key="video_run_min" app:defaultValue="10"
-            app:dependency="video_rest_enabled" app:title="동영상 재생 시간(분)" app:useSimpleSummaryProvider="true" />
-        <EditTextPreference app:key="video_rest_min" app:defaultValue="30"
-            app:dependency="video_rest_enabled" app:title="쉬는 시간(분)" app:useSimpleSummaryProvider="true" />
         <SwitchPreferenceCompat app:key="dark_mode" app:defaultValue="false"
             app:title="대기 화면 다크 모드"
             app:summary="대기 화면 오른쪽 위(시계 왼쪽)의 달/해 버튼으로도 바로 바꿀 수 있습니다." />

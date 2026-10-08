@@ -29,6 +29,7 @@ import androidx.webkit.WebViewAssetLoader
 import com.seyoungjo.tvdashboard.R
 import com.seyoungjo.tvdashboard.data.AppSettings
 import com.seyoungjo.tvdashboard.data.ContentStore
+import com.seyoungjo.tvdashboard.data.MenuScanner
 import com.seyoungjo.tvdashboard.data.PlayItem
 import org.json.JSONObject
 import kotlin.math.max
@@ -89,6 +90,7 @@ class Screensaver(
     var resting = false
         private set
     private var playStartedAt = 0L                       // 이번 재생이 시작된 시각 (쉬는 시간 계산)
+    private var rest = MenuScanner.RestConf()            // main/설정.json 의 rest (PC 화면보호기 탭에서 정함)
     private val restRunnable = Runnable { startRest() }
     private val resumeRunnable = Runnable { resumeFromRest() }
         private set
@@ -164,14 +166,14 @@ class Screensaver(
     /** 설정이 바뀌었거나(fresh) 재생이 이어질 때 쉬는 시각을 (다시) 잡는다 */
     private fun scheduleRest(fresh: Boolean) {
         handler.removeCallbacks(restRunnable)
-        if (!AppSettings.videoRestEnabled || items.isEmpty()) return
+        if (!rest.enabled || items.isEmpty()) return
         if (fresh || playStartedAt == 0L) playStartedAt = System.currentTimeMillis()
-        val due = playStartedAt + AppSettings.videoRunMin * 60_000L - System.currentTimeMillis()
+        val due = playStartedAt + rest.runMin * 60_000L - System.currentTimeMillis()
         handler.postDelayed(restRunnable, maxOf(1_000L, due))
     }
 
     private fun startRest() {
-        if (!active || resting || items.isEmpty() || !AppSettings.videoRestEnabled) return
+        if (!active || resting || items.isEmpty() || !rest.enabled) return
         resting = true
         prepWatch?.let { handler.removeCallbacks(it) }
         releasePlayer()
@@ -181,8 +183,8 @@ class Screensaver(
         box.visibility = View.INVISIBLE
         web?.evaluateJavascript("window.ssRest&&ssRest(true)", null)
         handler.removeCallbacks(resumeRunnable)
-        handler.postDelayed(resumeRunnable, AppSettings.videoRestMin * 60_000L)
-        Log.i(TAG, "video rest for ${AppSettings.videoRestMin}min")
+        handler.postDelayed(resumeRunnable, rest.restMin * 60_000L)
+        Log.i(TAG, "video rest for ${rest.restMin}min")
     }
 
     /** 쉬는 시간 끝(시간이 지났거나 터치): 다음 항목부터 다시 재생 */
@@ -197,10 +199,17 @@ class Screensaver(
         play()
     }
 
+    /** main/설정.json 의 쉬는 시간 설정이 (다시) 읽혔을 때 */
+    fun setRest(r: MenuScanner.RestConf) {
+        if (r == rest) return
+        rest = r
+        restSettingsChanged()
+    }
+
     /** 설정(켜기/끄기 · 시간)이 바뀌면 */
     fun restSettingsChanged() {
         if (!active) return
-        if (!AppSettings.videoRestEnabled) { if (resting) resumeFromRest() else handler.removeCallbacks(restRunnable); return }
+        if (!rest.enabled) { if (resting) resumeFromRest() else handler.removeCallbacks(restRunnable); return }
         if (!resting) scheduleRest(fresh = false)
     }
 
@@ -319,8 +328,18 @@ class Screensaver(
      * 화면보호기 수정은 APK 없이 PC 프로그램에서 [화면보호기 화면 보내기]로 배포한다
      */
     private fun pageUrl(): String {
-        val f = java.io.File(ContentStore.root(activity), "$OVERRIDE_DIR/index.html")
-        return if (f.isFile) "https://" + ContentStore.WEB_HOST + ContentStore.WEB_PREFIX + "$OVERRIDE_DIR/index.html" else URL
+        val dir = java.io.File(ContentStore.root(activity), OVERRIDE_DIR)
+        if (!java.io.File(dir, "index.html").isFile) return URL
+        // PC 가 보낸 페이지가 앱에 내장된 것보다 오래됐으면(예: APK 를 새로 깔았는데 예전에 보낸 폴더가 남아 있음) 내장 페이지
+        val sent = MenuScanner.versionKey(try { java.io.File(dir, "version.txt").readText() } catch (_: Exception) { null })
+        val built = MenuScanner.versionKey(try { activity.assets.open("screensaver/version.txt").bufferedReader().readText() } catch (_: Exception) { null })
+        if (sent != null && built != null && compareVersions(sent, built) < 0) return URL
+        return "https://" + ContentStore.WEB_HOST + ContentStore.WEB_PREFIX + "$OVERRIDE_DIR/index.html"
+    }
+
+    private fun compareVersions(a: List<Int>, b: List<Int>): Int {
+        for (i in 0 until maxOf(a.size, b.size)) { val d = (a.getOrNull(i) ?: 0) - (b.getOrNull(i) ?: 0); if (d != 0) return d }
+        return 0
     }
 
     /** PC 가 보낸 화면보호기 페이지가 바뀌었을 때: 페이지를 다시 띄운다 (보고 있으면 바로, 아니면 다음에 뜰 때) */

@@ -51,10 +51,6 @@ object AppSettings {
         .let { if (it == OLD_DEFAULT_MESSAGE) DEFAULT_MESSAGE else it }   // 예전 기본 멘트는 새 문구로
     val idleMsgShowSec get() = int("idle_msg_show_sec", 0, 0, 3600)
     val idleMsgHideSec get() = int("idle_msg_hide_sec", 0, 0, 3600)
-    /** 화면보호기 동영상 쉬는 시간: 동영상을 videoRunMin 분 틀고 videoRestMin 분은 로고 화면(터치하면 다시 재생) */
-    val videoRestEnabled get() = prefs.getBoolean("video_rest_enabled", false)
-    val videoRunMin get() = int("video_run_min", 10, 1, 24 * 60)
-    val videoRestMin get() = int("video_rest_min", 30, 1, 24 * 60)
     /** 화면보호기(대기화면) 다크 모드 — 화면보호기의 달/해 버튼 · TV 설정 · PC 의 TV 설정 */
     var darkMode: Boolean
         get() = prefs.getBoolean("dark_mode", false)
@@ -74,9 +70,6 @@ object AppSettings {
         "idle_msg_hide_sec" to Int::class,
         "idle_video_sound" to Boolean::class,
         "dark_mode" to Boolean::class,
-        "video_rest_enabled" to Boolean::class,
-        "video_run_min" to Int::class,
-        "video_rest_min" to Int::class,
         "auto_refresh" to Boolean::class,
         "keep_screen_on" to Boolean::class,
         "update_url" to String::class,

@@ -127,6 +127,24 @@ object MenuScanner {
      *            "halign": left|center|right + "offsetX", "valign": top|center|bottom + "offsetY" (px, 1080p 기준, 기준선에서 안쪽으로)
      * 목록에 없는 main 의 동영상은 그 뒤에 이름 오름차순으로 붙는다 (자동 업로드 .bat 으로 올린 것 등).
      */
+    /** 화면보호기 동영상 쉬는 시간 (main/설정.json 의 "rest": {"enabled", "runMin", "restMin"}) — PC 화면보호기 탭에서 정함 */
+    data class RestConf(val enabled: Boolean = false, val runMin: Int = 10, val restMin: Int = 30)
+
+    fun mainRest(dir: File?): RestConf {
+        val conf = try {
+            val f = dir?.let { File(it, "설정.json") }
+            if (f != null && f.isFile) org.json.JSONObject(f.readText(Charsets.UTF_8).removePrefix("\uFEFF")) else null
+        } catch (e: Exception) { null }
+        val r = conf?.optJSONObject("rest") ?: return RestConf()
+        return RestConf(r.optBoolean("enabled", false), r.optInt("runMin", 10).coerceIn(1, 1440), r.optInt("restMin", 30).coerceIn(1, 1440))
+    }
+
+    /** "1.10.10_p2" → [1, 10, 10, 2] (비교용). 모양이 아니면 null */
+    fun versionKey(s: String?): List<Int>? {
+        val m = Regex("^(\\d+)\\.(\\d+)\\.(\\d+)(?:_p(\\d+))?$").find(s?.trim() ?: return null) ?: return null
+        return listOf(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt(), m.groupValues[4].toIntOrNull() ?: 0)
+    }
+
     fun mainPlaylist(dir: File?): List<PlayItem> {
         val files = mainMedia(dir)
         val conf = try {

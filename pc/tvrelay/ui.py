@@ -860,6 +860,8 @@ def make_handler(api: Api):
                 return self._send(200, f.read_bytes(), MIME.get(f.suffix.lower().lstrip("."), "application/octet-stream"))
             if method == "GET" and u.path.startswith("/ss/"):          # 화면보호기 미리보기 (TV 와 같은 페이지 사본)
                 name = Path(u.path).name
+                if name == "version.txt":                                # 이 PC 프로그램의 화면보호기 버전 (TV 로 같이 보냄)
+                    return self._send(200, __version__.encode("utf-8"), "text/plain; charset=utf-8")
                 f = HERE / "screensaver" / name
                 if not f.is_file():
                     return self._send(404, {"error": "없음"})

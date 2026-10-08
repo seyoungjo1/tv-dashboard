@@ -372,8 +372,9 @@ class MainActivity : AppCompatActivity() {
             val videos = MenuScanner.idleVideos(root)
             val main = MenuScanner.mainDir(root)
             val playlist = MenuScanner.mainPlaylist(main)
+            val rest = MenuScanner.mainRest(main)
             val sig = MenuScanner.signature(list)
-            handler.post { applyMenu(list, sig, videos, main?.name, playlist, force) }
+            handler.post { screensaver.setRest(rest); applyMenu(list, sig, videos, main?.name, playlist, force) }
         }
     }
 
