@@ -103,7 +103,7 @@ html.tv #notice .nedit, html.preview #notice .nedit { display: block; }   /* PC 
 #noticeAdd { position: absolute; left: 18px; top: 12px; width: 36px; height: 36px; }
 html.tv #perf.nonotice #noticeAdd, html.preview #perf.nonotice #noticeAdd { display: block; }
 #ntDim { position: absolute; inset: 0; z-index: 50; background: rgba(15, 25, 38, .45); }
-#ntPop { position: absolute; z-index: 51; left: 50%; top: 24px; width: 1180px; margin-left: -590px; background: #fff; border-radius: 26px;
+#ntPop { position: absolute; z-index: 51; left: 38px; top: 24px; width: 1079px;   /* 왼쪽 칸(#left) 폭 안에만 — 오른쪽 동영상 칸(앱 플레이어가 위에 뜸)을 덮지 않게 */ background: #fff; border-radius: 26px;
          box-shadow: 0 18px 60px rgba(0, 0, 0, .35); padding: 26px 34px 26px; animation: popIn .28s cubic-bezier(.2, .8, .2, 1); }
 @keyframes popIn { from { opacity: 0; transform: translateY(-30px) scale(.97); } to { opacity: 1; transform: none; } }
 #ntPop h3 { margin: 0 0 6px; font-size: 34px; font-weight: 800; }
@@ -116,7 +116,7 @@ html.tv #perf.nonotice #noticeAdd, html.preview #perf.nonotice #noticeAdd { disp
 .dots i { width: 30px; height: 30px; border-radius: 50%; border: 3px solid #b9c4d0; }
 .dots i.on { background: #2f7be6; border-color: #2f7be6; }
 .dots { justify-content: center; }
-#ntPop.pin { width: 520px; margin-left: -260px; text-align: center; }
+#ntPop.pin { width: 520px; left: 317px; text-align: center; }                       /* 왼쪽 칸 가운데 */
 .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .pad button { height: 78px; border: 0; border-radius: 16px; background: #eef2f6; color: #1d2b3a; font: 800 36px "Pretendard", sans-serif; }
 .pad button:active { background: #d6e4f7; }
