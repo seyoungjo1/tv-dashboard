@@ -93,7 +93,6 @@ class Screensaver(
     private var rest = MenuScanner.RestConf()            // main/설정.json 의 rest (PC 화면보호기 탭에서 정함)
     private val restRunnable = Runnable { startRest() }
     private val resumeRunnable = Runnable { resumeFromRest() }
-        private set
 
     /** 자료 폴더 안의 실제 이름 (main / Main …) — 페이지가 그 이름으로 JSON 을 읽는다 */
     var folder = "main"
