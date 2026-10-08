@@ -61,6 +61,7 @@ class Screensaver(
     private val dim: View = layer.findViewById(R.id.ssDim)
 
     private var web: WebView? = null
+    private var loadedUrl = ""                           // 지금 띄운 페이지 (내장 / PC 가 보낸 _screensaver)
     private val dataHandler = DataPathHandler(activity.applicationContext)
     private var prepWatch: Runnable? = null              // TV 플레이어가 정해진 시간 안에 시작하지 못하면 페이지 재생으로
     /** 화면보호기 페이지 (손가락 누름을 클릭으로 넣을 때) */
@@ -218,7 +219,8 @@ class Screensaver(
         layer.visibility = View.VISIBLE
         val wv = web ?: createWeb()
         wv.onResume()
-        if (wv.url == null) wv.loadUrl(URL) else wv.evaluateJavascript("window.ssShow&&ssShow()", null)
+        val url = pageUrl()
+        if (wv.url == null || loadedUrl != url) { loadedUrl = url; wv.loadUrl(url) } else wv.evaluateJavascript("window.ssShow&&ssShow()", null)
         index = 0
         errors = 0
         resting = false
@@ -310,6 +312,27 @@ class Screensaver(
         val wv = web ?: return
         val imm = activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
         imm?.hideSoftInputFromWindow(wv.windowToken, 0)
+    }
+
+    /**
+     * 화면보호기 페이지 주소: PC 가 자료 폴더 `_screensaver/` 로 보낸 페이지가 있으면 그것, 없으면 앱에 내장된 페이지.
+     * 화면보호기 수정은 APK 없이 PC 프로그램에서 [화면보호기 화면 보내기]로 배포한다
+     */
+    private fun pageUrl(): String {
+        val f = java.io.File(ContentStore.root(activity), "$OVERRIDE_DIR/index.html")
+        return if (f.isFile) "https://" + ContentStore.WEB_HOST + ContentStore.WEB_PREFIX + "$OVERRIDE_DIR/index.html" else URL
+    }
+
+    /** PC 가 보낸 화면보호기 페이지가 바뀌었을 때: 페이지를 다시 띄운다 (보고 있으면 바로, 아니면 다음에 뜰 때) */
+    fun pageChanged() {
+        val wv = web ?: return
+        val url = pageUrl()
+        if (!active) { loadedUrl = ""; return }
+        releasePlayer(); ytSeq++; webItem = false; resting = false
+        handler.removeCallbacks(restRunnable); handler.removeCallbacks(resumeRunnable)
+        loadedUrl = url
+        wv.loadUrl(url)
+        scheduleRest(fresh = true)
     }
 
     /** main 폴더 내용이 바뀌었을 때 (숫자·그래프 다시 읽기) */
@@ -820,6 +843,8 @@ class Screensaver(
     companion object {
         private const val TAG = "Screensaver"
         private const val URL = "https://" + ContentStore.WEB_HOST + "/assets/screensaver/index.html"
+        /** PC 가 보낸 화면보호기 페이지 폴더 (자료 폴더 안, '_' 로 시작해 메뉴에는 안 보임) */
+        const val OVERRIDE_DIR = "_screensaver"
         /** 다크 모드 페이지 바탕색 (ss.css html.dark 와 같게) */
         private const val DARK_BG = 0xFF0E1319.toInt()
     }

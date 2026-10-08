@@ -229,6 +229,11 @@
     </div><iframe class="ssscreen hidden" id="ssFrame" title="화면보호기 미리보기"></iframe></div></div>
     <div id="ssPanel" class="hidden">
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px"><b style="flex:1">화면보호기 설정</b><span class="hint" id="ssSt"></span><button type="button" id="ssSave">TV 에 저장</button></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <span class="hint" id="ssPageSt" style="flex:1"></span>
+        <button type="button" class="secondary" id="ssPageSend" title="이 PC 프로그램에 들어 있는 화면보호기 화면(index.html · ss.js · ss.css · 그림)을 TV 로 보냅니다. APK 업데이트 없이 화면이 바뀝니다">화면보호기 화면 TV 로 보내기</button>
+        <button type="button" class="secondary" id="ssPageReset" title="PC 가 보낸 화면을 지우고 앱에 내장된 화면으로">내장 화면으로</button>
+      </div>
       <div class="hint">미리보기 — 실적·공지는 TV 의 main 폴더 내용, 고친 공지·동영상·표시 방식은 저장 전에도 바로 보입니다. 동영상 ▶ = 미리보기에서 재생 (TV 에만 있는 영상은 받아 와서 재생)</div>
       <div class="ssCols">
         <div>
@@ -844,6 +849,7 @@
   async function openScreensaver(dir) {
     ssDir = dir; ssConf = {}; ssVidsDirty = false;
     ssPanels = DEFAULT_PANELS.map(normPanel); ssPanelsDirty = false; ssPanelsKnown = !entry(dir + '/현황판.json'); ssRenderPanels();
+    ssPageStatus();
     const tvVids = () => kids(dir).filter(k => !k.d && isMedia(base(k.p))).map(k => base(k.p)).sort(natCmp);
     ssVids = tvVids().map(n => newItem({ name: n }));
     const ta = $('#ssNotice');
@@ -903,6 +909,32 @@
     ssCount(); $('#ssSave').disabled = false;
   }
   $('#ssFrame').addEventListener('load', () => setTimeout(ssPushPanels, 500));
+  // ── 화면보호기 화면(페이지) 배포: PC 프로그램의 screensaver/ 사본을 TV 의 _screensaver/ 로. TV 는 그 폴더가 있으면 내장 대신 그 페이지를 띄운다 ──
+  const SS_PAGE_FILES = ['index.html', 'ss.css', 'ss.js', 'logo.png', 'white.png', 'dark.png'];
+  const SS_PAGE_DIR = '_screensaver';
+  function ssPageStatus() {
+    const has = !!entry(SS_PAGE_DIR + '/index.html');
+    $('#ssPageSt').textContent = has ? `TV 는 PC 가 보낸 화면보호기 화면을 쓰고 있습니다 ([보내기]를 누르면 이 PC 프로그램의 화면과 비교해 바뀐 파일만 보냅니다)` : 'TV 는 앱에 내장된 화면보호기 화면을 쓰고 있습니다';
+    $('#ssPageReset').disabled = !has;
+  }
+  $('#ssPageSend').onclick = async () => {
+    if ($('#ssPageSend').disabled) return;
+    $('#ssPageSend').disabled = true;
+    try {
+      const ops = [];
+      for (const n of SS_PAGE_FILES) {
+        const r = await fetch('/ss/' + n + '?t=' + Date.now()); if (!r.ok) continue;
+        const st = await api('PUT', '/api/stage', await r.blob(), true);
+        ops.push({ op: 'put', path: SS_PAGE_DIR + '/' + n, stage: st.id });
+      }
+      await send(ops, '화면보호기 화면 보내기 (PC v' + ($('#verPill').textContent.replace('PC 프로그램 v', '') || '?') + ')');
+      toast('화면보호기 화면을 보냈습니다. TV 가 받으면 바로 바뀝니다.');
+    } catch (e) { alert(e.message); } finally { $('#ssPageSend').disabled = false; }
+  };
+  $('#ssPageReset').onclick = async () => {
+    if (!confirm('PC 가 보낸 화면보호기 화면을 TV 에서 지우고, 앱에 내장된 화면으로 돌아갈까요?')) return;
+    try { await send([{ op: 'delete', path: SS_PAGE_DIR }], '화면보호기 화면: 내장 화면으로', true); } catch (e) { alert(e.message); }
+  };
   let ssRestShown = false;
   const ssRestPost = (on) => { ssRestShown = on; $('#ssFrame').contentWindow?.postMessage({ ss: { rest: on } }, '*'); $('#ssRestPrev').textContent = on ? '미리보기 끝' : '미리보기'; };
   $('#ssRestPrev').onclick = () => ssRestPost(!ssRestShown);

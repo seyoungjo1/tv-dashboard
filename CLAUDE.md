@@ -10,6 +10,9 @@
 ## 화면보호기
 - `app/src/main/assets/screensaver/` 가 원본이고, PC 미리보기용 사본이 `pc/tvrelay/screensaver/` 에 있다 (폰트 제외).
   원본을 고치면 사본도 같이 복사한다 — `pc/tests` 가 두 사본이 같은지 검사한다.
+- **화면보호기 페이지(index.html · ss.js · ss.css · 그림)만 고친 변경은 APK 를 만들지 않는다.** PC 버전만 `_pN` 으로 올리고,
+  PC 프로그램의 [화면보호기 설정] → [화면보호기 화면 TV 로 보내기]로 배포한다 (TV 의 `_screensaver/` 폴더, 있으면 내장 페이지 대신 씀).
+  안드로이드(Kotlin · 레이아웃 · 설정 키) 변경이 있을 때만 APK 버전을 올린다.
 
 ## 보안
 - 서명 키·비밀번호는 GitHub Secrets 에만. `tvrelay.json`·`grants.json` 은 커밋하지 않는다.

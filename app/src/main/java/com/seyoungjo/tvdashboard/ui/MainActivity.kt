@@ -423,6 +423,8 @@ class MainActivity : AppCompatActivity() {
         handler.postDelayed(reloadRunnable, 800)
     }
 
+    private val ssPageRunnable = Runnable { screensaver.pageChanged() }
+
     private fun onEvent(e: AppEvent) {
         when (e) {
             is AppEvent.Changed -> {
@@ -431,6 +433,9 @@ class MainActivity : AppCompatActivity() {
                 if (e.path.equals(LOGO_FILE, ignoreCase = true)) applyHeader()
                 val top = e.path.substringBefore('/')
                 if (MenuScanner.isMain(top) || e.path.equals(LOGO_FILE, ignoreCase = true)) screensaver.refresh()
+                if (top == Screensaver.OVERRIDE_DIR) {              // PC 가 보낸 화면보호기 페이지 — 다 받은 뒤 한 번만 다시 띄움
+                    handler.removeCallbacks(ssPageRunnable); handler.postDelayed(ssPageRunnable, 1500)
+                }
                 val c = current
                 if (c != null && AppSettings.autoRefresh &&
                     (e.path == c.folder || e.path.startsWith(c.folder + "/"))
