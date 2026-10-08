@@ -246,14 +246,14 @@ html.dark #ssRest .wg .wx { background: rgba(255, 255, 255, .06); border-color: 
 #ssRest .wg .wx .city { font-size: 1.1em; font-weight: 600; opacity: .95; }
 #ssRest .wg .wx .temp { font-size: 3.6em; font-weight: 600; line-height: 1.05; letter-spacing: -1px; }
 #ssRest .wg .wx .r { text-align: right; }
-#ssRest .wg .wx .ico { width: 2.2em; height: 2.2em; margin-left: auto; }
+#ssRest .wg .wx .ico { width: 3.8em; height: 3.8em; margin-left: auto; margin-top: -.3em; }
 #ssRest .wg .wx .ico svg { width: 100%; height: 100%; }
 #ssRest .wg .wx .desc { font-size: 1.05em; font-weight: 600; margin-top: 2px; }
 #ssRest .wg .wx .hl { font-size: .95em; opacity: .8; }
 #ssRest .wg .wx .hours { display: flex; justify-content: space-between; gap: 4px; margin-top: 4%; }
 #ssRest .wg .wx .hours div { flex: 1; text-align: center; font-size: .95em; }
 #ssRest .wg .wx .hours span { display: block; opacity: .8; white-space: nowrap; }
-#ssRest .wg .wx .hours em { display: block; width: 1.8em; height: 1.8em; margin: 4px auto; }
+#ssRest .wg .wx .hours em { display: block; width: 2.2em; height: 2.2em; margin: 4px auto; }
 #ssRest .wg .wx .hours em svg { width: 100%; height: 100%; }
 #ssRest .wg .wx .hours strong { font-weight: 600; }
 #ssRest .wg .logo { flex: 0 0 auto; text-align: center; margin-top: 5%; }
