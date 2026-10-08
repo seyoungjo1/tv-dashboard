@@ -106,12 +106,24 @@ TV를 **자료 저장소 + 화면 표시기**로 사용하는 Android 앱입니�
     style.css · app.js · 기타 이미지
   02_지원팀/
     ...
+  03_일정/
+    icon.png · index.html
+    CustomEventList.json  ← 노츠 캘린더 뷰 내보내기(JSON) 를 그대로 올리면 월 달력으로 표시
 ```
 
 ### 예제 대시보드 (vDesk 스타일)
 `sample/자료/01_생산팀` 은 색상 타일 4개 + 목록 2개 + 게이지·막대·도넛 카드로 구성되며, **화면 내용은 전부 `data.json` 으로 바꿉니다.**
 `tiles[]`(label·value·sub·color), `lists[]`(title·color·items[time·text·tag]), `cards[]`(type: gauge / bars / donut).
 색 이름: blue · green · red · orange · sky · teal · purple · pink · gray (또는 `#RRGGBB`). 외부 라이브러리를 쓰지 않아 오프라인에서도 그대로 표시됩니다.
+
+### 예제 일정 캘린더 (1796 × 1002 기준)
+`sample/자료/03_일정` 은 같은 폴더의 **`CustomEventList.json`**(노츠 캘린더 뷰 `?ReadViewEntries&OutputFormat=JSON` 내보내기, 파일명 고정)을 상대 경로로 읽어
+월 달력(일요일·공휴일 빨강, 토요일 파랑, 오늘 표시, 기간 일정 막대, 칸을 넘치면 `+N 더보기`)과 오른쪽에 선택한 날의 일정 목록을 보여 줍니다.
+- 열 해석: `$147` 제목 · `$153` 담당 · `$144`/`$146` 시작·끝 · `$StartDate`/`$EndDate` 날짜 · `_AllDay` 종일 · `$Color` 색(`#RRGGBB|`) · `$Custom` 장소(`|장소|`).
+  색이 없으면 제목으로 분류(휴가·출장·교육·기타)해 색을 정합니다. 뷰가 기간 일정을 날짜마다 한 줄씩 넣어 주므로 같은 문서·같은 기간은 막대 하나로 이어 그립니다.
+- 저장·누적하지 않습니다. JSON 을 다시 올리면 그 내용만 다시 그립니다(1분마다 다시 읽고, 바뀌었으면 갱신).
+- 공휴일은 2025~2027 이 내장되어 있고, 같은 폴더에 `holidays.json`(`{"20280101":"신정"}`) 을 두면 덧붙여집니다.
+- 화면은 1796 × 1002 로 설계되어 있고 WebView 크기에 맞춰 비율을 유지한 채 확대·축소됩니다.
 
 ### 폰트
 앱 화면은 **Pretendard Bold/ExtraBold**(굵은 한글 서체, SIL OFL 무료 라이선스)를 사용합니다. 대시보드 HTML에서도 앱에 내장된 폰트를 인터넷 없이 쓸 수 있습니다:
