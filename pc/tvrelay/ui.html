@@ -898,6 +898,7 @@
   async function openScreensaver(dir) {
     ssDir = dir; ssConf = {}; ssVidsDirty = false;
     ssPanels = DEFAULT_PANELS.map(normPanel); ssPanelsDirty = false; ssPanelsKnown = !entry(dir + '/현황판.json'); ssRenderPanels();
+    ssRestDirty = false;
     ssPageStatus();
     const tvVids = () => kids(dir).filter(k => !k.d && isMedia(base(k.p))).map(k => base(k.p)).sort(natCmp);
     ssVids = tvVids().map(n => newItem({ name: n }));
@@ -913,7 +914,8 @@
     ssNoticeKnown = !hasNotice || cachedNotice !== null;          // TV 에 공지가 없거나, 받아 둔 내용이 있으면 '알고 있음'
     if (cachedNotice !== null) ta.value = cachedNotice.replace(/^﻿/, '').trim();
     try { const c = await get('설정.json'); if (c) ssConf = JSON.parse(c) || {}; } catch (_) {}
-    const applyRest = () => { const f = ssConf.rest?.fit === 'fit' ? 'fit' : 'crop'; const r = document.querySelector(`input[name=ssRestFit][value=${f}]`); if (r) r.checked = true;
+    const applyRest = () => { if (ssRestDirty) return;              // 고치는 중이면 늦게 온 TV 내용으로 덮지 않는다
+      const f = ssConf.rest?.fit === 'fit' ? 'fit' : 'crop'; const r = document.querySelector(`input[name=ssRestFit][value=${f}]`); if (r) r.checked = true;
       $('#ssRestOn').checked = !!ssConf.rest?.enabled; $('#ssRestRun').value = +ssConf.rest?.runMin > 0 ? +ssConf.rest.runMin : 10; $('#ssRestMin').value = +ssConf.rest?.restMin > 0 ? +ssConf.rest.restMin : 30; };
     applyRest();
     const loadPanels = async () => { try { const c = await get('현황판.json'); if (c === null) return false; const j = JSON.parse(c);
@@ -988,8 +990,9 @@
   let ssRestShown = false;
   const ssRestPost = (on) => { ssRestShown = on; $('#ssFrame').contentWindow?.postMessage({ ss: { rest: on } }, '*'); $('#ssRestPrev').textContent = on ? '미리보기 끝' : '미리보기'; };
   $('#ssRestPrev').onclick = () => ssRestPost(!ssRestShown);
-  ['#ssRestOn', '#ssRestRun', '#ssRestMin'].forEach(id => $(id).addEventListener('change', () => { ssVidsDirty = true; }));
-  $('#ssRestOpt').addEventListener('change', () => { ssVidsDirty = true; if (ssRestShown) { ssRestPost(false); setTimeout(() => ssRestPost(true), 500); } });
+  let ssRestDirty = false;                                   // 쉬는 화면 설정을 직접 고쳤는가 (TV 내용으로 덮지 않게)
+  ['#ssRestOn', '#ssRestRun', '#ssRestMin'].forEach(id => $(id).addEventListener('input', () => { ssVidsDirty = true; ssRestDirty = true; }));
+  $('#ssRestOpt').addEventListener('change', () => { ssVidsDirty = true; ssRestDirty = true; if (ssRestShown) { ssRestPost(false); setTimeout(() => ssRestPost(true), 500); } });
   $('#ssSave').onclick = async () => {
     const lines = ssLines();
     const conf = Object.assign({}, ssConf);
@@ -1025,6 +1028,7 @@
       say('');
       // 이름을 옮기는 작업과 함께 보내므로 '바뀐 파일만' 비교는 끈다 (옮기기 전 이름과 비교하면 틀릴 수 있음)
       await send(ops, '화면보호기 설정 저장' + (ssVids.some(v => v.file) ? ` (동영상·사진 ${ssVids.filter(v => v.file).length}개 올림)` : ''), ops.some(o => o.op === 'delete'));
+      ssConf = conf; ssRestDirty = false; ssVidsDirty = false;   // 보낸 내용이 기준
     } catch (e) { alert(e.message); } finally { $('#ssSave').disabled = false; }
     function say(t) { $('#ssSt').textContent = t; }
   };
