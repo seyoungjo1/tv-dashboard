@@ -75,9 +75,9 @@
   #ssPage { padding:0; } #ssHost { display:flex; height:calc(100vh - 100px); min-height:520px; }
   #ssHost #tvpane { width:auto; flex:1; min-width:0; border-left:0; flex-direction:row; }
   #ssHost #tvpane .phead { display:none; }
-  #ssHost #tvpane .tvwrap { flex:0 0 52%; align-items:flex-start; padding:16px; }
+  #ssHost #tvpane .tvwrap { flex:0 0 40%; align-items:flex-start; padding:14px; }
   #ssHost #tvpane .tvbox { width:calc(100% - 20px); }
-  #ssHost #ssPanel { flex:1; border-left:1px solid var(--line); background:#fff; padding:8px 16px 16px; }
+  #ssHost #ssPanel { flex:1; border-left:1px solid var(--line); background:#f4f6f8; padding:4px 16px 16px; }
   #ssHost #tvpane.collapsed { display:flex; }
   .tvwrap { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:14px; overflow:hidden; }
   .tvbox { position:relative; box-sizing:content-box; width:calc(100% - 20px); aspect-ratio:16/9; background:#000; border:10px solid #111; border-radius:12px; overflow:hidden; box-shadow:0 6px 24px rgba(0,0,0,.25); }
@@ -85,6 +85,22 @@
   .tvbox .ssscreen { position:absolute; inset:0; border:0; width:100%; height:100%; background:#eaeef3; z-index:5; }
   #tvpane.ss .tvwrap { flex:none; }
   #ssPanel { flex:1; min-height:0; overflow:auto; padding:2px 14px 14px; }
+  .sstop { display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; } .sstop .sp { flex:1; } .sstop b { font-size:15px; }
+  .sscard { border:1px solid var(--line); border-radius:10px; background:#fff; margin-top:10px; }
+  .sscard > summary { cursor:pointer; padding:9px 12px; font-weight:800; font-size:14px; list-style:none; display:flex; align-items:center; gap:8px; }
+  .sscard > summary::before { content:'▸'; color:var(--dim); font-size:12px; } .sscard[open] > summary::before { content:'▾'; }
+  .sscard > summary .hint { font-weight:600; }
+  .sscard .body { padding:2px 12px 12px; border-top:1px solid #eef1f4; }
+  .sscard .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:8px; }
+  .sscard .row .lb { color:var(--dim); font-size:12px; } .sscard .row label { margin:0; display:flex; align-items:center; gap:5px; font-size:13px; }
+  .sscard .row input[type=number] { width:64px; } .sscard .row .hint { flex-basis:100%; }
+  #ssHost .sscard .row .hint { flex-basis:auto; flex:1; min-width:200px; }
+  #ssJsonList { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; } #ssJsonList span { border:1px solid var(--line); border-radius:6px; padding:3px 8px; background:#f7f9fb; color:var(--text); }
+  /* 동영상 줄: 첫 줄 이름 · 조작 버튼, 둘째 줄 표시 방식 */
+  #ssVids .v { display:block; }
+  #ssVids .v .hd { display:flex; align-items:center; gap:6px; } #ssVids .v .hd .f { flex:1; }
+  #ssVids .v .o { margin-top:6px; padding-top:6px; border-top:1px dashed #e4e9ef; } #ssVids .v .o .g { display:flex; align-items:center; gap:3px; }
+  #ssVids .v .o .g i { font-style:normal; color:var(--dim); font-size:11px; }
   #ssPanel h4 { margin:12px 0 6px; font-size:14px; }
   #ssPanel textarea { width:100%; box-sizing:border-box; min-height:110px; font-family:inherit; font-size:14px; line-height:1.7; padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
   #ssPanel .ssCols { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
@@ -241,49 +257,68 @@
       <div class="tvm"><div class="tvs" id="tvSide"></div><div class="tvhd"><div id="tvMenuBtn">◁</div></div><div class="tvc" id="tvContent"></div></div>
     </div><iframe class="ssscreen hidden" id="ssFrame" title="화면보호기 미리보기"></iframe></div></div>
     <div id="ssPanel" class="hidden">
-      <div style="display:flex;align-items:center;gap:8px;margin-top:6px"><b style="flex:1">화면보호기 설정</b><span class="hint" id="ssSt"></span><button type="button" id="ssSave">TV 에 저장</button></div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
-        <span class="hint" id="ssPageSt" style="flex:1"></span>
-        <button type="button" class="secondary" id="ssPageSend" title="이 PC 프로그램에 들어 있는 화면보호기 화면(index.html · ss.js · ss.css · 그림)을 TV 로 보냅니다. APK 업데이트 없이 화면이 바뀝니다">화면보호기 화면 TV 로 보내기</button>
+      <div class="sstop">
+        <b>화면보호기 설정</b><span class="hint" id="ssSt"></span>
+        <span class="sp"></span>
+        <button type="button" class="secondary" id="ssPageSend" title="이 PC 프로그램에 들어 있는 화면보호기 화면(index.html · ss.js · ss.css · 그림)을 TV 로 보냅니다. APK 업데이트 없이 화면이 바뀝니다">화면 TV 로 보내기</button>
         <button type="button" class="secondary" id="ssPageReset" title="PC 가 보낸 화면을 지우고 앱에 내장된 화면으로">내장 화면으로</button>
+        <button type="button" id="ssSave">TV 에 저장</button>
       </div>
-      <div class="hint">미리보기 — 실적·공지는 TV 의 main 폴더 내용, 고친 공지·동영상·표시 방식은 저장 전에도 바로 보입니다. 동영상 ▶ = 미리보기에서 재생 (TV 에만 있는 영상은 받아 와서 재생)</div>
-      <div class="ssCols">
-        <div>
-          <h4>공지사항 <span class="hint" id="ssCount"></span></h4>
-          <textarea id="ssNotice" placeholder="한 줄에 공지 하나 (위에서부터 5개까지 표시)&#10;예) 10월 정기교육은 14일에 진행됩니다."></textarea>
-          <h4>쉬는 화면 <span class="hint">켜 두면 동영상을 재생 시간만큼 튼 뒤 쉬는 시간 동안 동영상 칸에 이 화면 (터치하면 다시 재생)</span></h4>
-          <div class="opt" id="ssRestOpt">
-            <label><input type="radio" name="ssRestFit" value="crop" checked> <b>크롭</b><br>그림이 칸을 꽉 채움 (넘치는 쪽 잘림)</label>
-            <label><input type="radio" name="ssRestFit" value="fit"> <b>확장</b><br>그림 전체가 보임 (남는 곳은 바탕색)</label>
-            <button type="button" class="secondary" id="ssRestPrev" style="flex:0 0 auto">미리보기</button>
-          </div>
-          <div style="display:flex;gap:14px;align-items:center;margin-top:8px;flex-wrap:wrap">
-            <label style="margin:0"><input type="checkbox" id="ssRestOn"> 동영상 쉬는 시간 사용</label>
-            <label style="margin:0">재생 시간(분) <input type="number" id="ssRestRun" min="1" value="10" style="width:70px"></label>
-            <label style="margin:0">쉬는 시간(분) <input type="number" id="ssRestMin" min="1" value="30" style="width:70px"></label>
-          </div>
-          <div class="hint" style="margin-top:4px">그림은 main 폴더에 <b>white.png</b>(밝은 모드) · <b>dark.png</b>(다크 모드)로 올립니다 (탐색기에서 끌어다 놓기). 없으면 기본 그림(DAESANG 로고)을 보여 줍니다</div>
-          <h4>현황판 항목 <span class="hint">매출 · 생산량 · 전력량 … 최대 4개 — 저장하면 main/현황판.json 으로, TV 는 앱 업데이트 없이 바로 반영</span></h4>
-          <div id="ssPanels"></div>
-          <button type="button" class="secondary" id="ssAddPanel">+ 항목 추가</button>
-          <button type="button" class="secondary" id="ssPanelsReset">기본(매출 · 생산량)으로</button>
-          <div class="hint" style="margin-top:6px">파일 = main 폴더의 일별 JSON(날짜 · 구분 · 숫자 칸을 값 모양으로 찾음) · 표시 = 값 ÷ 나누기, 소수 자리, 단위 ·
-          비교 = 전년 같은 기간 대비 / 월 계획 파일 대비 달성율(계획이 원 단위면 계획 나누기 1000) / 없음 ·
-          값 칸 = 숫자 칸이 여럿일 때 이름 일부(예: 사용량) · 제외 = 빼고 계산할 구분(쉼표로) · 보정 = fi.json 식 비율 파일(매출)</div>
-</div>
-        </div>
-        <div>
-          <h4>동영상 · 사진 <span class="hint">위에서부터 순서대로 반복 재생 · 항목마다 표시 방식 · 사진은 보여 줄 시간과 전환 효과</span></h4>
+      <div class="hint" id="ssPageSt" style="margin:2px 0 8px"></div>
+
+      <details class="sscard" open>
+        <summary>공지사항 <span class="hint" id="ssCount"></span></summary>
+        <div class="body"><textarea id="ssNotice" placeholder="한 줄에 공지 하나 (위에서부터 5개까지 표시)&#10;예) 10월 정기교육은 14일에 진행됩니다."></textarea></div>
+      </details>
+
+      <details class="sscard" open>
+        <summary>동영상 · 사진 <span class="hint">위에서부터 순서대로 반복 · 항목마다 표시 방식</span></summary>
+        <div class="body">
           <div id="ssVids"></div>
-          <button type="button" class="secondary" id="ssAddVid">+ 동영상·사진 추가</button>
-          <button type="button" class="secondary" id="ssAddYt">+ 유튜브 링크 추가</button>
-          <div class="hint" style="margin-top:6px">크롭 = 칸을 꽉 채우고 긴 쪽을 자름(위·가운데·아래 맞춤) · 확장 = 작은 쪽을 맞춰 전체가 보이고 남는 곳은 블러/단색<br>
-          사진 전환 효과: 모핑 · 쉐이딩 · 닦아내기 · 원형 · 블라인드 · 랜덤 (앞 장면에서 그 사진으로 바뀔 때)<br>
-          유튜브는 TV 가 인터넷에 연결돼 있어야 하고, 퍼가기가 막힌 영상은 건너뜁니다</div>
+          <div class="row"><button type="button" class="secondary" id="ssAddVid">+ 동영상·사진 추가</button><button type="button" class="secondary" id="ssAddYt">+ 유튜브 링크</button>
+            <span class="hint">크롭 = 꽉 채우고 긴 쪽 자름 · 확장 = 전체 보임, 남는 곳 블러/단색 · 직접 조절 = 크기 % 와 X·Y px 로 위치 보정</span></div>
           <input type="file" id="ssVidInput" accept="video/*,image/*,.mp4,.m4v,.webm,.mkv,.mov,.3gp,.ts,.jpg,.jpeg,.png,.webp,.gif,.bmp" multiple class="hidden">
         </div>
-      </div>
+      </details>
+
+      <details class="sscard">
+        <summary>쉬는 화면 <span class="hint">재생 시간이 지나면 동영상 칸에 뜨는 화면 · 터치하면 다시 재생</span></summary>
+        <div class="body">
+          <div class="row">
+            <label class="chk"><input type="checkbox" id="ssRestOn"> 동영상 쉬는 시간 사용</label>
+            <label>재생 <input type="number" id="ssRestRun" min="1" value="10"> 분</label>
+            <label>쉬는 시간 <input type="number" id="ssRestMin" min="1" value="30"> 분</label>
+          </div>
+          <div class="row" id="ssRestOpt">
+            <span class="lb">그림 표시</span>
+            <label class="chk"><input type="radio" name="ssRestFit" value="crop" checked> 크롭 (꽉 채움)</label>
+            <label class="chk"><input type="radio" name="ssRestFit" value="fit"> 확장 (전체 보임)</label>
+            <button type="button" class="secondary" id="ssRestPrev">미리보기</button>
+          </div>
+          <div class="hint">그림을 바꾸려면 main 폴더에 <b>white.png</b>(밝은 모드) · <b>dark.png</b>(다크 모드)를 올리세요. 없으면 기본 그림(DAESANG)</div>
+        </div>
+      </details>
+
+      <details class="sscard">
+        <summary>실적 JSON <span class="hint">매출 · 생산 · 계획 파일 올리기</span></summary>
+        <div class="body">
+          <div id="ssJsonList" class="hint"></div>
+          <div class="row"><button type="button" class="secondary" id="ssJsonAdd">+ JSON 올리기</button>
+            <span class="hint">같은 이름이면 덮어씁니다 · 엑셀 붙여넣기로 고치려면 [파일 탐색기] → main → 그 JSON 선택</span></div>
+          <input type="file" id="ssJsonInput" accept=".json,application/json" multiple class="hidden">
+        </div>
+      </details>
+
+      <details class="sscard">
+        <summary>현황판 항목 <span class="hint">매출 · 생산량 · 전력량 … 최대 4개</span></summary>
+        <div class="body">
+          <div id="ssPanels"></div>
+          <div class="row"><button type="button" class="secondary" id="ssAddPanel">+ 항목 추가</button><button type="button" class="secondary" id="ssPanelsReset">기본(매출 · 생산량)으로</button></div>
+          <div class="hint">파일 = main 의 일별 JSON (날짜 · 구분 · 숫자 칸을 값 모양으로 찾음) · 표시 = 값 ÷ 나누기, 소수 자리, 단위 ·
+          비교 = 전년 같은 기간 / 월 계획 대비 달성율(계획이 원 단위면 계획 나누기 1000) / 없음 ·
+          값 칸 = 숫자 칸이 여럿일 때 이름 일부 · 제외 = 빼고 계산할 구분(쉼표) · 보정 = fi.json 식 비율 파일(매출)</div>
+        </div>
+      </details>
     </div>
   </section>
 </div>
@@ -678,31 +713,32 @@
   function ssCount() { const n = ssLines().length; $('#ssCount').textContent = n ? `${n}개${n > 5 ? ' — 5개까지만 표시' : ''}` : '(없으면 공지 칸 숨김)'; ssPush(); }
   function ssRenderVids() {
     $('#ssVids').innerHTML = ssVids.map((v, i) => `<div class="v${v.file ? ' new' : ''}${v.yt ? ' yt' : ''}">
-      <span class="n">${v.yt ? '▶ 유튜브' : (isPhoto(v) ? '🖼 ' : '') + esc(target(v))}</span>
-      <span class="f" title="${esc(vidLabel(v))}">${v.file ? '새 파일 · ' : ''}${esc(vidLabel(v))}${v.file ? ' (' + size(v.file.size) + ')' : ''}</span>
-      <span class="o">
-        <select data-k="fit" data-i="${i}">${[['crop', '크롭'], ['fit', '확장'], ['custom', '직접 조절']].map(([k, t]) => `<option value="${k}"${(v.fit || 'fit') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      <div class="hd"><span class="n">${v.yt ? '▶ 유튜브' : (isPhoto(v) ? '🖼' : '🎬') + ' ' + (i + 1)}</span>
+        <span class="f" title="${esc(vidLabel(v))}">${v.file ? '새 파일 · ' : ''}${esc(vidLabel(v))}${v.file ? ' (' + size(v.file.size) + ')' : ''}</span>
+        <button class="secondary" data-vp="${i}" title="미리보기에서 재생${!v.yt && !v.file && !ssHave.has(v.name) ? ' (TV 에서 받아 옴)' : ''}">▶</button>
+        <button class="secondary" data-vu="${i}" ${i ? '' : 'disabled'}>▲</button><button class="secondary" data-vd="${i}" ${i < ssVids.length - 1 ? '' : 'disabled'}>▼</button><button class="danger" data-vx="${i}">✕</button></div>
+      <div class="o">
+        <span class="g"><i>표시</i><select data-k="fit" data-i="${i}">${[['crop', '크롭'], ['fit', '확장'], ['custom', '직접 조절']].map(([k, t]) => `<option value="${k}"${(v.fit || 'fit') === k ? ' selected' : ''}>${t}</option>`).join('')}</select></span>
         ${v.fit === 'custom' ? customCtl(v, i) : v.fit === 'crop'
-          ? `<select data-k="align" data-i="${i}">${[['top', '위쪽 맞춤'], ['center', '가운데 맞춤'], ['bottom', '아래쪽 맞춤']].map(([k, t]) => `<option value="${k}"${(v.align || 'center') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>`
-          : `<select data-k="fill" data-i="${i}"><option value="blur"${v.fill !== 'color' ? ' selected' : ''}>남는 곳 블러</option><option value="color"${v.fill === 'color' ? ' selected' : ''}>남는 곳 단색</option></select>` +
-            (v.fill === 'color' ? `<input type="color" data-k="color" data-i="${i}" value="${esc(v.color || '#000000')}" title="채울 색">` : '')}
-        ${isPhoto(v) ? `<input type="number" data-k="dur" data-i="${i}" value="${v.dur || 8}" min="2" max="3600" step="1" title="보여 줄 시간(초)" style="width:52px">초
-          <select data-k="effect" data-i="${i}" title="이 사진으로 바뀔 때 전환 효과">${EFFECTS.map(([k, t]) => `<option value="${k}"${(v.effect || 'morph') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>` : ''}
-      </span>
-      <button class="secondary" data-vp="${i}" title="미리보기에서 재생${!v.yt && !v.file && !ssHave.has(v.name) ? ' (TV 에서 받아 옴)' : ''}">▶</button>
-      <button class="secondary" data-vu="${i}">▲</button><button class="secondary" data-vd="${i}">▼</button><button class="danger" data-vx="${i}">✕</button></div>`).join('')
+          ? `<span class="g"><i>맞춤</i><select data-k="align" data-i="${i}">${[['top', '위쪽'], ['center', '가운데'], ['bottom', '아래쪽']].map(([k, t]) => `<option value="${k}"${(v.align || 'center') === k ? ' selected' : ''}>${t}</option>`).join('')}</select></span>`
+          : `<span class="g"><i>남는 곳</i><select data-k="fill" data-i="${i}"><option value="blur"${v.fill !== 'color' ? ' selected' : ''}>블러</option><option value="color"${v.fill === 'color' ? ' selected' : ''}>단색</option></select>` +
+            (v.fill === 'color' ? `<input type="color" data-k="color" data-i="${i}" value="${esc(v.color || '#000000')}" title="채울 색">` : '') + '</span>'}
+        ${isPhoto(v) ? `<span class="g"><i>시간</i><input type="number" data-k="dur" data-i="${i}" value="${v.dur || 8}" min="2" max="3600" step="1" title="보여 줄 시간(초)" style="width:52px">초</span>
+          <span class="g"><i>전환</i><select data-k="effect" data-i="${i}" title="이 사진으로 바뀔 때 전환 효과">${EFFECTS.map(([k, t]) => `<option value="${k}"${(v.effect || 'morph') === k ? ' selected' : ''}>${t}</option>`).join('')}</select></span>` : ''}
+      </div></div>`).join('')
       || '<div class="hint">동영상·사진이 없습니다.</div>';
     ssPush();
   }
-  // 직접 조절: 100% 기준(크롭/확장) · 크기(%) · 가로 기준+px · 세로 기준+px · 남는 곳(블러/단색)
+  // 직접 조절: 100% 기준(크롭/확장) · 크기(%) · X 기준+px · Y 기준+px · 남는 곳(블러/단색)
   function customCtl(v, i) {
     const sel = (k, opts, cur) => `<select data-k="${k}" data-i="${i}">${opts.map(([o, t]) => `<option value="${o}"${cur === o ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
     const num = (k, val, w, t) => `<input type="number" data-k="${k}" data-i="${i}" value="${val}" step="${k === 'scale' ? 5 : 10}" title="${t}" style="width:${w}px">`;
-    return sel('base', [['crop', '크롭=100%'], ['fit', '확장=100%']], v.base || 'crop') + num('scale', v.scale || 100, 58, '크기 %') + '%' +
-      sel('halign', [['left', '왼쪽 기준'], ['center', '가로 가운데'], ['right', '오른쪽 기준']], v.halign || 'center') + num('offsetX', v.offsetX || 0, 62, '가로 px (음수 가능)') + 'px' +
-      sel('valign', [['top', '위쪽 기준'], ['center', '세로 가운데'], ['bottom', '아래쪽 기준']], v.valign || 'center') + num('offsetY', v.offsetY || 0, 62, '세로 px (음수 가능)') + 'px' +
-      sel('fill', [['blur', '남는 곳 블러'], ['color', '남는 곳 단색']], v.fill === 'color' ? 'color' : 'blur') +
-      (v.fill === 'color' ? `<input type="color" data-k="color" data-i="${i}" value="${esc(v.color || '#000000')}" title="채울 색">` : '');
+    return `<span class="g"><i>기준</i>${sel('base', [['crop', '크롭=100%'], ['fit', '확장=100%']], v.base || 'crop')}</span>` +
+      `<span class="g"><i>크기</i>${num('scale', v.scale || 100, 58, '크기 %')}%</span>` +
+      `<span class="g"><i>X</i>${sel('halign', [['left', '왼쪽'], ['center', '가운데'], ['right', '오른쪽']], v.halign || 'center')}${num('offsetX', v.offsetX || 0, 62, '가로 px (음수 가능)')}px</span>` +
+      `<span class="g"><i>Y</i>${sel('valign', [['top', '위쪽'], ['center', '가운데'], ['bottom', '아래쪽']], v.valign || 'center')}${num('offsetY', v.offsetY || 0, 62, '세로 px (음수 가능)')}px</span>` +
+      `<span class="g"><i>남는 곳</i>${sel('fill', [['blur', '블러'], ['color', '단색']], v.fill === 'color' ? 'color' : 'blur')}` +
+      (v.fill === 'color' ? `<input type="color" data-k="color" data-i="${i}" value="${esc(v.color || '#000000')}" title="채울 색">` : '') + '</span>';
   }
   // 영상 비율(가로/세로): 새 파일·받아 둔 영상은 실제 값, 유튜브는 쇼츠 9:16 · 일반 16:9, 모르면 16:9 로 가정
   let ssBox = [742, 928];                                    // 미리보기가 알려 주는 동영상 칸 크기 (1080p 기준)
@@ -812,6 +848,21 @@
     ssRenderVids();
   });
   $('#ssAddVid').onclick = () => { $('#ssVidInput').value = ''; $('#ssVidInput').click(); };
+  // 실적 JSON: main 의 JSON 목록 + 올리기 (같은 이름은 덮어씀, 바뀌지 않은 파일은 보내지 않음)
+  function ssRenderJson() {
+    const list = kids(ssDir).filter(k => !k.d && /\.json$/i.test(k.p) && !/^(설정|현황판)\.json$/i.test(base(k.p))).sort((a, b) => natCmp(a.p, b.p));
+    $('#ssJsonList').innerHTML = list.length ? list.map(k => `<span title="${esc(size(k.s))}">${esc(base(k.p))}</span>`).join('') : 'main 폴더에 JSON 이 없습니다 (생산.json · sd.json · fi.json · plan.json 등)';
+  }
+  $('#ssJsonAdd').onclick = () => { $('#ssJsonInput').value = ''; $('#ssJsonInput').click(); };
+  $('#ssJsonInput').onchange = async (e) => {
+    const files = [...e.target.files]; if (!files.length) return;
+    try {
+      const ops = [];
+      for (const f of files) { try { JSON.parse(await f.text()); } catch (_) { alert(f.name + ' 은(는) JSON 이 아닙니다.'); return; }
+        const st = await api('PUT', '/api/stage', f, true); ops.push({ op: 'put', path: ssDir + '/' + f.name, stage: st.id }); }
+      await send(ops, 'JSON 올리기 (' + files.map(f => f.name).join(', ') + ')');
+    } catch (err) { alert(err.message); }
+  };
   $('#ssVidInput').onchange = (e) => { ssVidsDirty = true; [...e.target.files].sort((a, b) => natCmp(a.name, b.name)).forEach(f => {
     const i = ssVids.findIndex(v => !v.yt && target(v) === safeName(f.name));             // 같은 이름이 이미 있으면 그 자리를 새 파일로
     if (i >= 0) ssVids[i] = Object.assign({}, ssVids[i], { file: f, name: undefined }); else ssVids.push(newItem({ file: f })); }); ssRenderVids(); e.target.value = ''; };
@@ -898,6 +949,7 @@
   async function openScreensaver(dir) {
     ssDir = dir; ssConf = {}; ssVidsDirty = false;
     ssPanels = DEFAULT_PANELS.map(normPanel); ssPanelsDirty = false; ssPanelsKnown = !entry(dir + '/현황판.json'); ssRenderPanels();
+    ssRenderJson();
     ssRestDirty = false;
     ssPageStatus();
     const tvVids = () => kids(dir).filter(k => !k.d && isMedia(base(k.p))).map(k => base(k.p)).sort(natCmp);
