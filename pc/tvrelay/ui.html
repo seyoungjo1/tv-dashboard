@@ -265,7 +265,6 @@
         <button type="button" id="ssSave">TV 에 저장</button>
       </div>
       <div class="hint" id="ssPageSt" style="margin:2px 0 8px"></div>
-      <div class="hint" id="ssTvRest" style="margin:-4px 0 8px"></div>
 
       <details class="sscard" open>
         <summary>공지사항 <span class="hint" id="ssCount"></span></summary>
@@ -654,7 +653,7 @@
         // 보내기는 TV 가 꺼져 있어도 맡겨지므로, 연결 상태는 '마지막 응답'만 차분하게 (15분 넘게 소식 없을 때만 꺼짐으로)
         pill.className = 'pill ' + (state.online ? 'on' : 'off');
         const ago = state.age_sec < 60 ? '방금' : state.age_sec < 3600 ? Math.round(state.age_sec / 60) + '분 전' : Math.round(state.age_sec / 3600) + '시간 전';
-        verWarn(state.status?.versionName); ssTvRestStatus();
+        verWarn(state.status?.versionName);
         pill.textContent = `📺 ${info?.tv || 'TV'} · ` + (state.online ? `응답 ${ago}` : `꺼진 것 같음 (마지막 응답 ${ago})`) + ` · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}` + (state.status?.videoError ? ` · ⚠ 화면보호기 동영상 재생 실패: ${state.status.videoError}` : '');
         pill.title = state.cached ? '저장해 둔 마지막 상태 — TV 확인 중' : '';
       }
@@ -1017,13 +1016,7 @@
   // ── 화면보호기 화면(페이지) 배포: PC 프로그램의 screensaver/ 사본을 TV 의 _screensaver/ 로. TV 는 그 폴더가 있으면 내장 대신 그 페이지를 띄운다 ──
   const SS_PAGE_FILES = ['index.html', 'ss.css', 'ss.js', 'logo.png', 'white.png', 'dark.png', 'version.txt'];
   const SS_PAGE_DIR = '_screensaver';
-  function ssTvRestStatus() {
-    const r = state?.status?.ssRest; const el = $('#ssTvRest');
-    if (!r) { el.textContent = ''; return; }
-    el.textContent = 'TV 가 읽은 쉬는 시간: ' + (r.enabled ? `켜짐 — 재생 ${r.runMin}분 · 쉬는 시간 ${r.restMin}분` : '꺼짐') + ' (설정.json 기준, TV 상태를 받을 때 갱신)';
-  }
   function ssPageStatus() {
-    ssTvRestStatus();
     const has = !!entry(SS_PAGE_DIR + '/index.html');
     $('#ssPageSt').textContent = has ? `TV 는 PC 가 보낸 화면보호기 화면을 쓰고 있습니다 ([보내기]를 누르면 이 PC 프로그램의 화면과 비교해 바뀐 파일만 보냅니다)` : 'TV 는 앱에 내장된 화면보호기 화면을 쓰고 있습니다';
     $('#ssPageReset').disabled = !has;

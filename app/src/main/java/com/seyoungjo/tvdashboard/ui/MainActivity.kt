@@ -804,7 +804,8 @@ class MainActivity : AppCompatActivity() {
     private fun showIdle() {
         if (!resumed) return
         handler.removeCallbacks(idleRunnable)
-        disarmTap()                                    // '한 번 더 눌러 주세요' 가 남아 있지 않게 (멘트도 원래대로)
+        handler.removeCallbacks(disarmTapRunnable)
+        tapArmedAt = 0L
         idleOverlay.visibility = View.VISIBLE
         idleOverlay.bringToFront()
         if (hasMain) {                                 // 화면보호기 (공지·실적 그래프·동영상, 멘트는 페이지 맨 아래)

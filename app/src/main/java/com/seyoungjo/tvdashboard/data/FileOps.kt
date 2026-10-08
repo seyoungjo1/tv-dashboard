@@ -263,8 +263,6 @@ class FileOps(private val ctx: Context) {
             .put("addresses", addrs)
             .put("deletedOnUninstall", ContentStore.effectiveMode() == "app")
             .put("videoError", VideoDiag.last)               // 화면보호기 동영상 마지막 실패 이유 (비어 있으면 정상)
-            .put("ssRest", MenuScanner.mainRest(MenuScanner.mainDir(root)).let {   // TV 가 읽은 쉬는 시간 설정 (PC 화면보호기 탭에 표시)
-                JSONObject().put("enabled", it.enabled).put("runMin", it.runMin).put("restMin", it.restMin) })
     }
 
     fun menu(): JSONObject {
