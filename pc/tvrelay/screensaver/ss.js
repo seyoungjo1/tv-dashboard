@@ -35,7 +35,8 @@
       var v = $('video'); try { parent.postMessage({ ssBox: [v.clientWidth, v.clientHeight] }, '*'); } catch (e) {}
     }
     if (!TV) return;
-    var r = $('video').getBoundingClientRect();
+    var r = restManual ? { left: 0, top: 0, width: 1, height: 1 }      // 눈 버튼 쉬는 동안: 앱 플레이어를 1픽셀로 (쉬는 화면이 그 뒤에 가려지지 않게)
+      : $('video').getBoundingClientRect();
     try { TV.videoRect(r.left, r.top, r.width, r.height, innerWidth, innerHeight); } catch (e) {}
     reportEdit();
   }
@@ -448,6 +449,7 @@
     var m = restMark(); if (!m) return;
     restManual = true;
     window.ssRest(true);
+    reportVideo();                                                      // 앱 플레이어 숨김
     getJson('설정.json').then(function (c) {
       var r = c && c.rest || {}, min = +r.restMin > 0 ? +r.restMin : 30, left = m.at + min * 60000 - Date.now();
       clearTimeout(restEndTimer);
@@ -461,6 +463,7 @@
     if (!restManual) return;
     restManual = false;
     window.ssRest(false);
+    reportVideo();                                                      // 앱 플레이어 제자리로
   }
   setTimeout(function () { var m = restMark(); if (m && !restOn) restManualStart(); }, 800);   // 페이지를 새로 열었을 때: 쉬는 중이었으면 이어서
   function toggleDark() {
@@ -559,7 +562,7 @@
     var box = $('video'), old = $('ssRest');
     restOn = !!on;
     clearInterval(restSlideTimer);
-    if (!on) { if (restManual) { restManual = false; clearTimeout(restEndTimer); try { localStorage.removeItem(REST_MARK); } catch (e) {} }
+    if (!on) { if (restManual) { restManual = false; clearTimeout(restEndTimer); try { localStorage.removeItem(REST_MARK); } catch (e) {} reportVideo(); }
       if (old) { old.classList.add('bye'); setTimeout(function () { old.remove(); }, 450); } return; }
     if (old) old.remove();
     pvStop(); window.ssWebStop(0);
