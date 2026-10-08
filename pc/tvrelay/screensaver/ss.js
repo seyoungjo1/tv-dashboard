@@ -529,16 +529,17 @@
       '<div class="cap">터치하면 동영상을 재생합니다</div>';
     box.appendChild(L);
     box.classList.add('playing');
-    getJson('설정.json').then(function (c) {                                // 사용자 그림이 있으면 그걸로
+    getJson('설정.json').then(function (c) {                                // main 의 그림 → 없으면 내장 기본 그림(DAESANG)
       if (!restOn || $('ssRest') !== L) return;
       var fit = c && c.rest && c.rest.fit === 'fit' ? 'contain' : 'cover';
-      var img = new Image();
+      var name = DARK ? 'dark.png' : 'white.png', img = new Image(), tried = false;
       img.onload = function () {
         if (!restOn || $('ssRest') !== L) return;
         img.className = 'pic'; img.style.objectFit = fit;
         L.classList.add('custom'); L.insertBefore(img, L.querySelector('.cap'));
       };
-      img.src = BASE + (DARK ? 'dark.png' : 'white.png') + '?t=' + Math.floor(Date.now() / 60000);
+      img.onerror = function () { if (tried) return; tried = true; L.classList.add('builtin'); img.src = name; };   // 내장 기본 그림 (안내 글이 그림에 들어 있음)
+      img.src = BASE + name + '?t=' + Math.floor(Date.now() / 60000);
     });
   };
   /** TV: 기본 플레이어가 틀지 못한 동영상 파일을 페이지 <video> 로 (유튜브가 재생되는 길). 화면에는 아무 표시도 하지 않는다 */

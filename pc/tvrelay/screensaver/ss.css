@@ -214,3 +214,4 @@ html.dark #ssRest .cap { color: #9aa8b8; }
 html.dark #ssRest.custom .paper { background: #11161c; }
 #ssRest .cap { z-index: 2; text-shadow: 0 1px 8px rgba(255,255,255,.8); }
 html.dark #ssRest .cap { text-shadow: 0 1px 8px rgba(0,0,0,.8); }
+#ssRest.builtin .cap { display: none; }
