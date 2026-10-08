@@ -1,0 +1,58 @@
+# 안드로이드 실기 시험: 에뮬레이터(Android 14)에 디버그 APK 를 깔고 실제 터치로 화면보호기 페이지를 시험한다
+#  - 눈 버튼 → 쉬는 화면 · 마킹, 장면 넘김, 쉬는 화면 터치 → 끝, 달/해 버튼, 글꼴, JS 오류 없음
+#  - 결과 그림(스크린샷)·콘솔·logcat 을 결과물로 남긴다
+name: Android emulator test
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "app/src/main/assets/screensaver/**"
+      - "app/src/main/java/**"
+      - ".github/emu/**"
+      - ".github/workflows/android-emu.yml"
+concurrency:
+  group: emu-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  emu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: 디버그 APK
+        run: ./gradlew -q assembleDirectDebug -PappVersion=$(cat pc/tvrelay/VERSION | sed 's/_p.*//')
+      - name: 시험 자료 만들기 (동영상 · 설정.json · 공지)
+        run: |
+          mkdir -p emu-content/main
+          ffmpeg -loglevel error -f lavfi -i testsrc=size=1280x720:rate=30 -f lavfi -i sine=frequency=440 -t 12 -c:v libx264 -profile:v main -level 4.0 -pix_fmt yuv420p -c:a aac -movflags +faststart emu-content/main/test.mp4
+          printf '{"playlist":[{"src":"test.mp4"}],"rest":{"slides":["widget1","image"],"slideSec":5,"enabled":false,"runMin":10,"restMin":1,"city":"오산시","lat":37.1499,"lon":127.0771}}' > emu-content/main/설정.json
+          printf '에뮬레이터 시험 공지 1\n에뮬레이터 시험 공지 2\n' > emu-content/main/공지.txt
+          cp pc/tvrelay/VERSION emu-content/version.txt
+          ls -la emu-content/main
+          python3 -m pip install -q websocket-client
+      - name: KVM 켜기
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: 에뮬레이터에서 시험
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: bash .github/emu/run.sh emu-out
+      - name: 결과물
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: emu-test, path: emu-out, if-no-files-found: ignore }
