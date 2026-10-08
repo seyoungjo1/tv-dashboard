@@ -538,7 +538,7 @@
         img.className = 'pic'; img.style.objectFit = fit;
         L.classList.add('custom'); L.insertBefore(img, L.querySelector('.cap'));
       };
-      img.onerror = function () { if (tried) return; tried = true; L.classList.add('builtin'); img.src = name; };   // 내장 기본 그림 (안내 글이 그림에 들어 있음)
+      img.onerror = function () { if (tried) return; tried = true; img.src = name; };   // 내장 기본 그림 (DAESANG)
       img.src = BASE + name + '?t=' + Math.floor(Date.now() / 60000);
     });
   };

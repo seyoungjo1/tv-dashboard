@@ -197,7 +197,8 @@ html.dark .edbar button.save { background: #2f7be6; color: #fff; }
 @keyframes restLight { from { transform: translateX(-4%) } to { transform: translateX(4%) } }
 #ssRest .lg { position: relative; width: 46%; max-width: 420px; max-height: 40%; object-fit: contain; filter: drop-shadow(0 10px 22px rgba(20, 30, 45, .22)); }
 #ssRest .cap { position: absolute; left: 0; right: 0; bottom: 38px; text-align: center; font-size: 27px; font-weight: 700; color: #5d6b7a; letter-spacing: .5px;
-               animation: blink 2.8s ease-in-out infinite; }
+               animation: restBlink 1.6s ease-in-out infinite; }
+@keyframes restBlink { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
 html.dark #ssRest { background: #11161c; }
 html.dark #ssRest .paper { background:
   radial-gradient(120% 90% at 50% 0%, rgba(255,255,255,.08), rgba(255,255,255,0) 60%),
@@ -214,4 +215,3 @@ html.dark #ssRest .cap { color: #9aa8b8; }
 html.dark #ssRest.custom .paper { background: #11161c; }
 #ssRest .cap { z-index: 2; text-shadow: 0 1px 8px rgba(255,255,255,.8); }
 html.dark #ssRest .cap { text-shadow: 0 1px 8px rgba(0,0,0,.8); }
-#ssRest.builtin .cap { display: none; }
