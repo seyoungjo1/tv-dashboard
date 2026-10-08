@@ -20,7 +20,28 @@ class GitHubApi(
 
     class Resp(val code: Int, val body: ByteArray, val etag: String?)
 
+    /**
+     * 요청. 읽기(GET)와 blob 올리기(내용 주소라 다시 보내도 같은 결과)는 연결이 끊기면(unexpected end of stream ·
+     * 시간 초과 등 IOException) 잠깐 쉬고 다시 시도한다 — TV 와이파이가 잠깐 흔들려 파일 하나가 '실패'로 남지 않게
+     */
     fun request(method: String, path: String, body: JSONObject? = null, raw: Boolean = false, etag: String? = null): Resp {
+        val retry = method == "GET" || path == "git/blobs"
+        var wait = 1500L
+        var last: java.io.IOException? = null
+        for (attempt in 1..(if (retry) 4 else 1)) {
+            try {
+                return once(method, path, body, raw, etag)
+            } catch (e: java.io.IOException) {
+                last = e
+                if (attempt == 4 || !retry) throw e
+                try { Thread.sleep(wait) } catch (_: InterruptedException) { throw e }
+                wait *= 2
+            }
+        }
+        throw last!!
+    }
+
+    private fun once(method: String, path: String, body: JSONObject?, raw: Boolean, etag: String?): Resp {
         val c = URL("$base/repos/$repo/$path").openConnection() as HttpURLConnection
         c.requestMethod = method
         c.connectTimeout = 20_000
