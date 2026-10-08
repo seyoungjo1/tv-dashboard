@@ -7,6 +7,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #eaeef3;
              -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }   /* 안드로이드 WebView 글자 자동 확대 끔 (작은 화면에서 넘침 방지) */
+html { -webkit-tap-highlight-color: transparent; }
 body { font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif; font-weight: 600; color: #1d2b3a; word-break: keep-all; }
 
 #stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden;
@@ -142,7 +143,7 @@ html.tv #perf.nonotice #noticeAdd, html.preview #perf.nonotice #noticeAdd { disp
           filter: blur(2px); }
 
 /* 다크 모드 버튼: 시계 왼쪽 반투명 (달 ↔ 해). 눌러도 대시보드로 넘어가지 않는다 */
-#darkBtn, #restBtn { width: 46px; height: 46px; color: #1d2b3a; opacity: .3; cursor: pointer; }
+#darkBtn, #restBtn { width: 46px; height: 46px; color: #1d2b3a; opacity: .3; cursor: pointer; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; outline: none; }   /* 누를 때 네모 블록(터치 하이라이트·선택) 안 뜨게 */
 #darkBtn svg, #restBtn svg { width: 100%; height: 100%; display: block; }
 html.dark #darkBtn, html.dark #restBtn { color: #e3eaf2; opacity: .4; }
 #darkBtn.tap, #restBtn.tap { animation: darkTap .45s ease; }   /* 눈 버튼: 누르면 바로 쉬는 화면 (그때부터 쉬는 시간) */

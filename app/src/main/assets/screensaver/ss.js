@@ -49,6 +49,7 @@
       var r = b.getBoundingClientRect();
       out.push([r.left, r.top, r.width, r.height]);
     });
+    if (restManual) { var v = $('video').getBoundingClientRect(); out.push([v.left, v.top, v.width, v.height]); }   // 눈 버튼 쉬는 동안: 쉬는 화면 터치도 페이지로 (끝내기)
     try { TV.editRects(JSON.stringify(out), innerWidth); } catch (e) {}
   }
   var EDIT_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -439,44 +440,45 @@
       쉬기 시작한 시각을 JSON 으로 마킹(localStorage "ssRestMark")해 두고, 설정.json rest.restMin(분)을 더한 시각이 되면 스스로 끝낸다.
       페이지를 다시 열어도 마킹을 읽어 남은 시간만큼 이어가고, 쉬는 화면을 터치하면 바로 끝난다 */
   var REST_MARK = 'ssRestMark', restManual = false, restEndTimer = 0;
-  function restMark() { try { var m = JSON.parse(localStorage.getItem(REST_MARK) || 'null'); return m && m.at > 0 ? m : null; } catch (e) { return null; } }
+  function restMark() { try { var m = JSON.parse(localStorage.getItem(REST_MARK) || 'null'); return m && m.until > 0 ? m : null; } catch (e) { return null; } }
   function restNow() {
     var b = $('restBtn'); if (b) { b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap'); }
-    try { localStorage.setItem(REST_MARK, JSON.stringify({ at: Date.now() })); } catch (e) {}
-    restManualStart();
-  }
-  function restManualStart() {
-    var m = restMark(); if (!m) return;
-    restManual = true;
-    window.ssRest(true);
-    reportVideo();                                                      // 앱 플레이어 숨김
     getJson('설정.json').then(function (c) {
-      var r = c && c.rest || {}, min = +r.restMin > 0 ? +r.restMin : 30, left = m.at + min * 60000 - Date.now();
-      clearTimeout(restEndTimer);
-      if (left <= 0) { restManualEnd(); return; }
-      restEndTimer = setTimeout(restManualEnd, left);
+      var r = c && c.rest || {}, min = +r.restMin > 0 ? +r.restMin : 30, now = Date.now();
+      try { localStorage.setItem(REST_MARK, JSON.stringify({ at: now, until: now + min * 60000 })); } catch (e) {}
+      restManualStart();
     });
+  }
+  function restManualStart() {                                           // 마킹(until)까지 쉰다 — 이미 지났으면 마킹만 지움
+    var m = restMark(), left = m ? m.until - Date.now() : 0;
+    clearTimeout(restEndTimer);
+    if (left <= 0) { try { localStorage.removeItem(REST_MARK); } catch (e) {} return; }
+    restManual = true;
+    restShow(true, lastRestOverride);
+    reportVideo();                                                      // 앱 플레이어 숨김 + 쉬는 화면 터치를 페이지로
+    restEndTimer = setTimeout(restManualEnd, left);
   }
   function restManualEnd() {
     clearTimeout(restEndTimer);
     try { localStorage.removeItem(REST_MARK); } catch (e) {}
     if (!restManual) return;
     restManual = false;
-    window.ssRest(false);
+    if (!restApp) restShow(false);                                      // 앱도 쉬는 중이면 화면은 앱이 끝낼 때까지 둔다
     reportVideo();                                                      // 앱 플레이어 제자리로
   }
-  setTimeout(function () { var m = restMark(); if (m && !restOn) restManualStart(); }, 800);   // 페이지를 새로 열었을 때: 쉬는 중이었으면 이어서
+  setTimeout(function () { if (restMark() && !restManual) restManualStart(); }, 800);   // 페이지를 새로 열었을 때: 쉬는 중이었으면 이어서
+  var darkUser = null;                                               // 미리보기에서 사용자가 바꾼 모드 (load 가 되돌리지 않게)
   function toggleDark() {
-    setDark(!DARK);
+    setDark(!DARK); darkUser = DARK;
     var b = $('darkBtn'); b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap');
     if (TV && TV.setDark) { try { TV.setDark(DARK); } catch (e) {} }   // TV 설정에 저장 (다음에도 그대로)
     paintBadges(); drawCharts();                                     // 배지·그래프 색도 바로
-    if (restOn) window.ssRest(true);                                 // 쉬는 화면 그림도 모드에 맞게
+    if (restOn) restShow(true, lastRestOverride);                    // 쉬는 화면 그림도 모드에 맞게
     lastKey = lastKey.replace(/:dark$/, '') + (DARK ? ':dark' : '');
   }
   function load(force) {
     cfg = config();
-    setDark(TV ? cfg.dark : Q.get('dark') === '1');
+    setDark(TV ? cfg.dark : (darkUser != null ? darkUser : Q.get('dark') === '1'));
     BASE = '/data/' + encodeURIComponent(cfg.folder || 'main') + '/';
     getJson('현황판.json').then(function (pc) {
       var list = normPanels(overridePanels ? { panels: overridePanels } : pc), names = [];
@@ -555,17 +557,24 @@
   var restOn = false, restSlideTimer = 0;
   var REST_SLIDES = { image: restImageSlide, widget1: restWidget };            // 장면 이름 → 그리는 함수 (위젯2 · 위젯3 은 여기에 추가)
   function restSlides(r) {
-    var ids = Array.isArray(r.slides) ? r.slides.filter(function (s) { return typeof s === 'string' && REST_SLIDES[s]; }) : [];
+    var ids = Array.isArray(r.slides) ? r.slides.filter(function (s) { return typeof s === 'string' && Object.prototype.hasOwnProperty.call(REST_SLIDES, s); }) : [];
     return ids.length ? ids : [r.mode === 'widget' ? 'widget1' : 'image'];
   }
+  // 앱(재생 시간이 지나서) 또는 PC 미리보기가 켜고 끄는 쉬는 화면. 눈 버튼 쉬기(restManual)와는 따로 센다 — 둘 다 끝나야 화면이 내려간다
+  var restApp = false, lastRestOverride = null;
   window.ssRest = function (on, override) {
+    restApp = !!on;
+    if (on) { lastRestOverride = override || null; restShow(true, override); return; }
+    if (restManual) return;                                              // 눈 버튼 쉬기는 아직 남음 → 화면 유지 (앱 플레이어는 1픽셀 그대로)
+    restShow(false);
+  };
+  function restShow(on, override) {
     var box = $('video'), old = $('ssRest');
     restOn = !!on;
     clearInterval(restSlideTimer);
-    if (!on) { if (restManual) { restManual = false; clearTimeout(restEndTimer); try { localStorage.removeItem(REST_MARK); } catch (e) {} reportVideo(); }
-      if (old) { old.classList.add('bye'); setTimeout(function () { old.remove(); }, 450); } return; }
+    if (!on) { if (old) { old.classList.add('bye'); setTimeout(function () { old.remove(); }, 450); } return; }
     if (old) old.remove();
-    pvStop(); window.ssWebStop(0);
+    if (!restManual) { pvStop(); window.ssWebStop(0); }                  // 눈 버튼 쉬기: 페이지 재생(유튜브·사진)은 끊지 않는다 (화면 뒤에 가려질 뿐, 앱 재생 순서가 멈추지 않게)
     var L = document.createElement('div'); L.id = 'ssRest';
     L.innerHTML = '<div class="paper"></div><div class="slides"></div><div class="cap">터치하면 동영상을 재생합니다</div>';
     box.appendChild(L);
@@ -650,7 +659,7 @@
       W.querySelector('.ico').innerHTML = wxIcon(code, day);
       W.querySelector('.desc').textContent = WX_TEXT[code] || '—';
       var dmax = j.daily && j.daily.temperature_2m_max ? j.daily.temperature_2m_max[0] : null, dmin = j.daily && j.daily.temperature_2m_min ? j.daily.temperature_2m_min[0] : null;
-      W.querySelector('.hl').textContent = dmax != null ? '최고:' + Math.round(dmax) + '° 최저:' + Math.round(dmin) + '°' : '';
+      W.querySelector('.hl').textContent = dmax != null ? '최고:' + Math.round(dmax) + '°' + (dmin != null ? ' 최저:' + Math.round(dmin) + '°' : '') : '';
       var hs = j.hourly || {}, now = new Date(), key = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) + 'T' + pad(now.getHours()), out = '';
       var i0 = (hs.time || []).indexOf(key + ':00'); if (i0 < 0) i0 = 0;
       for (var i = i0 + 1, cnt = 0; i < (hs.time || []).length && cnt < 6; i++, cnt++) {
@@ -663,7 +672,7 @@
       if (wxCache && Date.now() - wxAt < 30 * 60000) { paintWx(wxCache); return; }
       var u = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon +
         '&current=temperature_2m,weather_code,is_day&hourly=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FSeoul&forecast_days=2';
-      fetch(u).then(function (x) { return x.json(); }).then(function (j) { wxCache = j; wxAt = Date.now(); if ($('ssRest') === L) paintWx(j); })
+      fetch(u).then(function (x) { return x.json(); }).then(function (j) { if (!j || !j.current) throw new Error('bad'); wxCache = j; wxAt = Date.now(); if ($('ssRest') === L) paintWx(j); })
         .catch(function () { if (!wxCache) W.querySelector('.desc').textContent = '날씨를 받지 못했습니다 (인터넷 확인)'; else paintWx(wxCache); });
     }
     calendar(); weather();
@@ -1087,7 +1096,7 @@
   window.ssNoticeCancel = function () { if (ntOpen) ntClose(); };
 
   // TV 앱이 부른다: 화면보호기를 다시 띄울 때(show) · main 폴더가 바뀌었을 때(refresh)
-  window.ssShow = function () { if (ntOpen) ntClose(); promptOn = false; clearTimeout(promptTimer); load(true); };
+  window.ssShow = function () { if (ntOpen) ntClose(); promptOn = false; clearTimeout(promptTimer); load(true); if (restManual) restManualStart(); };
   window.ssRefresh = function () { load(false); };
   // 한 번 터치했을 때 TV 앱이 부른다: 아래 멘트를 '한 번 더 눌러 주세요' 로 잠시 바꾼다 (빈 값이면 원래대로)
   var promptOn = false, promptTimer = 0;
