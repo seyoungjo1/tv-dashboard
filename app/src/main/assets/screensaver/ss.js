@@ -434,12 +434,35 @@
     return true;
   }
   var EYE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
-  /** 눈 버튼: 지금 바로 쉬는 화면으로 (TV 앱이 동영상을 멈추고 그때부터 쉬는 시간을 잰다 · 예전 앱/PC 미리보기는 페이지만) */
+  /** 눈 버튼: 지금 바로 쉬는 화면 — 앱은 건드리지 않고 페이지가 처리한다.
+      쉬기 시작한 시각을 JSON 으로 마킹(localStorage "ssRestMark")해 두고, 설정.json rest.restMin(분)을 더한 시각이 되면 스스로 끝낸다.
+      페이지를 다시 열어도 마킹을 읽어 남은 시간만큼 이어가고, 쉬는 화면을 터치하면 바로 끝난다 */
+  var REST_MARK = 'ssRestMark', restManual = false, restEndTimer = 0;
+  function restMark() { try { var m = JSON.parse(localStorage.getItem(REST_MARK) || 'null'); return m && m.at > 0 ? m : null; } catch (e) { return null; } }
   function restNow() {
-    var b = $('restBtn'); b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap');
-    if (TV && TV.restNow) { try { TV.restNow(); return; } catch (e) {} }
-    window.ssRest(true);
+    var b = $('restBtn'); if (b) { b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap'); }
+    try { localStorage.setItem(REST_MARK, JSON.stringify({ at: Date.now() })); } catch (e) {}
+    restManualStart();
   }
+  function restManualStart() {
+    var m = restMark(); if (!m) return;
+    restManual = true;
+    window.ssRest(true);
+    getJson('설정.json').then(function (c) {
+      var r = c && c.rest || {}, min = +r.restMin > 0 ? +r.restMin : 30, left = m.at + min * 60000 - Date.now();
+      clearTimeout(restEndTimer);
+      if (left <= 0) { restManualEnd(); return; }
+      restEndTimer = setTimeout(restManualEnd, left);
+    });
+  }
+  function restManualEnd() {
+    clearTimeout(restEndTimer);
+    try { localStorage.removeItem(REST_MARK); } catch (e) {}
+    if (!restManual) return;
+    restManual = false;
+    window.ssRest(false);
+  }
+  setTimeout(function () { var m = restMark(); if (m && !restOn) restManualStart(); }, 800);   // 페이지를 새로 열었을 때: 쉬는 중이었으면 이어서
   function toggleDark() {
     setDark(!DARK);
     var b = $('darkBtn'); b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap');
@@ -536,7 +559,8 @@
     var box = $('video'), old = $('ssRest');
     restOn = !!on;
     clearInterval(restSlideTimer);
-    if (!on) { if (old) { old.classList.add('bye'); setTimeout(function () { old.remove(); }, 450); } return; }
+    if (!on) { if (restManual) { restManual = false; clearTimeout(restEndTimer); try { localStorage.removeItem(REST_MARK); } catch (e) {} }
+      if (old) { old.classList.add('bye'); setTimeout(function () { old.remove(); }, 450); } return; }
     if (old) old.remove();
     pvStop(); window.ssWebStop(0);
     var L = document.createElement('div'); L.id = 'ssRest';
@@ -1033,6 +1057,7 @@
   document.addEventListener('click', function (e) {
     if (e.target.closest && e.target.closest('#darkBtn')) { if (!ntOpen) toggleDark(); return; }
     if (e.target.closest && e.target.closest('#restBtn')) { if (!ntOpen && !restOn) restNow(); return; }
+    if (restManual && e.target.closest && e.target.closest('#ssRest')) { restManualEnd(); return; }   // 눈 버튼으로 켠 쉬는 화면: 터치하면 끝
     var b = e.target.closest && e.target.closest('.nedit');
     if (b && !TV && PREVIEW) {                           // PC 미리보기: 아래 공지사항 입력칸의 그 줄로
       parent.postMessage({ ssEditNotice: b.dataset.line != null ? +b.dataset.line : -1 }, '*');

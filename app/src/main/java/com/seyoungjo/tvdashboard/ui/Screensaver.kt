@@ -172,10 +172,8 @@ class Screensaver(
         handler.postDelayed(restRunnable, maxOf(1_000L, due))
     }
 
-    /** force: 화면의 눈 버튼 — 쉬는 시간 설정이 꺼져 있거나 동영상이 없어도 바로 쉬는 화면, 쉬는 시간은 지금부터 */
-    private fun startRest(force: Boolean = false) {
-        if (!active || resting) return
-        if (!force && (items.isEmpty() || !rest.enabled)) return
+    private fun startRest() {
+        if (!active || resting || items.isEmpty() || !rest.enabled) return
         resting = true
         prepWatch?.let { handler.removeCallbacks(it) }
         releasePlayer()
@@ -441,12 +439,6 @@ class Screensaver(
             .toString()
 
         /** 화면보호기의 달/해 버튼 → 다크 모드 저장 (페이지는 이미 바꿔 그림) */
-        /** 페이지의 눈 버튼: 지금 바로 쉬는 화면 (쉬는 시간은 지금부터 restMin 분) */
-        @JavascriptInterface
-        fun restNow() {
-            handler.post { startRest(force = true) }
-        }
-
         @JavascriptInterface
         fun setDark(on: Boolean) {
             AppSettings.darkMode = on
