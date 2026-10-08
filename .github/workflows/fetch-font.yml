@@ -14,10 +14,19 @@ jobs:
         run: |
           set -e
           cd app/src/main/assets/fonts
-          for w in 3 5 6; do
-            curl -fsSL "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.0/SCDream$w.woff" -o "SCDream$w.woff"
-            file "SCDream$w.woff"; ls -la "SCDream$w.woff"
-          done
+          echo "== 패키지 파일 목록 =="; curl -fsSL "https://data.jsdelivr.com/v1/package/gh/projectnoonnu/noonfonts_six@1.0/flat" | python3 -c "import json,sys; [print(f['name']) for f in json.load(sys.stdin)['files'] if 'ore' in f['name'] or 'SCD' in f['name']]" || true
+          get() { # get <저장이름> <후보 URL...>
+            out="$1"; shift
+            for u in "$@"; do
+              if curl -fsSL "$u" -o "$out"; then echo "받음: $u"; file "$out"; ls -la "$out"; return 0; fi
+              echo "없음: $u"
+            done
+            echo "모든 후보 실패: $out"; return 1
+          }
+          B="https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.0"
+          get SCDream3.woff "$B/S-CoreDream-3Light.woff" "$B/SCDream3.woff" "$B/S-CoreDream-3Light.woff2"
+          get SCDream5.woff "$B/S-CoreDream-5Medium.woff" "$B/SCDream5.woff" "$B/S-CoreDream-5Medium.woff2"
+          get SCDream6.woff "$B/S-CoreDream-6Bold.woff" "$B/SCDream6.woff" "$B/S-CoreDream-6Bold.woff2"
           python3 - <<'PY'
           for w in (3, 5, 6):
               b = open(f"SCDream{w}.woff", "rb").read(4); assert b == b"wOFF", (w, b)
