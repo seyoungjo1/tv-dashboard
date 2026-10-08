@@ -1,0 +1,48 @@
+# 화면보호기 페이지 시험: 실제 Open-Meteo 날씨를 받아 쉬는 화면 위젯1(밝은/다크)을 그려 그림으로 남긴다
+name: Screensaver check
+on:
+  workflow_dispatch:
+  push:
+    paths: ["app/src/main/assets/screensaver/**", "pc/tvrelay/screensaver/**", ".github/workflows/screensaver.yml"]
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open-Meteo (TV 가 쓰는 주소) 응답 확인
+        run: |
+          curl -fsS "https://api.open-meteo.com/v1/forecast?latitude=37.1499&longitude=127.0771&current=temperature_2m,weather_code,is_day&hourly=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FSeoul&forecast_days=2" -o wx.json
+          python3 - <<'PY'
+          import json; j = json.load(open("wx.json"))
+          c = j["current"]; print("현재", c["temperature_2m"], "°C code", c["weather_code"], "day", c["is_day"])
+          print("시간별", len(j["hourly"]["time"]), "개 · 최고/최저", j["daily"]["temperature_2m_max"][0], j["daily"]["temperature_2m_min"][0])
+          assert j["hourly"]["is_day"] and j["hourly"]["weather_code"], "필드 없음"
+          PY
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Playwright
+        run: npm i -s playwright@1.47 && npx playwright install --with-deps chromium
+      - name: 위젯1 그리기 (밝은 · 다크, 실제 날씨)
+        run: |
+          mkdir -p shot/data/main && cp pc/tvrelay/screensaver/* shot/ && cp pc/tvrelay/screensaver/logo.png shot/data/logo.png
+          (cd shot && python3 -m http.server 8766 >/dev/null 2>&1 &) ; sleep 1
+          cat > render.js <<'JS'
+          const { chromium } = require('playwright');
+          (async () => {
+            const b = await chromium.launch(); const pg = await b.newPage({ viewport: { width: 1280, height: 720 } });
+            const errs = []; pg.on('pageerror', e => errs.push(String(e)));
+            for (const [tag, d] of [['light', ''], ['dark', '&dark=1']]) {
+              await pg.goto('http://localhost:8766/index.html?preview=1' + d); await pg.waitForTimeout(1500);
+              await pg.evaluate(() => ssRest(true, { mode: 'widget', city: '오산시', lat: 37.1499, lon: 127.0771 }));
+              await pg.waitForFunction(() => /°$/.test(document.querySelector('#ssRest .temp')?.textContent || '') && document.querySelectorAll('#ssRest .hours div').length >= 6, null, { timeout: 15000 });
+              await pg.screenshot({ path: 'widget1-' + tag + '.png', clip: { x: 755, y: 75, width: 505, height: 600 } });
+              console.log(tag, await pg.evaluate(() => document.querySelector('#ssRest .wx').innerText.replace(/\n+/g, ' | ')));
+            }
+            if (errs.length) { console.error(errs); process.exit(1); }
+            await b.close();
+          })();
+          JS
+          node render.js
+      - uses: actions/upload-artifact@v4
+        with: { name: widget1, path: "widget1-*.png" }
