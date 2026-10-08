@@ -50,7 +50,7 @@ object MenuScanner {
     val ICON_EXT = setOf("png", "jpg", "jpeg", "webp")
     val PHOTO_EXT = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
     val EFFECTS = setOf("morph", "shade", "wipe", "circle", "blinds", "random")
-    private val NOT_PHOTO = setOf("icon", "대표이미지", "logo")       // main 안이라도 사진 목록에 넣지 않는 이름
+    private val NOT_PHOTO = setOf("icon", "대표이미지", "logo", "white", "dark")   // white/dark = 쉬는 화면 그림       // main 안이라도 사진 목록에 넣지 않는 이름
     val ICON_NAMES = listOf("icon", "대표이미지")
     const val MAIN_FOLDER = "main"
     const val ORDER_FILE = "메뉴순서.txt"

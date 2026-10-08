@@ -179,3 +179,38 @@ html.dark #ntTa { background: #121920; border-color: #33404e; color: #e3eaf2; }
 html.dark #ntTa:focus { border-color: #2f7be6; }
 html.dark .edbar button { background: #283340; color: #e3eaf2; }
 html.dark .edbar button.save { background: #2f7be6; color: #fff; }
+
+/* 쉬는 시간 로고 화면 (동영상 칸 안) — 밝은 종이 + 비스듬한 빛줄기, 가운데 로고, 아래 안내 */
+#ssRest { position: absolute; inset: 0; z-index: 4; overflow: hidden; background: #f3f5f7; display: flex; align-items: center; justify-content: center;
+          animation: restIn .6s ease both; }
+#ssRest.bye { animation: restOut .45s ease both; }
+@keyframes restIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes restOut { from { opacity: 1; } to { opacity: 0; } }
+#ssRest .paper { position: absolute; inset: 0; background:
+  radial-gradient(120% 90% at 50% 0%, rgba(255,255,255,.9), rgba(255,255,255,0) 60%),
+  repeating-linear-gradient(0deg, rgba(0,0,0,.012) 0 1px, transparent 1px 3px),
+  linear-gradient(180deg, #f6f7f9, #e9edf1); }
+#ssRest .light { position: absolute; inset: -40%; background:
+  linear-gradient(115deg, transparent 30%, rgba(255,255,255,.55) 38%, rgba(255,255,255,.75) 42%, rgba(255,255,255,.4) 47%, transparent 56%,
+                  transparent 62%, rgba(255,255,255,.5) 68%, rgba(255,255,255,.65) 71%, transparent 80%);
+  filter: blur(14px); animation: restLight 14s ease-in-out infinite alternate; }
+@keyframes restLight { from { transform: translateX(-4%) } to { transform: translateX(4%) } }
+#ssRest .lg { position: relative; width: 46%; max-width: 420px; max-height: 40%; object-fit: contain; filter: drop-shadow(0 10px 22px rgba(20, 30, 45, .22)); }
+#ssRest .cap { position: absolute; left: 0; right: 0; bottom: 38px; text-align: center; font-size: 27px; font-weight: 700; color: #5d6b7a; letter-spacing: .5px;
+               animation: blink 2.8s ease-in-out infinite; }
+html.dark #ssRest { background: #11161c; }
+html.dark #ssRest .paper { background:
+  radial-gradient(120% 90% at 50% 0%, rgba(255,255,255,.08), rgba(255,255,255,0) 60%),
+  repeating-linear-gradient(0deg, rgba(255,255,255,.015) 0 1px, transparent 1px 3px),
+  linear-gradient(180deg, #161c23, #0f1419); }
+html.dark #ssRest .light { background:
+  linear-gradient(115deg, transparent 30%, rgba(255,255,255,.07) 38%, rgba(255,255,255,.11) 42%, rgba(255,255,255,.05) 47%, transparent 56%,
+                  transparent 62%, rgba(255,255,255,.06) 68%, rgba(255,255,255,.09) 71%, transparent 80%); }
+html.dark #ssRest .lg { filter: drop-shadow(0 0 18px rgba(255,255,255,.18)) brightness(1.05); }
+html.dark #ssRest .cap { color: #9aa8b8; }
+#ssRest .pic { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
+#ssRest.custom .lg, #ssRest.custom .light { display: none; }
+#ssRest.custom .paper { background: #f3f5f7; }
+html.dark #ssRest.custom .paper { background: #11161c; }
+#ssRest .cap { z-index: 2; text-shadow: 0 1px 8px rgba(255,255,255,.8); }
+html.dark #ssRest .cap { text-shadow: 0 1px 8px rgba(0,0,0,.8); }

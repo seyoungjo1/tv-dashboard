@@ -437,6 +437,7 @@
     var b = $('darkBtn'); b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap');
     if (TV && TV.setDark) { try { TV.setDark(DARK); } catch (e) {} }   // TV 설정에 저장 (다음에도 그대로)
     paintBadges(); drawCharts();                                     // 배지·그래프 색도 바로
+    if (restOn) window.ssRest(true);                                 // 쉬는 화면 그림도 모드에 맞게
     lastKey = lastKey.replace(/:dark$/, '') + (DARK ? ':dark' : '');
   }
   function load(force) {
@@ -513,6 +514,33 @@
     box.appendChild(wrap);
     box.classList.add('playing');
   }
+  /** 쉬는 시간 화면 (동영상 칸 안): main/white.png(밝은 모드) · dark.png(다크 모드)가 있으면 그 그림을 설정.json 의 rest.fit(crop/fit)대로,
+      없으면 종이 질감 + 로고. 아래에 '터치하면 동영상을 재생합니다' */
+  var restOn = false;
+  window.ssRest = function (on) {
+    var box = $('video'), old = $('ssRest');
+    restOn = !!on;
+    if (!on) { if (old) { old.classList.add('bye'); setTimeout(function () { old.remove(); }, 450); } return; }
+    if (old) old.remove();
+    pvStop(); window.ssWebStop(0);
+    var L = document.createElement('div'); L.id = 'ssRest';
+    L.innerHTML = '<div class="light"></div><div class="paper"></div>' +
+      '<img class="lg" src="/data/logo.png" onerror="this.onerror=null;this.src=\'logo.png\'">' +
+      '<div class="cap">터치하면 동영상을 재생합니다</div>';
+    box.appendChild(L);
+    box.classList.add('playing');
+    getJson('설정.json').then(function (c) {                                // 사용자 그림이 있으면 그걸로
+      if (!restOn || $('ssRest') !== L) return;
+      var fit = c && c.rest && c.rest.fit === 'fit' ? 'contain' : 'cover';
+      var img = new Image();
+      img.onload = function () {
+        if (!restOn || $('ssRest') !== L) return;
+        img.className = 'pic'; img.style.objectFit = fit;
+        L.classList.add('custom'); L.insertBefore(img, L.querySelector('.cap'));
+      };
+      img.src = BASE + (DARK ? 'dark.png' : 'white.png') + '?t=' + Math.floor(Date.now() / 60000);
+    });
+  };
   /** TV: 기본 플레이어가 틀지 못한 동영상 파일을 페이지 <video> 로 (유튜브가 재생되는 길). 화면에는 아무 표시도 하지 않는다 */
   window.ssVideoWeb = function (o) {
     pvStop(); window.ssWebStop(0);
@@ -530,6 +558,7 @@
       return;
     }
     if (d.panels !== undefined) { overridePanels = d.panels; load(true); return; }   // 현황판 항목 (저장 전)
+    if (d.rest !== undefined) { window.ssRest(!!d.rest); return; }                  // 쉬는 화면 미리보기
     override = d;
     if (lastA) paint(lastA);
   });

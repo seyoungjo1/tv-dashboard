@@ -64,7 +64,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.preferences, rootKey)
 
-        numeric("port"); numeric("idle_seconds"); numeric("idle_msg_show_sec"); numeric("idle_msg_hide_sec")
+        numeric("port"); numeric("idle_seconds"); numeric("idle_msg_show_sec"); numeric("idle_msg_hide_sec"); numeric("video_run_min"); numeric("video_rest_min")
         findPreference<EditTextPreference>("settings_pin")?.setOnBindEditTextListener {
             it.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
         }
@@ -93,7 +93,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             }
         }
         listOf("header_title", "idle_enabled", "idle_seconds", "idle_message", "idle_msg_show_sec", "idle_msg_hide_sec",
-            "keep_screen_on", "auto_refresh", "dark_mode").forEach { key ->
+            "keep_screen_on", "auto_refresh", "dark_mode", "video_rest_enabled", "video_run_min", "video_rest_min").forEach { key ->
             findPreference<Preference>(key)?.setOnPreferenceChangeListener { _, _ ->
                 view?.post { ChangeBus.post(AppEvent.SettingsChanged) }; true
             }

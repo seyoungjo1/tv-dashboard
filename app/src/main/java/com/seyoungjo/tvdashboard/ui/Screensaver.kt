@@ -84,6 +84,12 @@ class Screensaver(
         private set
     /** 공지 수정 중 — 터치·키는 화면보호기 페이지로 (대시보드로 넘어가지 않음) */
     var editing = false
+    /** 쉬는 시간(로고 화면) 중 — 동영상 칸을 터치하면 다시 재생 */
+    var resting = false
+        private set
+    private var playStartedAt = 0L                       // 이번 재생이 시작된 시각 (쉬는 시간 계산)
+    private val restRunnable = Runnable { startRest() }
+    private val resumeRunnable = Runnable { resumeFromRest() }
         private set
 
     /** 자료 폴더 안의 실제 이름 (main / Main …) — 페이지가 그 이름으로 JSON 을 읽는다 */
@@ -145,12 +151,66 @@ class Screensaver(
     fun setPlaylist(list: List<PlayItem>) {
         val changed = list.map { it.key } != items.map { it.key }
         items = list
-        if (active && changed) {
+        if (active && changed && !resting) {
             index = 0
             errors = 0
             releasePlayer()
             play()
         }
+    }
+
+    // ── 동영상 쉬는 시간: 재생 시간(분) 뒤 로고 화면, 쉬는 시간(분) 뒤 또는 터치하면 다시 재생 ──
+    /** 설정이 바뀌었거나(fresh) 재생이 이어질 때 쉬는 시각을 (다시) 잡는다 */
+    private fun scheduleRest(fresh: Boolean) {
+        handler.removeCallbacks(restRunnable)
+        if (!AppSettings.videoRestEnabled || items.isEmpty()) return
+        if (fresh || playStartedAt == 0L) playStartedAt = System.currentTimeMillis()
+        val due = playStartedAt + AppSettings.videoRunMin * 60_000L - System.currentTimeMillis()
+        handler.postDelayed(restRunnable, maxOf(1_000L, due))
+    }
+
+    private fun startRest() {
+        if (!active || resting || items.isEmpty() || !AppSettings.videoRestEnabled) return
+        resting = true
+        prepWatch?.let { handler.removeCallbacks(it) }
+        releasePlayer()
+        ytSeq++
+        webItem = true                                   // 칸은 페이지가 보여 주는 중 (칸 위치가 바뀌어도 다시 재생하지 않게)
+        box.animate().cancel()
+        box.visibility = View.INVISIBLE
+        web?.evaluateJavascript("window.ssRest&&ssRest(true)", null)
+        handler.removeCallbacks(resumeRunnable)
+        handler.postDelayed(resumeRunnable, AppSettings.videoRestMin * 60_000L)
+        Log.i(TAG, "video rest for ${AppSettings.videoRestMin}min")
+    }
+
+    /** 쉬는 시간 끝(시간이 지났거나 터치): 다음 항목부터 다시 재생 */
+    fun resumeFromRest() {
+        if (!resting) return
+        resting = false
+        handler.removeCallbacks(resumeRunnable)
+        web?.evaluateJavascript("window.ssRest&&ssRest(false)", null)
+        if (!active) return
+        playStartedAt = 0L
+        scheduleRest(fresh = true)
+        play()
+    }
+
+    /** 설정(켜기/끄기 · 시간)이 바뀌면 */
+    fun restSettingsChanged() {
+        if (!active) return
+        if (!AppSettings.videoRestEnabled) { if (resting) resumeFromRest() else handler.removeCallbacks(restRunnable); return }
+        if (!resting) scheduleRest(fresh = false)
+    }
+
+    /** 창 좌표 (x, y) 가 쉬는 화면(동영상 칸) 안인가 — 터치하면 다시 재생하고 대시보드로는 넘어가지 않는다 */
+    fun hitsRest(x: Float, y: Float): Boolean {
+        if (!resting || !active) return false
+        val wv = web ?: return false
+        val loc = IntArray(2); wv.getLocationInWindow(loc)
+        val lp = box.layoutParams as? FrameLayout.LayoutParams ?: return false
+        val lx = x - loc[0]; val ly = y - loc[1]
+        return lx >= lp.leftMargin && ly >= lp.topMargin && lx <= lp.leftMargin + lp.width && ly <= lp.topMargin + lp.height
     }
 
     fun show() {
@@ -161,6 +221,8 @@ class Screensaver(
         if (wv.url == null) wv.loadUrl(URL) else wv.evaluateJavascript("window.ssShow&&ssShow()", null)
         index = 0
         errors = 0
+        resting = false
+        scheduleRest(fresh = true)
         if (box.width > 0) play()
         handler.removeCallbacks(blurTick)
         handler.post(blurTick)
@@ -170,6 +232,8 @@ class Screensaver(
         if (editing) setEditing(false)
         active = false
         handler.removeCallbacks(blurTick)
+        handler.removeCallbacks(restRunnable); handler.removeCallbacks(resumeRunnable)
+        resting = false
         releasePlayer()
         ytSeq++
         webItem = false
@@ -251,6 +315,7 @@ class Screensaver(
     /** main 폴더 내용이 바뀌었을 때 (숫자·그래프 다시 읽기) */
     fun refresh() {
         applyDark()
+        restSettingsChanged()
         if (active) web?.evaluateJavascript("window.ssRefresh&&ssRefresh()", null)
     }
 
@@ -467,6 +532,7 @@ class Screensaver(
             box.visibility = View.INVISIBLE
             return
         }
+        if (resting) return                              // 쉬는 시간: 로고 화면 (터치하거나 시간이 지나면 resumeFromRest)
         if (errors >= list.size * 2) {                   // 전부 재생 실패(인터넷 끊김 등) → 1분 뒤 다시
             errors = 0
             handler.postDelayed({ if (active && player == null) play() }, 60_000)

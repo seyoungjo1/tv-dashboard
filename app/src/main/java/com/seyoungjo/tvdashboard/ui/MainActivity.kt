@@ -687,6 +687,12 @@ class MainActivity : AppCompatActivity() {
             if (idleOverlay.visibility == View.VISIBLE && hasMain && !morphing) {
                 // 화면보호기의 공지 수정 아이콘 · 수정 중인 화면: 대시보드로 넘어가지 않고 화면보호기 페이지가 받는다
                 val (rx, ry) = toRoot(ev.x, ev.y)
+                if (screensaver.hitsRest(ev.x, ev.y)) {          // 쉬는 화면(로고) 터치: 동영상 다시 재생, 대시보드로는 안 넘어감
+                    disarmTap()
+                    swallowGesture = true
+                    screensaver.resumeFromRest()
+                    return true
+                }
                 if (screensaver.editing || screensaver.hitsEditButton(rx, ry, reveal.parent as View)) {
                     disarmTap()
                     swallowGesture = false
