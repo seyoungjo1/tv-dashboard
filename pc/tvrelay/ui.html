@@ -132,6 +132,9 @@
   .tvc iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:#eef1f4; }
   .tvc .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:34px; color:#6b7785; text-align:center; padding:60px; }
   /* 보낸 직후 잠깐 뜨는 알림 (결과는 탐색기 아래 [전송 결과]) */
+  #verWarn { background:#fff3cd; color:#7a4b00; border-bottom:1px solid #f0d58c; padding:9px 18px; font-size:13px; font-weight:700; line-height:1.5; }
+  #verWarn.bad { background:#fde2e1; color:#8a1f1a; border-color:#f3b7b4; }
+  #verWarn.hidden { display:none; }
   #toast { position:fixed; right:16px; top:64px; max-width:380px; padding:12px 16px; border-radius:10px; background:#1e2125; color:#fff; font-size:13px; font-weight:700; box-shadow:0 6px 20px rgba(0,0,0,.25); z-index:90; }
   #toast.bad { background:var(--danger); }
   #toast { white-space:pre-line; }
@@ -179,6 +182,7 @@
   <button data-tab="update">앱 업데이트</button>
   <button data-tab="conn">연결</button>
 </nav>
+<div id="verWarn" class="hidden"></div>
 
 <!-- 처음 설정 / 연결 -->
 <div id="setupPage" class="page hidden">
@@ -425,6 +429,21 @@
     return d;
   }
 
+  // ── TV 앱 버전과 PC 프로그램 버전이 안 맞으면 위에 띄운다 (화면보호기 설정 등이 TV 에 반영되지 않는 원인) ──
+  const verKey = (v) => { const m = /^(\d+)\.(\d+)\.(\d+)(?:_p(\d+))?/.exec(String(v || '').trim()); return m ? [+m[1], +m[2], +m[3]] : null; };
+  const verCmp = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i]; return 0; };
+  function verWarn(tvVer) {
+    const el = $('#verWarn'); const pc = verKey(info?.version), tv = verKey(tvVer);
+    if (!pc || !tv) { el.classList.add('hidden'); return; }
+    const c = verCmp(tv, pc);
+    if (c === 0) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden'); el.classList.toggle('bad', c < 0);
+    el.innerHTML = c < 0
+      ? `⚠ TV 앱이 오래됐습니다 — TV 앱 <b>v${esc(tvVer)}</b> · PC 프로그램 <b>v${esc(info.version)}</b>. 화면보호기 설정(쉬는 시간 · 현황판 항목 · 보낸 화면)처럼 새 기능은 TV 에 반영되지 않습니다. ` +
+        `<a href="https://github.com/seyoungjo1/tv-dashboard/releases/latest" target="_blank">최신 APK</a> 를 받아 [앱 업데이트] 탭에서 보내거나 TV 에서 설치하세요.`
+      : `⚠ PC 프로그램이 TV 앱(v${esc(tvVer)})보다 오래됐습니다 (PC v${esc(info.version)}). 오른쪽 위 [프로그램 업데이트]를 누르세요.`;
+  }
+
   // ── 화면 전환 ──
   function show(t) {
     tab = t;
@@ -599,6 +618,7 @@
         // 보내기는 TV 가 꺼져 있어도 맡겨지므로, 연결 상태는 '마지막 응답'만 차분하게 (15분 넘게 소식 없을 때만 꺼짐으로)
         pill.className = 'pill ' + (state.online ? 'on' : 'off');
         const ago = state.age_sec < 60 ? '방금' : state.age_sec < 3600 ? Math.round(state.age_sec / 60) + '분 전' : Math.round(state.age_sec / 3600) + '시간 전';
+        verWarn(state.status?.versionName);
         pill.textContent = `📺 ${info?.tv || 'TV'} · ` + (state.online ? `응답 ${ago}` : `꺼진 것 같음 (마지막 응답 ${ago})`) + ` · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}` + (state.status?.videoError ? ` · ⚠ 화면보호기 동영상 재생 실패: ${state.status.videoError}` : '');
         pill.title = state.cached ? '저장해 둔 마지막 상태 — TV 확인 중' : '';
       }
