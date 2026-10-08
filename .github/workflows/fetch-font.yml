@@ -1,4 +1,4 @@
-# 글꼴 받기: 에스코어드림(S-Core Dream, 무료 배포)을 눈누 CDN 에서 받아 앱 글꼴 폴더에 넣고 커밋한다 (작업 환경에서 바깥 다운로드가 막혀 있어 Actions 가 대신)
+# 글꼴 받기: 에스코어드림(S-Core Dream, 무료 배포) woff 를 받아 화면보호기 폴더(앱 원본 + PC 사본)에 넣고 커밋한다 — APK 없이 PC 가 TV 로 보낼 수 있게 (작업 환경에서 바깥 다운로드가 막혀 있어 Actions 가 대신)
 name: Fetch font
 on:
   workflow_dispatch:
@@ -10,14 +10,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: SCDream 3 · 5 · 6 받기
+      - name: SCDream 5 · 6 받기
         run: |
           set -e
-          cd app/src/main/assets/fonts
+          cd app/src/main/assets/screensaver
           # 1) 정해진 후보 → 2) 모자라면 GitHub 코드 검색으로 그 파일명을 가진 공개 저장소를 찾아 raw 로 받는다
           python3 - <<'PY'
           import json, os, urllib.parse, urllib.request
-          NAMES = {3: "S-CoreDream-3Light", 5: "S-CoreDream-5Medium", 6: "S-CoreDream-6Bold"}
+          NAMES = {5: "S-CoreDream-5Medium", 6: "S-CoreDream-6Bold"}   # 위젯 본문 500 · 굵게 700
           CAND = ["https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.0/{n}.woff", "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six/{n}.woff",
                   "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/{n}.woff", "https://astra.nrf.re.kr/fonts/home/user/{n}.woff"]
           def get(u):
@@ -49,11 +49,12 @@ jobs:
               open(out, "wb").write(d)
           print("ok")
           PY
+          cp SCDream5.woff SCDream6.woff ../../../../../pc/tvrelay/screensaver/      # PC 미리보기용 사본 (pc/tests 가 같은지 검사)
         env:
           GH_TOKEN: ${{ github.token }}
       - name: 커밋
         run: |
           git config user.name "github-actions[bot]"; git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/assets/fonts/SCDream*.woff
-          git commit -m "글꼴: 에스코어드림(S-Core Dream) 3 · 5 · 6 woff 추가 (무료 배포 글꼴)" || echo "변경 없음"
+          git add app/src/main/assets/screensaver/SCDream*.woff pc/tvrelay/screensaver/SCDream*.woff
+          git commit -m "글꼴: 에스코어드림(S-Core Dream) 5 · 6 woff 를 화면보호기 폴더에 추가 (무료 배포 글꼴 · PC 가 TV 로 보냄)" || echo "변경 없음"
           git push

@@ -1,6 +1,8 @@
 /* 화면보호기 — 1920×1080 무대를 화면 크기에 맞춰 통째로 확대/축소한다 (ss.js fit) */
 @font-face { font-family: "Pretendard"; font-weight: 600; src: url("/assets/fonts/Pretendard-SemiBold.woff2") format("woff2"); }
 @font-face { font-family: "Pretendard"; font-weight: 700; src: url("/assets/fonts/Pretendard-Bold.woff2") format("woff2"); }
+@font-face { font-family: "S-Core Dream"; font-weight: 500; src: url("SCDream5.woff") format("woff"); }   /* 에스코어드림 5 (같은 폴더 → PC 가 TV 로 같이 보냄) */
+@font-face { font-family: "S-Core Dream"; font-weight: 700; src: url("SCDream6.woff") format("woff"); }   /* 굵게는 6 */
 @font-face { font-family: "Pretendard"; font-weight: 800; src: url("/assets/fonts/Pretendard-ExtraBold.woff2") format("woff2"); }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #eaeef3;
@@ -195,7 +197,7 @@ html.dark .edbar button.save { background: #2f7be6; color: #fff; }
                   transparent 62%, rgba(255,255,255,.5) 68%, rgba(255,255,255,.65) 71%, transparent 80%);
   filter: blur(14px); animation: restLight 14s ease-in-out infinite alternate; }
 @keyframes restLight { from { transform: translateX(-4%) } to { transform: translateX(4%) } }
-#ssRest .lg { position: relative; width: 46%; max-width: 420px; max-height: 40%; object-fit: contain; filter: drop-shadow(0 10px 22px rgba(20, 30, 45, .22)); }
+#ssRest .lg { position: absolute; left: 0; right: 0; top: 0; bottom: 0; margin: auto; width: 46%; max-width: 420px; max-height: 40%; object-fit: contain; filter: drop-shadow(0 10px 22px rgba(20, 30, 45, .22)); }
 #ssRest .cap { position: absolute; left: 0; right: 0; bottom: 38px; text-align: center; font-size: 27px; font-weight: 700; color: #5d6b7a; letter-spacing: .5px;
                animation: restBlink 1.6s ease-in-out infinite; }
 @keyframes restBlink { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
@@ -209,18 +211,22 @@ html.dark #ssRest .light { background:
                   transparent 62%, rgba(255,255,255,.06) 68%, rgba(255,255,255,.09) 71%, transparent 80%); }
 html.dark #ssRest .lg { filter: drop-shadow(0 0 18px rgba(255,255,255,.18)) brightness(1.05); }
 html.dark #ssRest .cap { color: #9aa8b8; }
-#ssRest .pic { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
-#ssRest.custom .lg, #ssRest.custom .light { display: none; }
-#ssRest.custom .paper { background: #f3f5f7; }
-html.dark #ssRest.custom .paper { background: #11161c; }
-#ssRest .cap { z-index: 2; text-shadow: 0 1px 8px rgba(255,255,255,.8); }
+#ssRest .pic { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; background: #f3f5f7; }
+html.dark #ssRest .pic { background: #11161c; }
+#ssRest .slide.custom .lg, #ssRest .slide.custom .light { display: none; }
+/* 장면(슬라이드): 정한 시간마다 옆으로 밀어 넘김 — 지금 장면은 왼쪽으로 빠지고 다음 장면은 오른쪽에서 들어온다 */
+#ssRest .slides { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
+#ssRest .slide { position: absolute; inset: 0; overflow: hidden; transform: translateX(100%); transition: transform .65s cubic-bezier(.45, 0, .2, 1); }
+#ssRest .slide.cur { transform: translateX(0); }
+#ssRest .slide.gone { transform: translateX(-100%); }
+#ssRest .slide.still { transition: none; }
+#ssRest .cap { z-index: 3; text-shadow: 0 1px 8px rgba(255,255,255,.8); }
 html.dark #ssRest .cap { text-shadow: 0 1px 8px rgba(0,0,0,.8); }
 
 /* 쉬는 화면 위젯1: 달력 · 날씨 · 로고 (종이 톤, 다크는 어두운 종이) */
-#ssRest.widget .lg, #ssRest.widget .light { display: none; }
-#ssRest.widget .paper { background: #e9e4da; }
-html.dark #ssRest.widget .paper { background: #1c1e23; }
-#ssRest .wg { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; padding: 5% 6% 9%; font-size: 21px; color: #1e1f22; font-family: "Pretendard", "Noto Sans KR", sans-serif; }
+#ssRest .slide.widget1 { background: #e9e4da; }
+html.dark #ssRest .slide.widget1 { background: #1c1e23; }
+#ssRest .wg { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; padding: 5% 6% 9%; font-size: 21px; font-weight: 500; color: #1e1f22; font-family: "S-Core Dream", "Pretendard", "Noto Sans KR", sans-serif; }
 html.dark #ssRest .wg { color: #e7e3da; }
 #ssRest .wg .cal { flex: 0 0 auto; display: flex; gap: 6%; align-items: flex-start; margin-top: 4%; }
 #ssRest .wg .today { flex: 0 0 34%; text-align: center; }

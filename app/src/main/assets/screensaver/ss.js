@@ -516,34 +516,57 @@
   }
   /** 쉬는 시간 화면 (동영상 칸 안): main/white.png(밝은 모드) · dark.png(다크 모드)가 있으면 그 그림을 설정.json 의 rest.fit(crop/fit)대로,
       없으면 종이 질감 + 로고. 아래에 '터치하면 동영상을 재생합니다' */
-  var restOn = false;
+  //  여러 장면(슬라이드)을 정한 시간마다 옆으로 밀어 넘긴다: 설정.json rest.slides = ["widget1", "image", ...], rest.slideSec = 초
+  //  (slides 가 없으면 예전 rest.mode 로: "widget" → ["widget1"], 그 밖에는 ["image"])
+  var restOn = false, restSlideTimer = 0;
+  var REST_SLIDES = { image: restImageSlide, widget1: restWidget };            // 장면 이름 → 그리는 함수 (위젯2 · 위젯3 은 여기에 추가)
+  function restSlides(r) {
+    var ids = Array.isArray(r.slides) ? r.slides.filter(function (s) { return typeof s === 'string' && REST_SLIDES[s]; }) : [];
+    return ids.length ? ids : [r.mode === 'widget' ? 'widget1' : 'image'];
+  }
   window.ssRest = function (on, override) {
     var box = $('video'), old = $('ssRest');
     restOn = !!on;
+    clearInterval(restSlideTimer);
     if (!on) { if (old) { old.classList.add('bye'); setTimeout(function () { old.remove(); }, 450); } return; }
     if (old) old.remove();
     pvStop(); window.ssWebStop(0);
     var L = document.createElement('div'); L.id = 'ssRest';
-    L.innerHTML = '<div class="light"></div><div class="paper"></div>' +
-      '<img class="lg" src="/data/logo.png" onerror="this.onerror=null;this.src=\'logo.png\'">' +
-      '<div class="cap">터치하면 동영상을 재생합니다</div>';
+    L.innerHTML = '<div class="paper"></div><div class="slides"></div><div class="cap">터치하면 동영상을 재생합니다</div>';
     box.appendChild(L);
     box.classList.add('playing');
     (override ? Promise.resolve({ rest: override }) : getJson('설정.json')).then(function (c) {
       if (!restOn || $('ssRest') !== L) return;
-      var r = c && c.rest || {};
-      if (r.mode === 'widget') { restWidget(L, r); return; }                   // 위젯1: 달력 · 날씨 · 로고
-      var fit = r.fit === 'fit' ? 'contain' : 'cover';                          // 그림: main 의 white/dark → 없으면 내장 기본 그림(DAESANG)
-      var name = DARK ? 'dark.png' : 'white.png', img = new Image(), tried = false;
-      img.onload = function () {
-        if (!restOn || $('ssRest') !== L) return;
-        img.className = 'pic'; img.style.objectFit = fit;
-        L.classList.add('custom'); L.insertBefore(img, L.querySelector('.cap'));
-      };
-      img.onerror = function () { if (tried) return; tried = true; img.src = name; };
-      img.src = BASE + name + '?t=' + Math.floor(Date.now() / 60000);
+      var r = c && c.rest || {}, ids = restSlides(r), track = L.querySelector('.slides'), els = [];
+      ids.forEach(function (id, i) {
+        var S = document.createElement('div'); S.className = 'slide ' + id + (i === 0 ? ' cur' : '');
+        track.appendChild(S); els.push(S);
+        REST_SLIDES[id](L, S, r);
+      });
+      if (els.length < 2) return;
+      var sec = Math.max(3, +r.slideSec || 20), cur = 0;
+      restSlideTimer = setInterval(function () {                               // 샥 — 지금 장면은 왼쪽으로, 다음 장면은 오른쪽에서
+        if (!restOn || $('ssRest') !== L) { clearInterval(restSlideTimer); return; }
+        var a = els[cur], b = els[(cur + 1) % els.length];
+        b.classList.remove('gone'); b.classList.add('still'); void b.offsetWidth; b.classList.remove('still');   // 오른쪽 대기 위치로 (전환 없이)
+        a.classList.remove('cur'); a.classList.add('gone'); b.classList.add('cur');
+        cur = (cur + 1) % els.length;
+      }, sec * 1000);
     });
   };
+  // 장면 "image": main 의 white.png(밝은 모드) · dark.png(다크 모드)를 rest.fit(crop/fit)대로, 없으면 종이 질감 + 로고
+  function restImageSlide(L, S, r) {
+    S.innerHTML = '<div class="light"></div><img class="lg" src="/data/logo.png" onerror="this.onerror=null;this.src=\'logo.png\'">';
+    var fit = r.fit === 'fit' ? 'contain' : 'cover';
+    var name = DARK ? 'dark.png' : 'white.png', img = new Image(), tried = false;
+    img.onload = function () {
+      if (!restOn || $('ssRest') !== L) return;
+      img.className = 'pic'; img.style.objectFit = fit;
+      S.classList.add('custom'); S.appendChild(img);
+    };
+    img.onerror = function () { if (tried) return; tried = true; img.src = name; };
+    img.src = BASE + name + '?t=' + Math.floor(Date.now() / 60000);
+  }
 
   // ── 쉬는 화면 위젯1: 달력(오늘 강조) + 날씨(Open-Meteo, 키 없음) + 로고 ──
   //    설정.json rest: { mode: "widget", city: "오산", lat: 37.15, lon: 127.07 }
@@ -567,14 +590,13 @@
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + P[k] + '</svg>';
   }
   var wxCache = null, wxAt = 0, wxTimer = 0;
-  function restWidget(L, r) {
-    L.classList.add('widget');
+  function restWidget(L, S, r) {                                              // L: 쉬는 화면 전체(살아 있는지 확인용) · S: 이 장면 칸
     var lat = isFinite(+r.lat) ? +r.lat : 37.1499, lon = isFinite(+r.lon) ? +r.lon : 127.0771, city = r.city || '오산시';
     var W = document.createElement('div'); W.className = 'wg';
     W.innerHTML = '<div class="cal"><div class="today"><div class="dow"></div><div class="dd"></div></div><div class="grid"><div class="mon"></div><div class="days"></div></div></div>' +
       '<div class="wx"><div class="top"><div><div class="city"></div><div class="temp">--°</div></div><div class="r"><div class="ico"></div><div class="desc">날씨 불러오는 중…</div><div class="hl"></div></div></div><div class="hours"></div></div>' +
       '<div class="logo"><img src="/data/logo.png" onerror="this.onerror=null;this.src=\'logo.png\'"></div>';
-    L.insertBefore(W, L.querySelector('.cap'));
+    S.appendChild(W);
     function calendar() {
       var d = new Date(), y = d.getFullYear(), m = d.getMonth(), t = d.getDate();
       W.querySelector('.dow').textContent = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][d.getDay()];
