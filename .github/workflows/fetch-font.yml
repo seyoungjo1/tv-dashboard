@@ -14,27 +14,46 @@ jobs:
         run: |
           set -e
           cd app/src/main/assets/fonts
-          echo "== 패키지 파일 목록 =="; curl -fsSL "https://data.jsdelivr.com/v1/package/gh/projectnoonnu/noonfonts_six@1.0/flat" | python3 -c "import json,sys; [print(f['name']) for f in json.load(sys.stdin)['files'] if 'ore' in f['name'] or 'SCD' in f['name']]" || true
-          get() { # get <저장이름> <후보 URL...>
-            out="$1"; shift
-            for u in "$@"; do
-              if curl -fsSL "$u" -o "$out"; then echo "받음: $u"; file "$out"; ls -la "$out"; return 0; fi
-              echo "없음: $u"
-            done
-            echo "모든 후보 실패: $out"; return 1
-          }
-          B="https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.0"
-          get SCDream3.woff "$B/S-CoreDream-3Light.woff" "$B/SCDream3.woff" "$B/S-CoreDream-3Light.woff2"
-          get SCDream5.woff "$B/S-CoreDream-5Medium.woff" "$B/SCDream5.woff" "$B/S-CoreDream-5Medium.woff2"
-          get SCDream6.woff "$B/S-CoreDream-6Bold.woff" "$B/SCDream6.woff" "$B/S-CoreDream-6Bold.woff2"
+          # 1) 정해진 후보 → 2) 모자라면 GitHub 코드 검색으로 그 파일명을 가진 공개 저장소를 찾아 raw 로 받는다
           python3 - <<'PY'
-          for w in (3, 5, 6):
-              b = open(f"SCDream{w}.woff", "rb").read(4); assert b == b"wOFF", (w, b)
+          import json, os, urllib.parse, urllib.request
+          NAMES = {3: "S-CoreDream-3Light", 5: "S-CoreDream-5Medium", 6: "S-CoreDream-6Bold"}
+          CAND = ["https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.0/{n}.woff", "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six/{n}.woff",
+                  "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/{n}.woff", "https://astra.nrf.re.kr/fonts/home/user/{n}.woff"]
+          def get(u):
+              try:
+                  r = urllib.request.Request(u, headers={"User-Agent": "curl/8"}); d = urllib.request.urlopen(r, timeout=30).read()
+                  if d[:4] == b"wOFF": return d
+                  print("woff 아님:", u, d[:12])
+              except Exception as e: print("없음:", u, e)
+          tok = os.environ.get("GH_TOKEN", "")
+          def search(n):
+              try:
+                  r = urllib.request.Request("https://api.github.com/search/code?per_page=20&q=" + urllib.parse.quote(f'"{n}.woff" in:path'),
+                                             headers={"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json", "User-Agent": "curl/8"})
+                  j = json.load(urllib.request.urlopen(r, timeout=30))
+                  for it in j.get("items", []):
+                      if it["path"].endswith(n + ".woff"):
+                          yield f'https://raw.githubusercontent.com/{it["repository"]["full_name"]}/HEAD/{it["path"]}'
+              except Exception as e: print("검색 실패:", n, e)
+          for w, n in NAMES.items():
+              out = f"SCDream{w}.woff"; d = None
+              for u in [c.format(n=n) for c in CAND]:
+                  d = get(u)
+                  if d: print("받음:", u, len(d)); break
+              if not d:
+                  for u in search(n):
+                      d = get(u)
+                      if d: print("받음(검색):", u, len(d)); break
+              assert d, "못 받음: " + n
+              open(out, "wb").write(d)
           print("ok")
           PY
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: 커밋
         run: |
           git config user.name "github-actions[bot]"; git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/assets/fonts/SCDream*.woff
-          git commit -m "글꼴: 에스코어드림(S-Core Dream) 3 · 5 · 6 woff 추가 (눈누 CDN, 무료 배포 글꼴)" || echo "변경 없음"
+          git commit -m "글꼴: 에스코어드림(S-Core Dream) 3 · 5 · 6 woff 추가 (무료 배포 글꼴)" || echo "변경 없음"
           git push
