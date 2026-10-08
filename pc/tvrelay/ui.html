@@ -290,12 +290,21 @@
             <label>쉬는 시간 <input type="number" id="ssRestMin" min="1" value="30"> 분</label>
           </div>
           <div class="row" id="ssRestOpt">
-            <span class="lb">그림 표시</span>
-            <label class="chk"><input type="radio" name="ssRestFit" value="crop" checked> 크롭 (꽉 채움)</label>
-            <label class="chk"><input type="radio" name="ssRestFit" value="fit"> 확장 (전체 보임)</label>
+            <span class="lb">화면</span>
+            <label class="chk"><input type="radio" name="ssRestMode" value="image" checked> 그림</label>
+            <label class="chk"><input type="radio" name="ssRestMode" value="widget"> 위젯1 (달력 · 날씨 · 로고)</label>
+            <span class="lb ssImgOnly">그림 표시</span>
+            <label class="chk ssImgOnly"><input type="radio" name="ssRestFit" value="crop" checked> 크롭</label>
+            <label class="chk ssImgOnly"><input type="radio" name="ssRestFit" value="fit"> 확장</label>
             <button type="button" class="secondary" id="ssRestPrev">미리보기</button>
           </div>
-          <div class="hint">그림을 바꾸려면 main 폴더에 <b>white.png</b>(밝은 모드) · <b>dark.png</b>(다크 모드)를 올리세요. 없으면 기본 그림(DAESANG)</div>
+          <div class="row ssWgOnly hidden">
+            <label>지역 이름 <input type="text" id="ssWgCity" value="오산시" style="width:110px"></label>
+            <label>위도 <input type="number" id="ssWgLat" step="0.0001" value="37.1499" style="width:96px"></label>
+            <label>경도 <input type="number" id="ssWgLon" step="0.0001" value="127.0771" style="width:96px"></label>
+            <span class="hint" style="flex-basis:100%">날씨는 Open-Meteo(무료 · 키 없음)에서 TV 가 직접 받습니다. 위도·경도는 지도에서 공장 위치를 찍으면 나옵니다</span>
+          </div>
+          <div class="hint ssImgOnly">그림을 바꾸려면 main 폴더에 <b>white.png</b>(밝은 모드) · <b>dark.png</b>(다크 모드)를 올리세요. 없으면 기본 그림(DAESANG)</div>
         </div>
       </details>
 
@@ -967,6 +976,8 @@
     if (cachedNotice !== null) ta.value = cachedNotice.replace(/^﻿/, '').trim();
     try { const c = await get('설정.json'); if (c) ssConf = JSON.parse(c) || {}; } catch (_) {}
     const applyRest = () => { if (ssRestDirty) return;              // 고치는 중이면 늦게 온 TV 내용으로 덮지 않는다
+      const md = ssConf.rest?.mode === 'widget' ? 'widget' : 'image'; const rm = document.querySelector(`input[name=ssRestMode][value=${md}]`); if (rm) rm.checked = true; ssRestModeUi();
+      $('#ssWgCity').value = ssConf.rest?.city || '오산시'; $('#ssWgLat').value = isFinite(+ssConf.rest?.lat) && ssConf.rest?.lat !== undefined ? +ssConf.rest.lat : 37.1499; $('#ssWgLon').value = isFinite(+ssConf.rest?.lon) && ssConf.rest?.lon !== undefined ? +ssConf.rest.lon : 127.0771;
       const f = ssConf.rest?.fit === 'fit' ? 'fit' : 'crop'; const r = document.querySelector(`input[name=ssRestFit][value=${f}]`); if (r) r.checked = true;
       $('#ssRestOn').checked = !!ssConf.rest?.enabled; $('#ssRestRun').value = +ssConf.rest?.runMin > 0 ? +ssConf.rest.runMin : 10; $('#ssRestMin').value = +ssConf.rest?.restMin > 0 ? +ssConf.rest.restMin : 30; };
     applyRest();
@@ -1040,17 +1051,22 @@
     try { await send([{ op: 'delete', path: SS_PAGE_DIR }], '화면보호기 화면: 내장 화면으로', true); } catch (e) { alert(e.message); }
   };
   let ssRestShown = false;
-  const ssRestPost = (on) => { ssRestShown = on; $('#ssFrame').contentWindow?.postMessage({ ss: { rest: on } }, '*'); $('#ssRestPrev').textContent = on ? '미리보기 끝' : '미리보기'; };
+  const ssRestPost = (on) => { ssRestShown = on; $('#ssFrame').contentWindow?.postMessage({ ss: { rest: on ? ssRestConf() : false } }, '*'); $('#ssRestPrev').textContent = on ? '미리보기 끝' : '미리보기'; };
   $('#ssRestPrev').onclick = () => ssRestPost(!ssRestShown);
   let ssRestDirty = false;                                   // 쉬는 화면 설정을 직접 고쳤는가 (TV 내용으로 덮지 않게)
+  const ssRestConf = () => ({ mode: document.querySelector('input[name=ssRestMode]:checked')?.value === 'widget' ? 'widget' : 'image',
+    fit: document.querySelector('input[name=ssRestFit]:checked')?.value === 'fit' ? 'fit' : 'crop',
+    enabled: $('#ssRestOn').checked, runMin: Math.max(1, +$('#ssRestRun').value || 10), restMin: Math.max(1, +$('#ssRestMin').value || 30),
+    city: ($('#ssWgCity').value || '오산시').trim(), lat: +$('#ssWgLat').value || 37.1499, lon: +$('#ssWgLon').value || 127.0771 });
+  function ssRestModeUi() { const w = document.querySelector('input[name=ssRestMode]:checked')?.value === 'widget'; document.querySelectorAll('.ssImgOnly').forEach(e => e.classList.toggle('hidden', w)); document.querySelectorAll('.ssWgOnly').forEach(e => e.classList.toggle('hidden', !w)); }
+  ['#ssWgCity', '#ssWgLat', '#ssWgLon'].forEach(id => $(id).addEventListener('input', () => { ssVidsDirty = true; ssRestDirty = true; }));
   ['#ssRestOn', '#ssRestRun', '#ssRestMin'].forEach(id => $(id).addEventListener('input', () => { ssVidsDirty = true; ssRestDirty = true; }));
-  $('#ssRestOpt').addEventListener('change', () => { ssVidsDirty = true; ssRestDirty = true; if (ssRestShown) { ssRestPost(false); setTimeout(() => ssRestPost(true), 500); } });
+  $('#ssRestOpt').addEventListener('change', () => { ssVidsDirty = true; ssRestDirty = true; ssRestModeUi(); if (ssRestShown) { ssRestPost(false); setTimeout(() => ssRestPost(true), 500); } });
   $('#ssSave').onclick = async () => {
     const lines = ssLines();
     const conf = Object.assign({}, ssConf);
     delete conf.videoFit;                                     // 예전 전체 설정 → 영상별 설정으로
-    conf.rest = { fit: document.querySelector('input[name=ssRestFit]:checked')?.value === 'fit' ? 'fit' : 'crop',
-      enabled: $('#ssRestOn').checked, runMin: Math.max(1, +$('#ssRestRun').value || 10), restMin: Math.max(1, +$('#ssRestMin').value || 30) };
+    conf.rest = ssRestConf();
     conf.playlist = ssVids.map((v, i) => Object.assign({ src: v.yt || target(v), fit: ['crop', 'custom'].includes(v.fit) ? v.fit : 'fit' },
       v.fit === 'crop' ? { align: v.align || 'center' } : { fill: v.fill === 'color' ? 'color' : 'blur' },
       v.fit !== 'crop' && v.fill === 'color' ? { color: v.color || '#000000' } : {},

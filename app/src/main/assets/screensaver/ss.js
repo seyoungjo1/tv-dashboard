@@ -517,7 +517,7 @@
   /** 쉬는 시간 화면 (동영상 칸 안): main/white.png(밝은 모드) · dark.png(다크 모드)가 있으면 그 그림을 설정.json 의 rest.fit(crop/fit)대로,
       없으면 종이 질감 + 로고. 아래에 '터치하면 동영상을 재생합니다' */
   var restOn = false;
-  window.ssRest = function (on) {
+  window.ssRest = function (on, override) {
     var box = $('video'), old = $('ssRest');
     restOn = !!on;
     if (!on) { if (old) { old.classList.add('bye'); setTimeout(function () { old.remove(); }, 450); } return; }
@@ -529,19 +529,90 @@
       '<div class="cap">터치하면 동영상을 재생합니다</div>';
     box.appendChild(L);
     box.classList.add('playing');
-    getJson('설정.json').then(function (c) {                                // main 의 그림 → 없으면 내장 기본 그림(DAESANG)
+    (override ? Promise.resolve({ rest: override }) : getJson('설정.json')).then(function (c) {
       if (!restOn || $('ssRest') !== L) return;
-      var fit = c && c.rest && c.rest.fit === 'fit' ? 'contain' : 'cover';
+      var r = c && c.rest || {};
+      if (r.mode === 'widget') { restWidget(L, r); return; }                   // 위젯1: 달력 · 날씨 · 로고
+      var fit = r.fit === 'fit' ? 'contain' : 'cover';                          // 그림: main 의 white/dark → 없으면 내장 기본 그림(DAESANG)
       var name = DARK ? 'dark.png' : 'white.png', img = new Image(), tried = false;
       img.onload = function () {
         if (!restOn || $('ssRest') !== L) return;
         img.className = 'pic'; img.style.objectFit = fit;
         L.classList.add('custom'); L.insertBefore(img, L.querySelector('.cap'));
       };
-      img.onerror = function () { if (tried) return; tried = true; img.src = name; };   // 내장 기본 그림 (DAESANG)
+      img.onerror = function () { if (tried) return; tried = true; img.src = name; };
       img.src = BASE + name + '?t=' + Math.floor(Date.now() / 60000);
     });
   };
+
+  // ── 쉬는 화면 위젯1: 달력(오늘 강조) + 날씨(Open-Meteo, 키 없음) + 로고 ──
+  //    설정.json rest: { mode: "widget", city: "오산", lat: 37.15, lon: 127.07 }
+  var WX_TEXT = { 0: '맑음', 1: '대체로 맑음', 2: '구름 조금', 3: '흐림', 45: '안개', 48: '안개', 51: '이슬비', 53: '이슬비', 55: '이슬비',
+    56: '얼음비', 57: '얼음비', 61: '비', 63: '비', 65: '큰비', 66: '얼음비', 67: '얼음비', 71: '눈', 73: '눈', 75: '큰눈', 77: '싸락눈',
+    80: '소나기', 81: '소나기', 82: '강한 소나기', 85: '소낙눈', 86: '소낙눈', 95: '뇌우', 96: '뇌우', 99: '뇌우' };
+  function wxIcon(code, day) {                                                 // 선 아이콘 (SVG) — 한 톤으로
+    var k = code <= 1 ? (day ? 'sun' : 'moon') : code <= 2 ? (day ? 'psun' : 'pmoon') : code <= 3 ? 'cloud'
+      : code <= 48 ? 'fog' : code <= 67 || (code >= 80 && code <= 82) ? 'rain' : code <= 77 || code === 85 || code === 86 ? 'snow' : 'storm';
+    var P = {
+      sun: '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+      moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+      psun: '<circle cx="8" cy="9" r="3.2"/><path d="M8 2.5v1.5M2.5 9H4M4.1 5.1l1.1 1.1"/><path d="M9 19h9a3.5 3.5 0 0 0 .6-6.95A5 5 0 0 0 9.2 11.5 3.75 3.75 0 0 0 9 19z"/>',
+      pmoon: '<path d="M11 8.5A5 5 0 1 1 5.2 3.3 4 4 0 0 0 11 8.5z"/><path d="M9 19h9a3.5 3.5 0 0 0 .6-6.95A5 5 0 0 0 9.2 11.5 3.75 3.75 0 0 0 9 19z"/>',
+      cloud: '<path d="M7 18h10a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 7.1 9.6 4.25 4.25 0 0 0 7 18z"/>',
+      fog: '<path d="M7 14h10a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 7.1 5.6 4.25 4.25 0 0 0 7 14z"/><path d="M5 18h14M7 21h10"/>',
+      rain: '<path d="M7 15h10a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 7.1 6.6 4.25 4.25 0 0 0 7 15z"/><path d="M9 18l-1 3M13 18l-1 3M17 18l-1 3"/>',
+      snow: '<path d="M7 15h10a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 7.1 6.6 4.25 4.25 0 0 0 7 15z"/><path d="M9 18.5h.01M12.5 20.5h.01M16 18.5h.01M10.5 21.5h.01M14.5 21.5h.01"/>',
+      storm: '<path d="M7 14h10a4 4 0 0 0 .7-7.94A5.5 5.5 0 0 0 7.1 5.6 4.25 4.25 0 0 0 7 14z"/><path d="M13 14l-2.5 4h3l-2 4"/>'
+    };
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + P[k] + '</svg>';
+  }
+  var wxCache = null, wxAt = 0, wxTimer = 0;
+  function restWidget(L, r) {
+    L.classList.add('widget');
+    var lat = isFinite(+r.lat) ? +r.lat : 37.1499, lon = isFinite(+r.lon) ? +r.lon : 127.0771, city = r.city || '오산시';
+    var W = document.createElement('div'); W.className = 'wg';
+    W.innerHTML = '<div class="cal"><div class="today"><div class="dow"></div><div class="dd"></div></div><div class="grid"><div class="mon"></div><div class="days"></div></div></div>' +
+      '<div class="wx"><div class="top"><div><div class="city"></div><div class="temp">--°</div></div><div class="r"><div class="ico"></div><div class="desc">날씨 불러오는 중…</div><div class="hl"></div></div></div><div class="hours"></div></div>' +
+      '<div class="logo"><img src="/data/logo.png" onerror="this.onerror=null;this.src=\'logo.png\'"></div>';
+    L.insertBefore(W, L.querySelector('.cap'));
+    function calendar() {
+      var d = new Date(), y = d.getFullYear(), m = d.getMonth(), t = d.getDate();
+      W.querySelector('.dow').textContent = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][d.getDay()];
+      W.querySelector('.dd').textContent = t;
+      W.querySelector('.mon').textContent = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'][m];
+      var first = new Date(y, m, 1).getDay(), n = new Date(y, m + 1, 0).getDate(), h = '';
+      for (var i = 0; i < first; i++) h += '<i></i>';
+      for (var k = 1; k <= n; k++) h += '<b' + (k === t ? ' class="on"' : '') + '>' + k + '</b>';
+      W.querySelector('.days').innerHTML = h;
+    }
+    function paintWx(j) {
+      if (!j || !j.current) return;
+      var c = j.current, day = c.is_day !== 0, code = c.weather_code | 0;
+      W.querySelector('.city').textContent = city;
+      W.querySelector('.temp').textContent = Math.round(c.temperature_2m) + '°';
+      W.querySelector('.ico').innerHTML = wxIcon(code, day);
+      W.querySelector('.desc').textContent = WX_TEXT[code] || '—';
+      var dmax = j.daily && j.daily.temperature_2m_max ? j.daily.temperature_2m_max[0] : null, dmin = j.daily && j.daily.temperature_2m_min ? j.daily.temperature_2m_min[0] : null;
+      W.querySelector('.hl').textContent = dmax != null ? '최고:' + Math.round(dmax) + '° 최저:' + Math.round(dmin) + '°' : '';
+      var hs = j.hourly || {}, now = new Date(), key = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) + 'T' + pad(now.getHours()), out = '';
+      var i0 = (hs.time || []).indexOf(key + ':00'); if (i0 < 0) i0 = 0;
+      for (var i = i0 + 1, cnt = 0; i < (hs.time || []).length && cnt < 6; i++, cnt++) {
+        var hh = +hs.time[i].slice(11, 13), lab = (hh < 12 ? '오전 ' : '오후 ') + (hh % 12 === 0 ? 12 : hh % 12) + '시';
+        out += '<div><span>' + lab + '</span><em>' + wxIcon(hs.weather_code[i] | 0, hs.is_day ? hs.is_day[i] !== 0 : (hh >= 6 && hh < 19)) + '</em><strong>' + Math.round(hs.temperature_2m[i]) + '°</strong></div>';
+      }
+      W.querySelector('.hours').innerHTML = out;
+    }
+    function weather() {
+      if (wxCache && Date.now() - wxAt < 30 * 60000) { paintWx(wxCache); return; }
+      var u = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon +
+        '&current=temperature_2m,weather_code,is_day&hourly=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FSeoul&forecast_days=2';
+      fetch(u).then(function (x) { return x.json(); }).then(function (j) { wxCache = j; wxAt = Date.now(); if ($('ssRest') === L) paintWx(j); })
+        .catch(function () { if (!wxCache) W.querySelector('.desc').textContent = '날씨를 받지 못했습니다 (인터넷 확인)'; else paintWx(wxCache); });
+    }
+    calendar(); weather();
+    clearInterval(wxTimer);
+    wxTimer = setInterval(function () { if ($('ssRest') !== L) { clearInterval(wxTimer); return; } calendar(); weather(); }, 10 * 60000);
+  }
   /** TV: 기본 플레이어가 틀지 못한 동영상 파일을 페이지 <video> 로 (유튜브가 재생되는 길). 화면에는 아무 표시도 하지 않는다 */
   window.ssVideoWeb = function (o) {
     pvStop(); window.ssWebStop(0);
@@ -559,7 +630,7 @@
       return;
     }
     if (d.panels !== undefined) { overridePanels = d.panels; load(true); return; }   // 현황판 항목 (저장 전)
-    if (d.rest !== undefined) { window.ssRest(!!d.rest); return; }                  // 쉬는 화면 미리보기
+    if (d.rest !== undefined) { window.ssRest(!!d.rest, d.rest && typeof d.rest === 'object' ? d.rest : null); return; }   // 쉬는 화면 미리보기 (저장 전 설정으로)
     override = d;
     if (lastA) paint(lastA);
   });
