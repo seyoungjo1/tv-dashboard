@@ -311,11 +311,16 @@ function renderSum(){
   $('sumg').innerHTML=CATS.map(function(c){var p=pal(c.c);return '<div class="st" style="--ebg:'+p.bg+';--etx:'+p.tx+'"><b>'+(n[c.k]||0)+'</b><span>'+c.k+'</span></div>';}).join('');
 }
 
-/* ── 조작 ── */
+/* ── 조작 ── 기본은 언제나 '오늘': 열릴 때 오늘 달·오늘 날짜가 선택되고, 다른 달을 보다가 손을 떼면 IDLE_MIN 분 뒤 오늘로 돌아오며, 자정이 지나면 새 오늘로 옮긴다 */
+var IDLE_MIN=3; m=q.match(/[?&]idle=([\d.]+)/); if(m&&parseFloat(m[1])>=0)IDLE_MIN=parseFloat(m[1]);
+function goToday(){todayKey=key(new Date());view=new Date();view.setDate(1);selKey=todayKey;hiId='';render();}
+var idleT=null;
+function touched(){if(idleT)clearTimeout(idleT);if(IDLE_MIN>0)idleT=setTimeout(function(){idleT=null;goToday();},IDLE_MIN*60000);}
+document.addEventListener('pointerdown',touched,true);
 function go(n){view=new Date(view.getFullYear(),view.getMonth()+n,1);render();}
 $('prev').onclick=function(){go(-1);};
 $('next').onclick=function(){go(1);};
-$('todayBtn').onclick=function(){todayKey=key(new Date());view=new Date();view.setDate(1);selKey=todayKey;hiId='';render();};
+$('todayBtn').onclick=function(){if(idleT)clearTimeout(idleT);idleT=null;goToday();};
 $('grid').addEventListener('click',function(e){
   var ev=e.target.closest('.ev');
   if(ev){hiId=ev.getAttribute('data-id');selKey=ev.getAttribute('data-k');render();return;}
@@ -358,8 +363,7 @@ function load(){
       var p=parse(JSON.parse(t));
       SRC=nm;lastSig=sig;EV=p.events;ROWS=p.rows;
       $('err').className='';
-      todayKey=key(new Date());
-      render();
+      if(key(new Date())!==todayKey&&!idleT)goToday();else render();
       badge(SRC+' · '+ROWS+'건 · '+nowHM()+' 읽음');
     }).catch(function(e){
       if(i<names.length&&!SRC)return next();
@@ -371,7 +375,7 @@ function load(){
 fit();render();
 loadHolidays().then(load);
 setInterval(load,REFRESH_MIN*60000);
-setInterval(function(){var k=key(new Date());if(k!==todayKey){todayKey=k;render();}},60000); // 자정에 '오늘' 표시 이동
+setInterval(function(){if(key(new Date())!==todayKey&&!idleT)goToday();},30000); // 자정: 아무도 만지고 있지 않으면 새 오늘로 (만지는 중이면 3분 뒤 복귀 때 반영)
 })();
 </script>
 </body>
