@@ -1032,23 +1032,37 @@
   // ── 화면보호기 화면(페이지) 배포: PC 프로그램의 screensaver/ 사본을 TV 의 _screensaver/ 로. TV 는 그 폴더가 있으면 내장 대신 그 페이지를 띄운다 ──
   const SS_PAGE_FILES = ['index.html', 'ss.css', 'ss.js', 'logo.png', 'white.png', 'dark.png', 'SCDream5.woff', 'SCDream6.woff', 'version.txt'];   // 글꼴(없으면 건너뜀)
   const SS_PAGE_DIR = '_screensaver';
-  function ssPageStatus() {
+  async function ssPageStatus() {
     const has = !!entry(SS_PAGE_DIR + '/index.html');
-    $('#ssPageSt').textContent = has ? `TV 는 PC 가 보낸 화면보호기 화면을 쓰고 있습니다 ([보내기]를 누르면 이 PC 프로그램의 화면과 비교해 바뀐 파일만 보냅니다)` : 'TV 는 앱에 내장된 화면보호기 화면을 쓰고 있습니다';
     $('#ssPageReset').disabled = !has;
+    const pcV = ($('#verPill').textContent.replace('PC 프로그램 v', '') || '').trim();
+    if (!has) { $('#ssPageSt').textContent = 'TV 는 앱에 내장된 화면보호기 화면을 쓰고 있습니다 — [화면 TV 로 보내기]를 누르면 이 PC 프로그램의 화면(v' + pcV + ')으로 바뀝니다'; return; }
+    // TV 에 있는 화면의 버전: TV 가 알려 준 version.txt 의 해시가 PC 버전 문자열의 해시와 같으면 같은 버전. (PC 캐시는 보내기 전에 미리 바뀌므로 기준으로 쓰지 않는다)
+    const ve = entry(SS_PAGE_DIR + '/version.txt');
+    let same = null, tvV = '?';
+    try {
+      if (ve?.h && crypto?.subtle) { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pcV)); same = [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('') === String(ve.h).toLowerCase(); }
+    } catch (_) {}
+    if (same === true) tvV = pcV;
+    else { try { const r = await fetch(prevUrl(SS_PAGE_DIR + '/version.txt') + '?t=' + Date.now()); if (r.ok) tvV = (await r.text()).trim() || '?'; } catch (_) {} if (same === null) same = tvV === pcV; }
+    $('#ssPageSt').innerHTML = `TV 화면 <b>v${esc(tvV)}</b> · PC 프로그램 <b>v${esc(pcV)}</b> — ` + (same ? '같습니다' : '<b style="color:#d83b3b">다릅니다 — [화면 TV 로 보내기]를 누르거나 [TV 에 저장]을 하면 올라갑니다</b>');
   }
+  /** 이 PC 프로그램의 화면보호기 화면 파일들 → TV 의 _screensaver/ 로 올리는 작업 목록 */
+  async function ssPageOps() {
+    const ops = [];
+    for (const n of SS_PAGE_FILES) {
+      const r = await fetch('/ss/' + n + '?t=' + Date.now()); if (!r.ok) continue;
+      const st = await api('PUT', '/api/stage', await r.blob(), true);
+      ops.push({ op: 'put', path: SS_PAGE_DIR + '/' + n, stage: st.id });
+    }
+    return ops;
+  }
+  const pcVer = () => ($('#verPill').textContent.replace('PC 프로그램 v', '') || '?').trim();
   $('#ssPageSend').onclick = async () => {
     if ($('#ssPageSend').disabled) return;
     $('#ssPageSend').disabled = true;
     try {
-      const ops = [];
-      for (const n of SS_PAGE_FILES) {
-        const r = await fetch('/ss/' + n + '?t=' + Date.now()); if (!r.ok) continue;
-        const st = await api('PUT', '/api/stage', await r.blob(), true);
-        ops.push({ op: 'put', path: SS_PAGE_DIR + '/' + n, stage: st.id });
-      }
-      await send(ops, '화면보호기 화면 보내기 (PC v' + ($('#verPill').textContent.replace('PC 프로그램 v', '') || '?') + ')');
-      toast('화면보호기 화면을 보냈습니다. TV 가 받으면 바로 바뀝니다.');
+      await send(await ssPageOps(), '화면보호기 화면 보내기 (PC v' + pcVer() + ')', true);   // 직접 누른 것은 '바뀐 파일만' 비교 없이 전부 보낸다 (결과는 send 가 알림)
     } catch (e) { alert(e.message); } finally { $('#ssPageSend').disabled = false; }
   };
   $('#ssPageReset').onclick = async () => {
@@ -1064,8 +1078,9 @@
   let ssSlideList = ['image'];
   const ssSlidesOf = (r) => { const a = Array.isArray(r.slides) ? r.slides.filter(s => SS_SLIDES[s]) : []; return a.length ? a : [r.mode === 'widget' ? 'widget1' : 'image']; };
   function ssRenderSlides() {
+    if (!ssSlideList.length) ssSlideList = ['image'];
     $('#ssSlides').innerHTML = ssSlideList.map((s, i) => `<span class="chip" data-i="${i}"><span class="n">${i + 1}</span>${SS_SLIDES[s]}` +
-      `<button type="button" data-mv="-1" title="앞으로">◀</button><button type="button" data-mv="1" title="뒤로">▶</button><button type="button" data-del="1" title="빼기">✕</button></span>`).join('') || '<span class="hint">장면이 없습니다 — 오른쪽에서 추가하세요</span>';
+      `<button type="button" data-mv="-1" title="앞으로">◀</button><button type="button" data-mv="1" title="뒤로">▶</button><button type="button" data-del="1" title="빼기">✕</button></span>`).join('');
     const sel = $('#ssSlideAdd'); sel.innerHTML = '<option value="">+ 장면 추가…</option>' + Object.entries(SS_SLIDES).filter(([k]) => !ssSlideList.includes(k)).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
     sel.classList.toggle('hidden', sel.options.length < 2);
     $('#ssSlideSec').parentElement.classList.toggle('hidden', ssSlideList.length < 2);
@@ -1073,11 +1088,11 @@
   const ssSlidesChanged = () => { ssRenderSlides(); $('#ssRestOpt').dispatchEvent(new Event('change')); };
   $('#ssSlides').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return; const i = +b.closest('.chip').dataset.i;
-    if (b.dataset.del) ssSlideList.splice(i, 1);
+    if (b.dataset.del) { if (ssSlideList.length <= 1) { toast('장면은 하나 이상 있어야 합니다'); return; } ssSlideList.splice(i, 1); }
     else { const j = i + +b.dataset.mv; if (j < 0 || j >= ssSlideList.length) return; [ssSlideList[i], ssSlideList[j]] = [ssSlideList[j], ssSlideList[i]]; }
     ssSlidesChanged();
   });
-  $('#ssSlideAdd').addEventListener('change', (e) => { if (e.target.value) { ssSlideList.push(e.target.value); ssSlidesChanged(); } });
+  $('#ssSlideAdd').addEventListener('change', (e) => { e.stopPropagation(); if (e.target.value) { ssSlideList.push(e.target.value); ssSlidesChanged(); } });
   const ssRestConf = () => ({ slides: ssSlideList.slice(), slideSec: Math.max(3, +$('#ssSlideSec').value || 20),
     mode: ssSlideList[0] === 'widget1' ? 'widget' : 'image',                 // 예전 TV 화면(slides 모름)용
     fit: document.querySelector('input[name=ssRestFit]:checked')?.value === 'fit' ? 'fit' : 'crop',
@@ -1118,10 +1133,12 @@
         const pj = new File([JSON.stringify({ panels: panelsOut() }, null, 2)], '현황판.json', { type: 'application/json' });
         ops.push({ op: 'put', path: dir + '/현황판.json', stage: (await api('PUT', '/api/stage', pj, true)).id });
       }
+      // 화면보호기 화면(페이지) 파일도 같이: TV 에 이미 같은 내용이 있으면 건너뛰므로(TV 가 알려 준 파일 해시로 비교) 새 버전일 때만 올라간다
+      const pageOps = await ssPageOps(); ops.push(...pageOps);
       say('');
-      // 이름을 옮기는 작업과 함께 보내므로 '바뀐 파일만' 비교는 끈다 (옮기기 전 이름과 비교하면 틀릴 수 있음)
-      await send(ops, '화면보호기 설정 저장' + (ssVids.some(v => v.file) ? ` (동영상·사진 ${ssVids.filter(v => v.file).length}개 올림)` : ''), ops.some(o => o.op === 'delete'));
-      ssConf = conf; ssRestDirty = false; ssVidsDirty = false;   // 보낸 내용이 기준
+      const id = await send(ops, '화면보호기 설정 저장 (화면 v' + pcVer() + ' 포함)' + (ssVids.some(v => v.file) ? ` (동영상·사진 ${ssVids.filter(v => v.file).length}개 올림)` : ''));
+      if (id === undefined) return;                               // 보내기 실패(알림은 send 가 띄움) → 고친 내용은 그대로 둔다
+      ssConf = conf; ssRestDirty = false; ssVidsDirty = false;   // 보낸 내용(또는 TV 에 이미 같은 내용)이 기준
     } catch (e) { alert(e.message); } finally { $('#ssSave').disabled = false; }
     function say(t) { $('#ssSt').textContent = t; }
   };
@@ -1515,7 +1532,7 @@
         return r.id;
       }
       if (!r.id) {   // 모두 TV 와 같은 버전(또는 이미 보내 둔 내용) → 보낼 것이 없음
-        const note = qd ? `같은 내용을 이미 보냈습니다 — TV 가 받으면 반영됩니다 (다시 보내지 않음)` : `바뀐 파일이 없습니다 — ${sk}개 모두 TV 와 같은 버전이라 보내지 않았습니다`;
+        const note = qd ? `같은 내용을 이미 보냈습니다 — TV 가 받으면 반영됩니다 (다시 보내지 않음)` : `보낼 것이 없습니다 — ${sk}개 모두 TV 에 이미 같은 내용이 있습니다 (이미 저장된 것과 같음)`;
         jobs.unshift({ id: 'skip-' + Date.now(), at: Date.now(), desc, st: 'ok', note });
         renderJobs(); toast(desc + ' — ' + note); return null;
       }
@@ -1538,7 +1555,8 @@
         if (!r.ok) { j.unseen = true; toast('실패 — ' + j.desc + ' (아래 [전송 결과]에서 확인)', true); dockOpen(true); }
         (r.results || []).filter(x => x.file).forEach(x => { const a = document.createElement('a'); a.href = x.file; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); j.note += ' · 저장: ' + x.saved; });
         (r.results || []).filter(x => x.message).forEach(x => j.note += ' · ' + x.message);
-        renderJobs(); setTimeout(async () => { pb.dataset.for = '\u0000'; await loadState(); renderTv(true); if (ssActive) openScreensaver(ssDir); }, 1500);
+        renderJobs(); setTimeout(async () => { pb.dataset.for = '\u0000'; await loadState(); renderTv(true);
+          if (ssActive) { if (ssVidsDirty || ssRestDirty || ssNoticeDirty || ssPanelsDirty) ssPageStatus(); else openScreensaver(ssDir); } }, 1500);   // 고치는 중이면 TV 내용으로 덮지 않는다
         return;
       } catch (e) { j.note = e.message; renderJobs(); }
     }
