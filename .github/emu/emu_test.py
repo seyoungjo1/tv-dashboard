@@ -31,7 +31,6 @@ def shot(name: str):
         im = Image.open(f"{OUT}/{name}.png").convert("RGB")
         sm = im.copy(); sm.thumbnail((640, 640))
         b = io.BytesIO(); sm.save(b, "JPEG", quality=55)
-        print(f"@@SHOT {name} " + base64.b64encode(b.getvalue()).decode())
         return im
     except Exception as e:
         print("  (그림 읽기 실패)", e)
@@ -42,6 +41,11 @@ def paper_ratio(im, rect, dpr) -> float:
     """동영상 칸 안(가장자리 40px 안쪽)에서 쉬는 화면 종이색(밝은 #e9e4da · 어두운 #1c1e23 · 그림 흰 바탕)에 가까운 픽셀 비율"""
     if im is None:
         return -1
+    pts = []
+    for fy in (0.2, 0.5, 0.8):
+        for fx in (0.2, 0.5, 0.8):
+            pts.append(im.getpixel((int((rect[0] + rect[2] * fx) * dpr), int((rect[1] + rect[3] * fy) * dpr))))
+    print("  동영상 칸 9곳 색:", pts)
     x0, y0 = int((rect[0] + 40) * dpr), int((rect[1] + 40) * dpr)
     x1, y1 = int((rect[0] + rect[2] - 40) * dpr), int((rect[1] + rect[3] - 120) * dpr)
     hit = tot = 0
