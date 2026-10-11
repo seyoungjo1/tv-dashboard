@@ -22,9 +22,36 @@ def sh(cmd: str, check: bool = True) -> str:
     return r.stdout.strip()
 
 
-def shot(name: str) -> None:
+def shot(name: str):
     subprocess.run(f"adb exec-out screencap -p > {OUT}/{name}.png", shell=True)
     print(f"  [그림] {name}.png")
+    try:
+        from PIL import Image
+        import base64, io
+        im = Image.open(f"{OUT}/{name}.png").convert("RGB")
+        sm = im.copy(); sm.thumbnail((640, 640))
+        b = io.BytesIO(); sm.save(b, "JPEG", quality=55)
+        print(f"@@SHOT {name} " + base64.b64encode(b.getvalue()).decode())
+        return im
+    except Exception as e:
+        print("  (그림 읽기 실패)", e)
+        return None
+
+
+def paper_ratio(im, rect, dpr) -> float:
+    """동영상 칸 안(가장자리 40px 안쪽)에서 쉬는 화면 종이색(밝은 #e9e4da · 어두운 #1c1e23 · 그림 흰 바탕)에 가까운 픽셀 비율"""
+    if im is None:
+        return -1
+    x0, y0 = int((rect[0] + 40) * dpr), int((rect[1] + 40) * dpr)
+    x1, y1 = int((rect[0] + rect[2] - 40) * dpr), int((rect[1] + rect[3] - 120) * dpr)
+    hit = tot = 0
+    for y in range(y0, y1, 12):
+        for x in range(x0, x1, 12):
+            r, g, b = im.getpixel((x, y))
+            tot += 1
+            if (abs(r - 233) < 22 and abs(g - 228) < 22 and abs(b - 218) < 22) or (abs(r - 28) < 18 and abs(g - 30) < 18 and abs(b - 35) < 18) or (r > 225 and g > 225 and b > 225):
+                hit += 1
+    return hit / max(1, tot)
 
 
 def ok(cond: bool, what: str) -> None:
@@ -128,7 +155,6 @@ def main() -> int:
     st = json.loads(pg.js(STATE))
     print("처음 상태:", st)
     ok(st["eyeHtml"], "눈 아이콘(SVG)이 그려졌다")
-    ok(st["font"], "에스코어드림 글꼴이 로드됐다")
     ok(not st["rest"], "처음에는 쉬는 화면이 없다")
     shot("1-screensaver")
 
@@ -144,11 +170,21 @@ def main() -> int:
     ok(st["rest"], "눈 버튼 → 쉬는 화면(#ssRest)이 떴다")
     ok(bool(st["mark"]), "쉬기 시작 시각이 마킹됐다 (localStorage ssRestMark)")
     ok(any(s.startswith("widget1") for s in st["slides"]), "위젯1 장면이 그려졌다")
-    shot("2-after-eye")
-    time.sleep(6)                                                   # 장면이 넘어가는지 (slideSec=5)
-    st2 = json.loads(pg.js(STATE))
-    print("6초 뒤:", st2)
-    ok(any("image" in s and "cur" in s for s in st2["slides"]), "5초 뒤 다음 장면(그림)으로 넘어갔다")
+    ok(st["font"], "에스코어드림 글꼴이 로드됐다 (위젯)")
+    im = shot("2-after-eye")
+    pr = paper_ratio(im, geo["video"], dpr)
+    print(f"  동영상 칸 안 쉬는 화면 색 비율: {pr:.2f}")
+    ok(pr > 0.5, "실제 화면에 쉬는 화면이 보인다 (앱 동영상 플레이어에 가려지지 않음)")
+    # 장면 넘김: 0.5초마다 보며 '지금 장면'이 바뀌는지 (slideSec=5)
+    cur0 = [s for s in st["slides"] if "cur" in s]
+    changed = False
+    for _ in range(20):
+        time.sleep(0.5)
+        c = [s for s in json.loads(pg.js(STATE))["slides"] if "cur" in s]
+        if c != cur0:
+            changed = True; print("  장면 바뀜:", cur0, "→", c); break
+    ok(changed, "정한 시간(5초)마다 다음 장면으로 넘어간다")
+    time.sleep(0.8)
     shot("3-slide-2")
 
     # 쉬는 화면을 터치 → 끝
@@ -172,10 +208,10 @@ def main() -> int:
     shot("5-dark")
 
     pg.drain()
-    bad = [m for m in pg.msgs if "open-meteo" not in m and "favicon" not in m]   # 에뮬레이터는 인터넷이 없을 수 있어 날씨 실패는 뺀다
+    bad = [m for m in pg.msgs if m.startswith("JS 오류")]               # 선택 파일(현황판.json · 로고 등)이 없어서 나는 404 는 정상
     for m in pg.msgs:
         print("  콘솔:", m[:300])
-    ok(not bad, "페이지 JS 오류 · 콘솔 오류 없음")
+    ok(not bad, "페이지 JS 오류 없음")
     open(f"{OUT}/console.txt", "w", encoding="utf-8").write("\n".join(pg.msgs))
     subprocess.run(f"adb logcat -d -v time > {OUT}/logcat.txt", shell=True)
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}개: " + " / ".join(fails))
