@@ -55,7 +55,7 @@ class Page:
                 pages = []
             cand = [p for p in pages if p.get("type") == "page" and "screensaver" in p.get("url", "")]
             if cand:
-                self.ws = websocket.create_connection(cand[0]["webSocketDebuggerUrl"], timeout=20)
+                self.ws = websocket.create_connection(cand[0]["webSocketDebuggerUrl"], timeout=20, suppress_origin=True)   # WebView 는 Origin 헤더가 있으면 거부
                 self.url = cand[0]["url"]
                 break
             time.sleep(1)
@@ -183,4 +183,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        code = main()
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        shot("x-error")
+        subprocess.run(f"adb logcat -d -v time > {OUT}/logcat.txt", shell=True)
+        code = 2
+    sys.exit(code)

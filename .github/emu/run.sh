@@ -10,6 +10,7 @@ adb wait-for-device
 adb shell settings put global window_animation_scale 0; adb shell settings put global transition_animation_scale 0; adb shell settings put global animator_duration_scale 0
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1                      # 가로 (TV 처럼)
+adb shell wm size 1920x1080; adb shell wm density 160               # TV 와 같은 1920×1080 가로 화면
 adb install -r -g "$APK"
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
 adb shell appops set $PKG SYSTEM_ALERT_WINDOW allow || true
