@@ -1102,7 +1102,13 @@
   window.ssNoticeCancel = function () { if (ntOpen) ntClose(); };
 
   // TV 앱이 부른다: 화면보호기를 다시 띄울 때(show) · main 폴더가 바뀌었을 때(refresh)
-  window.ssShow = function () { if (ntOpen) ntClose(); promptOn = false; clearTimeout(promptTimer); load(true); if (restManual) restManualStart(); };
+  window.ssShow = function () {
+    if (ntOpen) ntClose(); promptOn = false; clearTimeout(promptTimer);
+    // 앱이 화면보호기를 내렸다가 다시 띄움 = 앱의 쉬는 시간도 끝남 (앱은 내릴 때 ssRest(false) 를 부르지 않는다).
+    // 그대로 두면 쉬는 화면이 남은 것으로 알고(restOn) 눈 버튼을 무시한다
+    if (restApp) { restApp = false; if (!restManual) restShow(false); }
+    load(true); if (restManual) restManualStart();
+  };
   window.ssRefresh = function () { load(false); };
   // 한 번 터치했을 때 TV 앱이 부른다: 아래 멘트를 '한 번 더 눌러 주세요' 로 잠시 바꾼다 (빈 값이면 원래대로)
   var promptOn = false, promptTimer = 0;

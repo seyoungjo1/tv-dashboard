@@ -332,6 +332,40 @@ def main() -> int:
     ok(st4["dark"] != st["dark"], "달/해 버튼 → 다크 모드가 바뀌었다")
     shot("5-dark")
 
+    # ── 눈 버튼을 다시 · 여러 번: 한 번 된 뒤에도 계속 되는지 ──
+    rest_on = lambda: json.loads(pg.js(STATE))["rest"]
+    def eye_cycle(tag, end_by_touch=True):
+        e = rect("#restBtn")
+        if not e:
+            ok(False, f"{tag}: 눈 버튼이 보인다"); return
+        tap(e); time.sleep(2.5)
+        on = rest_on()
+        ok(on, f"{tag}: 눈 터치 → 쉬는 화면이 떴다")
+        if on and end_by_touch:
+            tap(geo["video"]); time.sleep(2)
+            ok(not rest_on(), f"{tag}: 쉬는 화면 터치 → 내려갔다")
+    for i in (2, 3, 4):
+        eye_cycle(f"{i}번째")
+    # 쉬는 시간(restMin 1분)이 다 돼서 스스로 끝난 뒤에도
+    eye_cycle("시간으로 끝나기", end_by_touch=False)
+    time.sleep(64)
+    ok(not rest_on(), "쉬는 시간(1분)이 지나면 쉬는 화면이 스스로 내려간다")
+    eye_cycle("시간으로 끝난 뒤")
+    # 앱의 쉬는 시간 중에 대시보드로 들어갔다가 돌아온 뒤에도 (앱은 화면보호기를 내릴 때 ssRest(false) 를 부르지 않는다)
+    pg.js("window.ssRest(true)")                       # 앱이 재생 시간이 지나 쉬는 화면을 켤 때 부르는 것과 같은 호출
+    time.sleep(1.5)
+    ok(rest_on(), "앱의 쉬는 화면이 떴다 (재현 준비)")
+    bx, by = dev(geo["video"][0] / 2, geo["ih"] * 0.6, dpr)   # 동영상 칸 밖(왼쪽 실적 칸) 두 번 터치 → 대시보드
+    sh(f"adb shell input tap {bx} {by}"); time.sleep(0.6); sh(f"adb shell input tap {bx} {by}")
+    time.sleep(4)
+    shot("9-dashboard")
+    sh(f"adb shell am start -n {PKG}/com.seyoungjo.tvdashboard.ui.MainActivity --ez preview_idle true", check=False)
+    time.sleep(6)
+    shot("9-back")
+    print("  대시보드 다녀온 뒤:", pg.js(STATE))
+    ok(not rest_on(), "대시보드를 다녀오면 앱의 쉬는 화면은 내려가 있다")
+    eye_cycle("대시보드 다녀온 뒤")
+
     pg.drain()
     bad = [m for m in pg.msgs if m.startswith("JS 오류")]               # 선택 파일(현황판.json · 로고 등)이 없어서 나는 404 는 정상
     for m in pg.msgs:
