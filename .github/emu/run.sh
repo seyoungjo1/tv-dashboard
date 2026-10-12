@@ -21,6 +21,12 @@ adb shell appops set $PKG SYSTEM_ALERT_WINDOW allow || true
 adb shell am start -W -n $PKG/com.seyoungjo.tvdashboard.ui.MainActivity >/dev/null; sleep 4
 adb shell am force-stop $PKG
 adb shell mkdir -p "$ROOT/main" "$ROOT/_screensaver"
+# 공지 수정 비밀번호(시험용 123456)를 앱 설정에 넣는다 (디버그 앱만 run-as 가능)
+printf '<?xml version="1.0" encoding="utf-8" standalone="yes" ?>\n<map>\n<string name="notice_pin">123456</string>\n</map>\n' > /tmp/prefs.xml
+adb push /tmp/prefs.xml /data/local/tmp/prefs.xml >/dev/null; adb shell chmod 644 /data/local/tmp/prefs.xml
+adb shell run-as $PKG mkdir -p shared_prefs
+adb shell run-as $PKG cp /data/local/tmp/prefs.xml shared_prefs/${PKG}_preferences.xml
+adb shell run-as $PKG cat shared_prefs/${PKG}_preferences.xml
 adb push emu-content/main/. "$ROOT/main/" >/dev/null
 adb push pc/tvrelay/screensaver/. "$ROOT/_screensaver/" >/dev/null
 adb push emu-content/version.txt "$ROOT/_screensaver/version.txt" >/dev/null

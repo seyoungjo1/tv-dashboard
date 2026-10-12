@@ -137,6 +137,20 @@ def main() -> int:
     p2 = paper_ratio(im2)
     print(f"  쉬는 화면 터치 뒤 비율: {p2:.2f}")
     ok(p2 < 0.3, "쉬는 화면 터치 → 동영상으로 돌아왔다")
+    # 공지 수정: 공지 줄의 연필 아이콘(왼쪽 칸 안의 작은 아이콘) → 창이 왼쪽 칸에 뜨고 동영상 칸에 가려지지 않는지
+    sc, ox, oy = GEO["s"], GEO["ox"], GEO["oy"]
+    pens = sorted(b for c, r, b in nodes() if 25 * sc <= b[2] - b[0] <= 80 * sc and 25 * sc <= b[3] - b[1] <= 80 * sc and 900 * sc < b[0] - ox < 1117 * sc and b[1] - oy > 118 * sc)
+    print("  연필 아이콘:", pens[:3])
+    ok(bool(pens), "공지 줄에 수정(연필) 아이콘이 있다")
+    if pens:
+        l, t, r, b = pens[0]
+        sh(f"adb shell input tap {(l + r) // 2} {(t + b) // 2}"); time.sleep(3)
+        im3 = shot("r4-notice")
+        vx, vy, vw, vh = vrect()
+        left = [im3.getpixel((int(ox + x * sc), int(oy + 200 * sc))) for x in (200, 600, 1000)]
+        print("  공지 창 자리 색(왼쪽 칸 위):", left)
+        ok(all(min(px) > 200 for px in left), "공지 수정 창이 왼쪽 칸에 실제로 보인다")
+        sh("adb shell input keyevent KEYCODE_BACK")
     subprocess.run(f"adb logcat -d -v time > {OUT}/logcat.txt", shell=True)
     print("\n결과(릴리스 APK):", "모두 통과" if not fails else f"실패 {len(fails)}개: " + " / ".join(fails))
     return 0 if not fails else 1

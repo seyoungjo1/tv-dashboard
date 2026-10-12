@@ -237,6 +237,58 @@ def main() -> int:
     ok(not st3["mark"], "마킹이 지워졌다")
     shot("4-after-touch")
 
+    # ── 공지 수정: 연필 아이콘 → 비밀번호 숫자판 → 입력창 → 글 입력 → 저장 (모두 실제 터치) ──
+    def rect(sel):
+        return json.loads(pg.js("(function(e){if(!e)return 'null';var r=e.getBoundingClientRect();return JSON.stringify([r.left,r.top,r.width,r.height])})(document.querySelector(%s))" % json.dumps(sel)))
+    def tap(r):
+        sh(f"adb shell input tap {(r[0] + r[2] / 2) * dpr:.0f} {(r[1] + r[3] / 2) * dpr:.0f}")
+    def overlaps_video(r):
+        v = geo["video"]
+        return r[0] + r[2] > v[0] and r[0] < v[0] + v[2] and r[1] + r[3] > v[1] and r[1] < v[1] + v[3]
+    ne = rect(".nedit")
+    ok(bool(ne), "공지 줄에 수정(연필) 아이콘이 있다")
+    if ne:
+        tap(ne); time.sleep(2.5)
+        pop = rect("#ntPop")
+        ok(bool(pop), "연필 터치 → 공지 수정 창이 떴다")
+        if pop:
+            print("  비밀번호 창:", [round(x) for x in pop], "동영상 칸:", [round(x) for x in geo["video"]])
+            ok(not overlaps_video(pop), "비밀번호 창이 동영상 칸과 겹치지 않는다")
+            im = shot("6-pin")
+            k1 = rect('#ntPop .pad button[data-k="1"]')
+            if k1:
+                px = im.getpixel((int((k1[0] + k1[2] / 2) * dpr), int((k1[1] + k1[3] / 2) * dpr)))
+                print("  숫자 1 버튼 색:", px)
+                ok(min(px) > 180, "숫자판이 실제 화면에 보인다 (가려지지 않음)")
+            for d in "123456":
+                kr = rect('#ntPop .pad button[data-k="%s"]' % d)
+                if kr: tap(kr); time.sleep(0.5)
+            time.sleep(2)
+            ta = rect("#ntTa")
+            ok(bool(ta), "비밀번호 6자리 → 공지 입력창이 열렸다")
+            if ta:
+                pop2 = rect("#ntPop"); sv = rect("#ntSave")
+                print("  입력창:", [round(x) for x in pop2], "저장 버튼:", [round(x) for x in sv])
+                ok(not overlaps_video(pop2), "공지 입력창이 동영상 칸과 겹치지 않는다")
+                im2 = shot("7-editor")
+                spx = im2.getpixel((int((sv[0] + sv[2] / 2) * dpr), int((sv[1] + sv[3] / 2) * dpr)))
+                print("  저장 버튼 색:", spx)
+                ok(spx[2] > 180 and spx[0] < 120, "저장 버튼(파란색)이 실제 화면에 보인다")
+                tap(ta); time.sleep(1)
+                sh("adb shell input keyevent KEYCODE_MOVE_END"); sh("adb shell input keyevent KEYCODE_ENTER")
+                sh("adb shell input text EMUTEST123"); time.sleep(1.5)
+                print("  입력창 내용:", pg.js("document.querySelector('#ntTa').value"))
+                ok("EMUTEST123" in (pg.js("document.querySelector('#ntTa').value") or ""), "화면 키 입력이 공지 입력창에 들어간다")
+                sh("adb shell input keyevent KEYCODE_BACK"); time.sleep(1)        # 화면 키보드 닫기
+                sv = rect("#ntSave")
+                if sv: tap(sv)
+                time.sleep(4)
+                saved = sh("adb shell cat '/sdcard/Android/data/%s/files/자료/main/공지.txt'" % PKG, check=False)
+                print("  저장된 공지.txt:", saved.replace("\n", " / "))
+                ok("EMUTEST123" in saved, "저장 터치 → TV 의 공지.txt 에 저장됐다")
+                ok(not rect("#ntPop"), "저장 뒤 공지 수정 창이 닫혔다")
+                shot("8-after-save")
+
     # 다크 모드 버튼도 실제 터치로
     dk = json.loads(pg.js("JSON.stringify((function(r){return [r.left, r.top, r.width, r.height]})(document.querySelector('#darkBtn').getBoundingClientRect()))"))
     sh(f"adb shell input tap {(dk[0] + dk[2] / 2) * dpr:.0f} {(dk[1] + dk[3] / 2) * dpr:.0f}")
