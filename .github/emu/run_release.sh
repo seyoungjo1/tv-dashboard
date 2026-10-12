@@ -25,9 +25,10 @@ start() { adb shell am force-stop $PKG; adb shell am broadcast -a android.intent
 # 1) 재현: 예전처럼 1.10.11_p15 번호로 보낸 화면 → 앱(1.10.12)이 무시해야 한다
 echo -n "1.10.11_p15" > /tmp/oldver.txt; adb push /tmp/oldver.txt "$ROOT/_screensaver/version.txt" >/dev/null
 echo "== 재현: 보낸 화면 버전 1.10.11_p15 =="; start
-python3 .github/emu/emu_release_test.py "$OUT/old" --expect-ignored
+python3 .github/emu/emu_release_test.py "$OUT/old" --expect-ignored || r=1
 
 # 2) 고친 뒤: 지금 PC 버전(pc/tvrelay/VERSION) 번호로 보낸 화면 → 앱이 써야 하고 눈 버튼이 동작해야 한다
 adb push emu-content/version.txt "$ROOT/_screensaver/version.txt" >/dev/null
 echo "== 고친 뒤: 보낸 화면 버전 $(cat emu-content/version.txt) =="; start
-python3 .github/emu/emu_release_test.py "$OUT/new"
+python3 .github/emu/emu_release_test.py "$OUT/new" || r=1
+exit ${r:-0}

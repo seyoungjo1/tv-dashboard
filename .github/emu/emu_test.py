@@ -5,7 +5,7 @@
 - 시험: 눈 버튼 → 쉬는 화면이 뜨고 마킹이 저장되는지, 쉬는 화면 터치 → 끝나는지, 장면(위젯1 · 그림)이 그려지는지, JS 오류가 없는지.
 사용: python3 emu_test.py <결과 폴더>
 """
-import json, os, subprocess, sys, time, urllib.request
+import json, os, re, subprocess, sys, time, urllib.request
 
 import websocket  # pip install websocket-client
 
@@ -40,6 +40,27 @@ def shot(name: str):
         return None
 
 
+OFF = [0, 0]                                    # WebView 의 화면 위치 (상태 표시줄 · 내비게이션 바로 밀린 만큼)
+
+
+def webview_origin() -> None:
+    sh("adb shell uiautomator dump /sdcard/u.xml", check=False)
+    x = sh("adb shell cat /sdcard/u.xml", check=False)
+    best = None
+    for m in re.finditer(r'class="android\.webkit\.WebView"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', x):
+        l, t, r, b = map(int, m.groups())
+        if best is None or (r - l) * (b - t) > (best[2] - best[0]) * (best[3] - best[1]):
+            best = (l, t, r, b)
+    if best:
+        OFF[0], OFF[1] = best[0], best[1]
+    print("  WebView 화면 위치:", best, "→ 보정", OFF)
+
+
+def dev(x: float, y: float, dpr: float) -> tuple[int, int]:
+    """페이지 좌표(CSS px) → 화면 좌표(기기 px)"""
+    return int(OFF[0] + x * dpr), int(OFF[1] + y * dpr)
+
+
 def paper_ratio(im, rect, dpr) -> float:
     """동영상 칸 안(가장자리 40px 안쪽)에서 쉬는 화면 종이색(밝은 #e9e4da · 어두운 #1c1e23 · 그림 흰 바탕)에 가까운 픽셀 비율"""
     if im is None:
@@ -47,10 +68,10 @@ def paper_ratio(im, rect, dpr) -> float:
     pts = []
     for fy in (0.2, 0.5, 0.8):
         for fx in (0.2, 0.5, 0.8):
-            pts.append(im.getpixel((int((rect[0] + rect[2] * fx) * dpr), int((rect[1] + rect[3] * fy) * dpr))))
+            pts.append(im.getpixel(dev(rect[0] + rect[2] * fx, rect[1] + rect[3] * fy, dpr)))
     print("  동영상 칸 9곳 색:", pts)
-    x0, y0 = int((rect[0] + 40) * dpr), int((rect[1] + 40) * dpr)
-    x1, y1 = int((rect[0] + rect[2] - 40) * dpr), int((rect[1] + rect[3] - 120) * dpr)
+    x0, y0 = dev(rect[0] + 40, rect[1] + 40, dpr)
+    x1, y1 = dev(rect[0] + rect[2] - 40, rect[1] + rect[3] - 120, dpr)
     hit = tot = 0
     for y in range(y0, y1, 12):
         for x in range(x0, x1, 12):
@@ -189,7 +210,8 @@ def main() -> int:
 
     # 눈 버튼을 실제 터치로 누른다 (CSS px → 기기 px)
     dpr = geo["dpr"]
-    ex, ey = (geo["eye"][0] + geo["eye"][2] / 2) * dpr, (geo["eye"][1] + geo["eye"][3] / 2) * dpr
+    webview_origin()
+    ex, ey = dev(geo["eye"][0] + geo["eye"][2] / 2, geo["eye"][1] + geo["eye"][3] / 2, dpr)
     print(f"눈 버튼 터치: ({ex:.0f}, {ey:.0f})")
     sh(f"adb shell input tap {ex:.0f} {ey:.0f}")
     time.sleep(3)
@@ -226,7 +248,7 @@ def main() -> int:
     shot("3-slide-2")
 
     # 쉬는 화면을 터치 → 끝
-    vx, vy = (geo["video"][0] + geo["video"][2] / 2) * dpr, (geo["video"][1] + geo["video"][3] / 2) * dpr
+    vx, vy = dev(geo["video"][0] + geo["video"][2] / 2, geo["video"][1] + geo["video"][3] / 2, dpr)
     print(f"쉬는 화면 터치: ({vx:.0f}, {vy:.0f})")
     sh(f"adb shell input tap {vx:.0f} {vy:.0f}")
     time.sleep(2)
@@ -241,7 +263,7 @@ def main() -> int:
     def rect(sel):
         return json.loads(pg.js("(function(e){if(!e)return 'null';var r=e.getBoundingClientRect();return JSON.stringify([r.left,r.top,r.width,r.height])})(document.querySelector(%s))" % json.dumps(sel)))
     def tap(r):
-        sh(f"adb shell input tap {(r[0] + r[2] / 2) * dpr:.0f} {(r[1] + r[3] / 2) * dpr:.0f}")
+        x, y = dev(r[0] + r[2] / 2, r[1] + r[3] / 2, dpr); sh(f"adb shell input tap {x} {y}")
     def overlaps_video(r):
         v = geo["video"]
         return r[0] + r[2] > v[0] and r[0] < v[0] + v[2] and r[1] + r[3] > v[1] and r[1] < v[1] + v[3]
@@ -257,7 +279,7 @@ def main() -> int:
             im = shot("6-pin")
             k1 = rect('#ntPop .pad button[data-k="1"]')
             if k1:
-                px = im.getpixel((int((k1[0] + 8) * dpr), int((k1[1] + 8) * dpr)))     # 버튼 모서리 안쪽 (글자 말고 바탕)
+                px = im.getpixel(dev(k1[0] + 8, k1[1] + 8, dpr))     # 버튼 모서리 안쪽 (글자 말고 바탕)
                 print("  숫자 1 버튼 색:", px)
                 ok(min(px) > 180, "숫자판이 실제 화면에 보인다 (가려지지 않음)")
             for d in "123456":
@@ -271,7 +293,7 @@ def main() -> int:
                 print("  입력창:", [round(x) for x in pop2], "저장 버튼:", [round(x) for x in sv])
                 ok(not overlaps_video(pop2), "공지 입력창이 동영상 칸과 겹치지 않는다")
                 im2 = shot("7-editor")
-                spx = im2.getpixel((int((sv[0] + sv[2] / 2) * dpr), int((sv[1] + sv[3] / 2) * dpr)))
+                spx = im2.getpixel(dev(sv[0] + sv[2] / 2, sv[1] + sv[3] / 2, dpr))
                 print("  저장 버튼 색:", spx)
                 ok(spx[2] > 180 and spx[0] < 120, "저장 버튼(파란색)이 실제 화면에 보인다")
                 tap(ta); time.sleep(1)
@@ -291,7 +313,7 @@ def main() -> int:
 
     # 다크 모드 버튼도 실제 터치로
     dk = json.loads(pg.js("JSON.stringify((function(r){return [r.left, r.top, r.width, r.height]})(document.querySelector('#darkBtn').getBoundingClientRect()))"))
-    sh(f"adb shell input tap {(dk[0] + dk[2] / 2) * dpr:.0f} {(dk[1] + dk[3] / 2) * dpr:.0f}")
+    x, y = dev(dk[0] + dk[2] / 2, dk[1] + dk[3] / 2, dpr); sh(f"adb shell input tap {x} {y}")
     time.sleep(1.5)
     st4 = json.loads(pg.js(STATE))
     ok(st4["dark"] != st["dark"], "달/해 버튼 → 다크 모드가 바뀌었다")

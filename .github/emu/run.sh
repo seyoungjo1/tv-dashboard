@@ -38,7 +38,7 @@ adb shell am start -W -n $PKG/com.seyoungjo.tvdashboard.ui.MainActivity --ez pre
 sleep 10
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null || true; sleep 1
 adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" || true
-python3 .github/emu/emu_test.py "$OUT"; r=$?
+r=0; python3 .github/emu/emu_test.py "$OUT" || r=1
 # 대시보드 웹 화면 배율 (다른 분이 만든 반응형 HTML 처럼 화면 폭에 따라 글자 크기가 바뀌는 페이지)
 adb shell mkdir -p "$ROOT/배율시험"
 adb push emu-content/scale.html "$ROOT/배율시험/index.html" >/dev/null
