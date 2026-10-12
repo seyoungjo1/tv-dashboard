@@ -291,6 +291,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView, url: String?) {
                 TapClick.inject(view)
+                if (!fitInstalled) FitViewport.applyLate(view, resources.displayMetrics.density)
                 if (clearHistoryPending) {
                     view.clearHistory()
                     clearHistoryPending = false
@@ -312,9 +313,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
         wv.webChromeClient = WebChromeClient()
+        fitInstalled = FitViewport.install(wv, resources.displayMetrics.density)   // PC 와 같은 폭으로 보이게 (웹 배율이 앱과 다를 때만)
         webContainer.addView(wv, 0)
         webView = wv
     }
+    private var fitInstalled = false
 
     private fun openEntry(e: MenuEntry, userAction: Boolean) {
         current = e

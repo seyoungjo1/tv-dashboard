@@ -148,7 +148,7 @@ def main() -> int:
         sh(f"adb shell input tap {(l + r) // 2} {(t + b) // 2}"); time.sleep(3)
         im3 = shot("r4-notice")
         vx, vy, vw, vh = vrect()
-        left = [im3.getpixel((int(ox + x * sc), int(oy + 200 * sc))) for x in (200, 600, 1000)]
+        left = [im3.getpixel((int(ox + x * sc), int(oy + 70 * sc))) for x in (200, 600, 1000)]   # 창 윗부분 (제목 줄 높이)
         print("  공지 창 자리 색(왼쪽 칸 위):", left)
         ok(all(min(px) > 200 for px in left), "공지 수정 창이 왼쪽 칸에 실제로 보인다")
         sh("adb shell input keyevent KEYCODE_BACK")

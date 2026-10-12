@@ -39,7 +39,9 @@ def page_info(want: str):
             ws = websocket.create_connection(c[0]["webSocketDebuggerUrl"], timeout=20, suppress_origin=True)
             ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate", "params": {"returnByValue": True, "expression":
                 "JSON.stringify({iw: innerWidth, ih: innerHeight, dpr: devicePixelRatio, sw: screen.width, sh: screen.height,"
-                " fs: getComputedStyle(document.querySelector('#t')).fontSize, vp: (document.querySelector('meta[name=viewport]')||{}).content})"}}))
+                " ow: outerWidth, fs: getComputedStyle(document.querySelector('#t')).fontSize, vp: (document.querySelector('meta[name=viewport]')||{}).content,"
+                " clicks: window.__clicks || 0, b: (function(r){return [r.left,r.top,r.width,r.height]})(document.querySelector('#b').getBoundingClientRect()),"
+                " vv: window.visualViewport ? [visualViewport.offsetLeft, visualViewport.offsetTop, visualViewport.width, visualViewport.height] : null})"}}))
             while True:
                 m = json.loads(ws.recv())
                 if m.get("id") == 1:
@@ -84,6 +86,16 @@ def main() -> int:
         time.sleep(6)
         info = page_info("배율시험")
         wv = webview_bounds()
+        if info and wv:
+            # 페이지의 버튼(#b)을 손가락으로 누르듯 화면 좌표로 터치 → 클릭이 들어가는지 (TapClick 의 좌표 계산 확인)
+            l, t, w, h = max(wv, key=lambda b: b[2] * b[3])
+            vv = info.get("vv") or [0, 0, info["iw"], info["ih"]]
+            bx, by, bw, bh = info["b"]
+            x = l + (bx + bw / 2 - vv[0]) / vv[2] * w
+            y = t + (by + bh / 2 - vv[1]) / vv[3] * h
+            sh(f"adb shell input tap {int(x)} {int(y)}"); time.sleep(1.5)
+            after = page_info("배율시험")
+            info["clicked"] = (after or {}).get("clicks", 0) > info.get("clicks", 0)
         print("  WebView(기기 px):", wv)
         print("  페이지가 보는 값:", info)
         subprocess.run(f"adb exec-out screencap -p > {OUT}/dash-{d}.png", shell=True)
@@ -95,6 +107,8 @@ def main() -> int:
             ok(False, f"밀도 {d}: 페이지 값을 읽지 못함")
             continue
         ok(abs(info["iw"] - base["iw"]) <= 4, f"밀도 {d}: 페이지 폭 {info['iw']} 이 밀도 160 일 때({base['iw']})와 같다 — PC 와 같은 배치")
+        ok(info.get("fs") == base.get("fs"), f"밀도 {d}: 글자 크기 {info.get('fs')} 가 밀도 160 일 때({base.get('fs')})와 같다")
+        ok(bool(info.get("clicked")), f"밀도 {d}: 버튼을 터치하면 그 버튼이 눌린다")
     print("\n결과(배율):", "모두 통과" if not fails else f"실패 {len(fails)}개")
     return 0 if not fails else 1
 

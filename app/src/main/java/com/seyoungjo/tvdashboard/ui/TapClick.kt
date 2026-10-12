@@ -34,6 +34,12 @@ object TapClick {
       el.dispatchEvent(new MouseEvent('click', o));
     }, 350);
   };
+  // 웹 칸 안의 비율(0~1)로 받은 자리 → 페이지 좌표. 페이지 배율·축소·스크롤과 상관없이 손가락이 닿은 자리
+  window.__tvTapF = function (fx, fy) {
+    var v = window.visualViewport;
+    var x = v ? v.offsetLeft + fx * v.width : fx * innerWidth, y = v ? v.offsetTop + fy * v.height : fy * innerHeight;
+    window.__tvTap(Math.round(x), Math.round(y));
+  };
 })();
 """
 
@@ -48,10 +54,10 @@ object TapClick {
         val lx = x - loc[0]
         val ly = y - loc[1]
         if (lx < 0 || ly < 0 || lx > wv.width || ly > wv.height) return false
-        @Suppress("DEPRECATION") val k = wv.scale.takeIf { it > 0f } ?: 1f
-        val cx = (lx + wv.scrollX) / k
-        val cy = (ly + wv.scrollY) / k
-        wv.evaluateJavascript("window.__tvTap&&__tvTap(${cx.toInt()},${cy.toInt()})", null)
+        // 칸 안의 비율로 넘긴다 — 예전처럼 배율·스크롤로 좌표를 계산하면 스크롤된 페이지나 배율이 다른 TV 에서 엉뚱한 곳이 눌린다
+        val fx = lx / wv.width
+        val fy = ly / wv.height.coerceAtLeast(1)
+        wv.evaluateJavascript("window.__tvTapF&&__tvTapF($fx,$fy)", null)
         return true
     }
 }

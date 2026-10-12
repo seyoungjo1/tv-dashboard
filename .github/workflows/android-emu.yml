@@ -41,6 +41,7 @@ jobs:
           <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
           <style>body{margin:0;font:15px sans-serif}#t{font-size:15px}@media(max-width:1199px){#t{font-size:24px}}</style></head>
           <body><h1 id="t">배율 시험 — 폭 1200 미만이면 글자가 커짐</h1><p id="v"></p>
+          <button id="b" style="position:absolute;left:300px;top:400px;width:240px;height:90px" onclick="window.__clicks=(window.__clicks||0)+1">누르기</button>
           <script>v.textContent=innerWidth+'×'+innerHeight+' dpr '+devicePixelRatio</script></body></html>
           HTML
           ls -la emu-content/main
