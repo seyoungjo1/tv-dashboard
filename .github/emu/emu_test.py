@@ -29,8 +29,11 @@ def shot(name: str):
         from PIL import Image
         import base64, io
         im = Image.open(f"{OUT}/{name}.png").convert("RGB")
-        sm = im.copy(); sm.thumbnail((640, 640))
-        b = io.BytesIO(); sm.save(b, "JPEG", quality=55)
+        W, H = im.size
+        grid = []
+        for fy in (0.03, 0.25, 0.5, 0.75, 0.95):
+            grid.append(" ".join("%02x%02x%02x" % im.getpixel((int(W * fx), int(H * fy))) for fx in (0.05, 0.3, 0.5, 0.62, 0.8, 0.95)))
+        print(f"  [{name}] 화면 6x5 색:\n    " + "\n    ".join(grid))
         return im
     except Exception as e:
         print("  (그림 읽기 실패)", e)
@@ -150,6 +153,13 @@ def main() -> int:
     print("화면:", size)
     pg = Page()
     print("페이지:", pg.url)
+    def views(tag):
+        sh("adb shell uiautomator dump /sdcard/u.xml", check=False)
+        x = sh("adb shell cat /sdcard/u.xml", check=False)
+        import re as _re
+        nodes = _re.findall(r'class="([^"]+)"[^>]*?bounds="([^"]+)"', x)
+        print(f"  [{tag}] 화면 위 뷰:", [(c.split(".")[-1], b) for c, b in nodes if "Layout" not in c][:25])
+        print(f"  [{tag}] 포커스 창:", sh("adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", check=False)[:300])
     time.sleep(3)
     geo = json.loads(pg.js("""JSON.stringify({dpr: devicePixelRatio, iw: innerWidth, ih: innerHeight,
         eye: (function(r){return r && [r.left, r.top, r.width, r.height]})(document.querySelector('#restBtn') && document.querySelector('#restBtn').getBoundingClientRect()),
@@ -161,6 +171,7 @@ def main() -> int:
     ok(st["eyeHtml"], "눈 아이콘(SVG)이 그려졌다")
     ok(not st["rest"], "처음에는 쉬는 화면이 없다")
     shot("1-screensaver")
+    views("처음")
 
     # 눈 버튼을 실제 터치로 누른다 (CSS px → 기기 px)
     dpr = geo["dpr"]
@@ -176,6 +187,7 @@ def main() -> int:
     ok(any(s.startswith("widget1") for s in st["slides"]), "위젯1 장면이 그려졌다")
     ok(st["font"], "에스코어드림 글꼴이 로드됐다 (위젯)")
     im = shot("2-after-eye")
+    views("눈 누른 뒤")
     pr = paper_ratio(im, geo["video"], dpr)
     print(f"  동영상 칸 안 쉬는 화면 색 비율: {pr:.2f}")
     ok(pr > 0.5, "실제 화면에 쉬는 화면이 보인다 (앱 동영상 플레이어에 가려지지 않음)")
