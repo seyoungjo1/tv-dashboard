@@ -257,7 +257,7 @@ def main() -> int:
             im = shot("6-pin")
             k1 = rect('#ntPop .pad button[data-k="1"]')
             if k1:
-                px = im.getpixel((int((k1[0] + k1[2] / 2) * dpr), int((k1[1] + k1[3] / 2) * dpr)))
+                px = im.getpixel((int((k1[0] + 8) * dpr), int((k1[1] + 8) * dpr)))     # 버튼 모서리 안쪽 (글자 말고 바탕)
                 print("  숫자 1 버튼 색:", px)
                 ok(min(px) > 180, "숫자판이 실제 화면에 보인다 (가려지지 않음)")
             for d in "123456":

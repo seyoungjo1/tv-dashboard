@@ -37,6 +37,12 @@ jobs:
           printf '{"playlist":[{"src":"test.mp4"}],"rest":{"slides":["widget1","image"],"slideSec":5,"enabled":false,"runMin":10,"restMin":1,"city":"오산시","lat":37.1499,"lon":127.0771}}' > emu-content/main/설정.json
           printf '에뮬레이터 시험 공지 1\n에뮬레이터 시험 공지 2\n' > emu-content/main/공지.txt
           cp pc/tvrelay/VERSION emu-content/version.txt
+          cat > emu-content/scale.html <<'HTML'
+          <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+          <style>body{margin:0;font:15px sans-serif}#t{font-size:15px}@media(max-width:1199px){#t{font-size:24px}}</style></head>
+          <body><h1 id="t">배율 시험 — 폭 1200 미만이면 글자가 커짐</h1><p id="v"></p>
+          <script>v.textContent=innerWidth+'×'+innerHeight+' dpr '+devicePixelRatio</script></body></html>
+          HTML
           ls -la emu-content/main
           python3 -m pip install -q websocket-client pillow
       - name: TV 에 깔린 것과 같은 최신 릴리스 APK 받기

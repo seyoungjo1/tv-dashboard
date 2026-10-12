@@ -83,26 +83,14 @@ def paper_ratio(im) -> float:
 
 
 def header_icons(ns) -> list[tuple[int, int, int, int]]:
-    """머리글 오른쪽의 작은 아이콘(눈 · 달) — 왼쪽부터"""
+    """머리글 오른쪽의 정사각형 아이콘(눈 · 달) — 왼쪽부터. 앱 내장 화면(1.10.12)은 달 하나, PC 가 보낸 화면은 눈 + 달"""
     s, ox, oy = GEO["s"], GEO["ox"], GEO["oy"]
     out = set()
     for c, r, (l, t, rr, b) in ns:
-        if 25 * s <= rr - l <= 80 * s and 25 * s <= b - t <= 80 * s and t - oy < 118 * s and l - ox > 1000 * s:
+        w, h = rr - l, b - t
+        if abs(w - h) <= 4 and 30 * s <= w <= 60 * s and t - oy < 118 * s and l - ox > 1000 * s:
             out.add((l, t, rr, b))
     return sorted(out)
-
-
-def front(pkg: str) -> bool:
-    """앱이 맨 앞인지 — 아니면(시스템 '응답 없음' 창 등) 닫고 다시 띄워 본다"""
-    for _ in range(3):
-        f = subprocess.run("adb shell dumpsys window | grep mCurrentFocus", shell=True, capture_output=True, text=True).stdout
-        if pkg + "/" in f and "Not Responding" not in f:
-            return True
-        print("  (앞에 다른 창:", f.strip()[:160], "→ 닫고 다시 띄움)")
-        subprocess.run("adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS", shell=True, capture_output=True)
-        subprocess.run(f"adb shell am start -n {pkg}/com.seyoungjo.tvdashboard.ui.MainActivity --ez preview_idle true", shell=True, capture_output=True)
-        time.sleep(8)
-    return False
 
 
 def main() -> int:
