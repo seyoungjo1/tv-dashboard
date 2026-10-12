@@ -39,6 +39,13 @@ jobs:
           cp pc/tvrelay/VERSION emu-content/version.txt
           ls -la emu-content/main
           python3 -m pip install -q websocket-client pillow
+      - name: TV 에 깔린 것과 같은 최신 릴리스 APK 받기
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          TAG=$(gh release list -R ${{ github.repository }} -L 1 --json tagName -q '.[0].tagName')
+          echo "최신 릴리스: $TAG"
+          gh release download "$TAG" -R ${{ github.repository }} -p 'tv-dashboard-*.apk' -O release.apk
+          ls -la release.apk
       - name: KVM 켜기
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -53,7 +60,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: bash .github/emu/run.sh emu-out
+          script: bash -c "bash .github/emu/run.sh emu-out; a=\$?; bash .github/emu/run_release.sh emu-out/release; b=\$?; echo debug=\$a release=\$b; exit \$((a|b))"
       - name: 결과물
         if: always()
         uses: actions/upload-artifact@v4
