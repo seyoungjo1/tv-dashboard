@@ -311,6 +311,19 @@ def main() -> int:
                 ok(not rect("#ntPop"), "저장 뒤 공지 수정 창이 닫혔다")
                 shot("8-after-save")
 
+    # ── 실적 갱신: 같은 글자 수로 숫자만 바뀐 sd.json · 생산.json 이 들어오면 화면 숫자가 바뀌는지 ──
+    nums = lambda: pg.js("JSON.stringify([0,1].map(function(i){var a=document.getElementById('p'+i+'_m'),b=document.getElementById('p'+i+'_y');return (a?a.textContent:'')+'/'+(b?b.textContent:'')}))")
+    before = nums(); print("  실적 숫자(바꾸기 전):", before)
+    for name in ("sd.json", "생산.json"):
+        old = sh(f"adb shell stat -c %s '/sdcard/Android/data/{PKG}/files/자료/main/{name}'", check=False)
+        sh(f"adb push 'emu-content/{name}.new' '/sdcard/Android/data/{PKG}/files/자료/main/{name}'", check=False)
+        new = sh(f"adb shell stat -c %s '/sdcard/Android/data/{PKG}/files/자료/main/{name}'", check=False)
+        print(f"  {name}: 크기 {old} → {new} (같은 크기, 숫자만 바뀜)")
+    pg.js("window.ssRefresh && ssRefresh()")          # 앱이 '자료가 바뀜'을 알릴 때 부르는 것과 같은 호출
+    time.sleep(4)
+    after = nums(); print("  실적 숫자(바꾼 뒤):", after)
+    ok(before != after and before not in ("", "[]"), "같은 크기로 숫자만 바뀐 실적 파일 → 화면 숫자가 바로 바뀐다")
+
     # 다크 모드 버튼도 실제 터치로
     dk = json.loads(pg.js("JSON.stringify((function(r){return [r.left, r.top, r.width, r.height]})(document.querySelector('#darkBtn').getBoundingClientRect()))"))
     x, y = dev(dk[0] + dk[2] / 2, dk[1] + dk[3] / 2, dpr); sh(f"adb shell input tap {x} {y}")

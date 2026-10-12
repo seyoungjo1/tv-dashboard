@@ -37,6 +37,24 @@ jobs:
           printf '{"playlist":[{"src":"test.mp4"}],"rest":{"slides":["widget1","image"],"slideSec":5,"enabled":false,"runMin":10,"restMin":1,"city":"오산시","lat":37.1499,"lon":127.0771}}' > emu-content/main/설정.json
           printf '에뮬레이터 시험 공지 1\n에뮬레이터 시험 공지 2\n' > emu-content/main/공지.txt
           cp pc/tvrelay/VERSION emu-content/version.txt
+          python3 - <<'PY'
+          # 실적 시험 자료: 올해 1월 1일 ~ 어제, 당류 · 음용식초 하루 10000 씩 (sd.json = 매출, 생산.json = 수량)
+          import datetime, json
+          d0, d1 = datetime.date(datetime.date.today().year, 1, 1), datetime.date.today() - datetime.timedelta(days=1)
+          def rows(col):
+              out, d = [], d0
+              while d <= d1:
+                  for c in ("당류", "음용식초"):
+                      out.append({"달력일": d.strftime("%Y.%m.%d"), "제품계층구조(대,현재기준)": c, col: 10000})
+                  d += datetime.timedelta(days=1)
+              return out
+          for name, col in (("sd.json", "매출실적"), ("생산.json", "수량(KG)")):
+              t = json.dumps({"columns": ["달력일", "제품계층구조(대,현재기준)", col], "rows": rows(col)}, ensure_ascii=False)
+              open("emu-content/main/" + name, "w", encoding="utf-8").write(t)
+              # 같은 글자 수로 숫자만 바뀐 새 파일 (마지막 행 10000 → 90000)
+              i = t.rfind("10000"); open("emu-content/" + name + ".new", "w", encoding="utf-8").write(t[:i] + "90000" + t[i + 5:])
+          PY
+          ls -la emu-content emu-content/main
           cat > emu-content/scale.html <<'HTML'
           <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
           <style>body{margin:0;font:15px sans-serif}#t{font-size:15px}@media(max-width:1199px){#t{font-size:24px}}</style></head>

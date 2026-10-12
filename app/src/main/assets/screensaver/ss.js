@@ -476,6 +476,11 @@
     if (restOn) restShow(true, lastRestOverride);                    // 쉬는 화면 그림도 모드에 맞게
     lastKey = lastKey.replace(/:dark$/, '') + (DARK ? ':dark' : '');
   }
+  function hashStr(t) {                                  // 짧은 지문 (FNV-1a 32bit) — 내용이 조금만 달라도 다른 값
+    var h = 0x811c9dc5; t = String(t);
+    for (var i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0; }
+    return h.toString(36) + '.' + t.length;
+  }
   function load(force) {
     cfg = config();
     setDark(TV ? cfg.dark : (darkUser != null ? darkUser : Q.get('dark') === '1'));
@@ -488,7 +493,8 @@
         var notice = a[names.length], title = a[names.length + 1];
         lastA = [null, null, null, null, notice, title];
         var lines = paint(lastA);
-        var key = JSON.stringify(list) + ':' + names.map(function (n) { return JSON.stringify(files[n]).length; }).join(',') + ':' + lines.join('|') + (DARK ? ':dark' : '');
+        // 바뀌었는지는 파일 '내용'으로 (예전에는 글자 수로 봐서, 숫자만 바뀐 같은 길이의 실적 파일은 다시 그리지 않았다)
+        var key = JSON.stringify(list) + ':' + names.map(function (n) { return hashStr(JSON.stringify(files[n])); }).join(',') + ':' + lines.join('|') + (DARK ? ':dark' : '');
         if (force || key !== lastKey) {
           lastKey = key;
           panels = list;
