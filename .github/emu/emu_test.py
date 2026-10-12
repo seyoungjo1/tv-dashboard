@@ -151,6 +151,9 @@ STATE = """(function(){
 def main() -> int:
     size = sh("adb shell wm size")
     print("화면:", size)
+    foc = sh("adb shell dumpsys window | grep -E 'mCurrentFocus'", check=False)
+    print("포커스:", foc)
+    ok("tvdashboard" in foc, "앱이 맨 앞에 떠 있다 (다른 창이 덮지 않음)")
     pg = Page()
     print("페이지:", pg.url)
     def views(tag):

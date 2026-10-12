@@ -11,6 +11,7 @@ adb shell settings put global window_animation_scale 0; adb shell settings put g
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1                      # 가로 (TV 처럼)
 adb shell wm size 1920x1080; adb shell wm density 160               # TV 와 같은 1920×1080 가로 화면
+adb shell settings put secure immersive_mode_confirmations confirmed   # "전체 화면 보기" 안내 창(화면을 어둡게 덮고 터치를 가로챔) 끄기
 adb install -r -g "$APK"
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
 adb shell appops set $PKG SYSTEM_ALERT_WINDOW allow || true
@@ -28,4 +29,5 @@ adb logcat -c || true
 # 화면보호기(대기 화면)를 바로 띄우는 인텐트 (앱의 미리보기용)
 adb shell am start -W -n $PKG/com.seyoungjo.tvdashboard.ui.MainActivity --ez preview_idle true >/dev/null
 sleep 10
+adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" || true
 python3 .github/emu/emu_test.py "$OUT"
