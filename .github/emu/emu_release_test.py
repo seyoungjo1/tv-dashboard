@@ -144,7 +144,8 @@ def main() -> int:
     ok(p2 < 0.3, "쉬는 화면 터치 → 동영상으로 돌아왔다")
     # 공지 수정: 공지 줄의 연필 아이콘(왼쪽 칸 안의 작은 아이콘) → 창이 왼쪽 칸에 뜨고 동영상 칸에 가려지지 않는지
     sc, ox, oy = GEO["s"], GEO["ox"], GEO["oy"]
-    pens = sorted(b for c, r, b in nodes() if 25 * sc <= b[2] - b[0] <= 80 * sc and 25 * sc <= b[3] - b[1] <= 80 * sc and 900 * sc < b[0] - ox < 1117 * sc and b[1] - oy > 118 * sc)
+    pens = sorted((b for c, r, b in nodes() if abs((b[2] - b[0]) - (b[3] - b[1])) <= 4 and 30 * sc <= b[2] - b[0] <= 60 * sc
+                   and 900 * sc < b[0] - ox < 1117 * sc and 118 * sc < b[1] - oy < 400 * sc), key=lambda b: (b[1], b[0]))   # 공지 줄(위쪽 칸)의 정사각형 아이콘
     print("  연필 아이콘:", pens[:3])
     ok(bool(pens), "공지 줄에 수정(연필) 아이콘이 있다")
     if pens:
