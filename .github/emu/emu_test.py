@@ -148,12 +148,23 @@ STATE = """(function(){
 })()"""
 
 
+def front(pkg: str) -> bool:
+    """앱이 맨 앞인지 — 아니면(시스템 '응답 없음' 창 등) 닫고 다시 띄워 본다"""
+    for _ in range(3):
+        f = subprocess.run("adb shell dumpsys window | grep mCurrentFocus", shell=True, capture_output=True, text=True).stdout
+        if pkg + "/" in f and "Not Responding" not in f:
+            return True
+        print("  (앞에 다른 창:", f.strip()[:160], "→ 닫고 다시 띄움)")
+        subprocess.run("adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS", shell=True, capture_output=True)
+        subprocess.run(f"adb shell am start -n {pkg}/com.seyoungjo.tvdashboard.ui.MainActivity --ez preview_idle true", shell=True, capture_output=True)
+        time.sleep(8)
+    return False
+
+
 def main() -> int:
     size = sh("adb shell wm size")
     print("화면:", size)
-    foc = sh("adb shell dumpsys window | grep -E 'mCurrentFocus'", check=False)
-    print("포커스:", foc)
-    ok("tvdashboard" in foc, "앱이 맨 앞에 떠 있다 (다른 창이 덮지 않음)")
+    ok(front(PKG), "앱이 맨 앞에 떠 있다 (다른 창이 덮지 않음)")
     pg = Page()
     print("페이지:", pg.url)
     def views(tag):

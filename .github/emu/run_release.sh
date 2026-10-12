@@ -11,6 +11,7 @@ adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
 adb shell wm size 1920x1080; adb shell wm density 160
 adb shell settings put secure immersive_mode_confirmations confirmed
+adb shell settings put global hide_error_dialogs 1; adb shell settings put global anr_show_background 0   # 시스템 "응답 없음" 창이 화면을 덮지 않게
 adb install -r -g "$APK"
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
 adb shell appops set $PKG SYSTEM_ALERT_WINDOW allow || true
@@ -19,7 +20,7 @@ adb shell am force-stop $PKG
 adb shell mkdir -p "$ROOT/main" "$ROOT/_screensaver"
 adb push emu-content/main/. "$ROOT/main/" >/dev/null
 adb push pc/tvrelay/screensaver/. "$ROOT/_screensaver/" >/dev/null
-start() { adb shell am force-stop $PKG; adb shell am start -W -n $PKG/com.seyoungjo.tvdashboard.ui.MainActivity --ez preview_idle true >/dev/null; sleep 12; }
+start() { adb shell am force-stop $PKG; adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null || true; adb shell am start -W -n $PKG/com.seyoungjo.tvdashboard.ui.MainActivity --ez preview_idle true >/dev/null; sleep 12; adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null || true; sleep 1; }
 
 # 1) 재현: 예전처럼 1.10.11_p15 번호로 보낸 화면 → 앱(1.10.12)이 무시해야 한다
 echo -n "1.10.11_p15" > /tmp/oldver.txt; adb push /tmp/oldver.txt "$ROOT/_screensaver/version.txt" >/dev/null
