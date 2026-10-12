@@ -106,8 +106,8 @@ def main() -> int:
         if not info or not base:
             ok(False, f"밀도 {d}: 페이지 값을 읽지 못함")
             continue
-        # 에뮬레이터는 밀도마다 시스템 막대 크기가 달라 웹 칸이 몇 % 다르다 → 6% 안이면 같은 배치 (수정 전에는 1706 → 1133 · 852 로 33~50% 줄었음)
-        ok(abs(info["iw"] - base["iw"]) <= base["iw"] * 0.06, f"밀도 {d}: 페이지 폭 {info['iw']} 이 밀도 160 일 때({base['iw']})와 같은 배치 (6% 안)")
+        # 에뮬레이터는 실행·밀도마다 시스템 막대 크기가 달라 웹 칸이 몇 % 다르다 → 10% 안이면 같은 배치 (수정 전에는 1706 → 1133 · 852 로 33~50% 줄었음)
+        ok(abs(info["iw"] - base["iw"]) <= base["iw"] * 0.10, f"밀도 {d}: 페이지 폭 {info['iw']} 이 밀도 160 일 때({base['iw']})와 같은 배치 (10% 안)")
         ok(info.get("fs") == base.get("fs"), f"밀도 {d}: 글자 크기 {info.get('fs')} 가 밀도 160 일 때({base.get('fs')})와 같다")
         ok(bool(info.get("clicked")), f"밀도 {d}: 버튼을 터치하면 그 버튼이 눌린다")
     print("\n결과(배율):", "모두 통과" if not fails else f"실패 {len(fails)}개")
