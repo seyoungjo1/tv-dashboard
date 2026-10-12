@@ -35,8 +35,43 @@ def shot(name: str):
     return im
 
 
+GEO = {"s": 1.0, "ox": 0.0, "oy": 0.0}
+
+
+def nodes():
+    sh("adb shell uiautomator dump /sdcard/u.xml")
+    x = sh("adb shell cat /sdcard/u.xml")
+    out = []
+    for m in re.finditer(r'<node [^>]*?class="([^"]*)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', x):
+        rid = re.search(r'resource-id="([^"]*)"', m.group(0))
+        out.append((m.group(1), rid.group(1) if rid else "", tuple(map(int, m.group(2, 3, 4, 5)))))
+    return out
+
+
+def locate():
+    """WebView 의 실제 위치·크기 → 페이지(1920×1080 무대)의 배율·여백 (상태 표시줄 등으로 밀려도 맞게)"""
+    ns = nodes()
+    wv = [b for c, r, b in ns if c.endswith("WebView")]
+    for c, r, b in ns:
+        if "ssVideo" in r or "WebView" in c:
+            print("   뷰:", c.split(".")[-1], r.split("/")[-1], b)
+    if wv:
+        l, t, r, b = wv[0]
+        w, h = r - l, b - t
+        s = min(w / 1920, h / 1080)
+        GEO.update(s=s, ox=l + (w - 1920 * s) / 2, oy=t + (h - 1080 * s) / 2)
+    print("  페이지 배율·여백:", GEO)
+    return ns
+
+
+def vrect():
+    s, ox, oy = GEO["s"], GEO["ox"], GEO["oy"]
+    return (ox + VIDEO[0] * s, oy + VIDEO[1] * s, VIDEO[2] * s, VIDEO[3] * s)
+
+
 def paper_ratio(im) -> float:
-    x0, y0, x1, y1 = int(VIDEO[0] + 40), int(VIDEO[1] + 40), int(VIDEO[0] + VIDEO[2] - 40), int(VIDEO[1] + VIDEO[3] - 120)
+    vx, vy, vw, vh = vrect()
+    x0, y0, x1, y1 = int(vx + 40), int(vy + 40), int(vx + vw - 40), int(vy + vh - 120)
     hit = tot = 0
     for y in range(y0, y1, 12):
         for x in range(x0, x1, 12):
@@ -47,15 +82,13 @@ def paper_ratio(im) -> float:
     return hit / max(1, tot)
 
 
-def header_icons() -> list[tuple[int, int, int, int]]:
-    """접근성 트리에서 머리글 오른쪽의 작은 아이콘(눈 · 달)들 — 왼쪽부터"""
-    sh("adb shell uiautomator dump /sdcard/u.xml")
-    x = sh("adb shell cat /sdcard/u.xml")
+def header_icons(ns) -> list[tuple[int, int, int, int]]:
+    """머리글 오른쪽의 작은 아이콘(눈 · 달) — 왼쪽부터"""
+    s, ox, oy = GEO["s"], GEO["ox"], GEO["oy"]
     out = set()
-    for b in re.findall(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', x):
-        l, t, r, btm = map(int, b)
-        if 30 <= r - l <= 70 and 30 <= btm - t <= 70 and btm < 110 and l > 1000:
-            out.add((l, t, r, btm))
+    for c, r, (l, t, rr, b) in ns:
+        if 25 * s <= rr - l <= 80 * s and 25 * s <= b - t <= 80 * s and t - oy < 118 * s and l - ox > 1000 * s:
+            out.add((l, t, rr, b))
     return sorted(out)
 
 
@@ -63,26 +96,29 @@ def main() -> int:
     print("앱 버전:", sh("adb shell dumpsys package com.seyoungjo.tvdashboard | grep versionName"))
     print("포커스:", sh("adb shell dumpsys window | grep mCurrentFocus"))
     ok("com.seyoungjo.tvdashboard/" in sh("adb shell dumpsys window | grep mCurrentFocus"), "앱이 맨 앞에 떠 있다")
-    im0 = shot("r1-screensaver")
-    p0 = paper_ratio(im0)
-    print(f"  처음 동영상 칸 쉬는 화면 색 비율: {p0:.2f}")
-    icons = header_icons()
+    icons = header_icons(locate())
     print("  머리글 아이콘:", icons)
     if "--expect-ignored" in sys.argv:              # 재현: 앱 내장(1.10.12)보다 낮은 번호로 보낸 화면은 앱이 무시한다
         ok(len(icons) < 2, "재현: 앱 버전보다 낮은 번호(1.10.11_pN)로 보낸 화면은 무시되고 내장 화면이 뜬다 (눈 버튼 없음)")
         print("\n결과(재현):", "확인됨" if not fails else "재현 안 됨")
         return 0 if not fails else 1
     ok(len(icons) >= 2, "PC 가 보낸 화면(눈 버튼 있음)을 앱이 쓰고 있다 — 앱 내장 화면에는 눈 버튼이 없음")
+    im0 = shot("r1-screensaver")
+    print(f"  처음 동영상 칸 쉬는 화면 색 비율: {paper_ratio(im0):.2f}")
     if len(icons) < 2:
         return 1
     l, t, r, b = icons[0]
     sh(f"adb shell input tap {(l + r) // 2} {(t + b) // 2}")
-    time.sleep(3)
+    for i, wait in enumerate((1, 2, 3)):
+        time.sleep(wait)
+        print(f"  눈 누르고 {sum((1, 2, 3)[:i + 1])}초: 비율 {paper_ratio(shot(f'r2-t{i}')):.2f}")
+    locate()
     im1 = shot("r2-after-eye")
     p1 = paper_ratio(im1)
     print(f"  눈 누른 뒤 동영상 칸 쉬는 화면 색 비율: {p1:.2f}")
     ok(p1 > 0.5, "눈 버튼 → 실제 화면에 쉬는 화면이 보인다")
-    sh(f"adb shell input tap {int(VIDEO[0] + VIDEO[2] / 2)} {int(VIDEO[1] + VIDEO[3] / 2)}")
+    vx, vy, vw, vh = vrect()
+    sh(f"adb shell input tap {int(vx + vw / 2)} {int(vy + vh / 2)}")
     time.sleep(3)
     im2 = shot("r3-after-touch")
     p2 = paper_ratio(im2)

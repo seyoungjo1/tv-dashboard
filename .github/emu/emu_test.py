@@ -189,6 +189,14 @@ def main() -> int:
     ok(bool(st["mark"]), "쉬기 시작 시각이 마킹됐다 (localStorage ssRestMark)")
     ok(any(s.startswith("widget1") for s in st["slides"]), "위젯1 장면이 그려졌다")
     ok(st["font"], "에스코어드림 글꼴이 로드됐다 (위젯)")
+    for t in (1, 2, 4):
+        time.sleep(t if t == 1 else t / 2)
+        _im = shot(f"2-t{t}")
+        print(f"  눈 누르고 약 {t}초: 동영상 칸 쉬는 화면 색 비율 {paper_ratio(_im, geo['video'], dpr):.2f}")
+    xml = sh("adb shell uiautomator dump /sdcard/u.xml >/dev/null; adb shell cat /sdcard/u.xml", check=False)
+    import re as _re
+    for m in _re.finditer(r'resource-id="([^"]*ssVideo[^"]*)"[^>]*?bounds="([^"]+)"', xml):
+        print("   앱 동영상 칸:", m.group(1).split("/")[-1], m.group(2))
     im = shot("2-after-eye")
     views("눈 누른 뒤")
     pr = paper_ratio(im, geo["video"], dpr)
