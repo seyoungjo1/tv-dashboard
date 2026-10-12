@@ -90,7 +90,11 @@ def header_icons(ns) -> list[tuple[int, int, int, int]]:
         w, h = rr - l, b - t
         if abs(w - h) <= 4 and 30 * s <= w <= 60 * s and t - oy < 118 * s and l - ox > 1000 * s:
             out.add((l, t, rr, b))
-    return sorted(out)
+    rows: dict[int, list] = {}
+    for b in sorted(out):                                  # 같은 줄(위쪽 좌표가 비슷한)끼리 묶어 가장 많은 줄 = 머리글 아이콘 줄
+        k = next((k for k in rows if abs(k - b[1]) <= 8), b[1])
+        rows.setdefault(k, []).append(b)
+    return max(rows.values(), key=len) if rows else []
 
 
 def front(pkg: str) -> bool:
@@ -148,7 +152,7 @@ def main() -> int:
         sh(f"adb shell input tap {(l + r) // 2} {(t + b) // 2}"); time.sleep(3)
         im3 = shot("r4-notice")
         vx, vy, vw, vh = vrect()
-        left = [im3.getpixel((int(ox + x * sc), int(oy + 70 * sc))) for x in (200, 600, 1000)]   # 창 윗부분 (제목 줄 높이)
+        left = [im3.getpixel((int(ox + x * sc), int(oy + 34 * sc))) for x in (200, 600, 1000)]   # 창 위쪽 여백 (글자 없는 흰 바탕)
         print("  공지 창 자리 색(왼쪽 칸 위):", left)
         ok(all(min(px) > 200 for px in left), "공지 수정 창이 왼쪽 칸에 실제로 보인다")
         sh("adb shell input keyevent KEYCODE_BACK")
