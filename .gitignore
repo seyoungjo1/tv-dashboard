@@ -11,3 +11,6 @@ captures/
 *.keystore
 keystore.properties
 *.b64
+
+__pycache__/
+*.pyc
