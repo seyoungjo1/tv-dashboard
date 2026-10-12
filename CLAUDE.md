@@ -13,6 +13,8 @@
 - **화면보호기 페이지(index.html · ss.js · ss.css · 그림)만 고친 변경은 APK 를 만들지 않는다.** PC 버전만 `_pN` 으로 올리고,
   PC 프로그램의 [화면보호기 설정] → [화면보호기 화면 TV 로 보내기]로 배포한다 (TV 의 `_screensaver/` 폴더, 있으면 내장 페이지 대신 씀).
   안드로이드(Kotlin · 레이아웃 · 설정 키) 변경이 있을 때만 APK 버전을 올린다.
+- 화면보호기·앱을 고치면 **Actions `Android emulator test`(안드로이드 14 에뮬레이터, 실제 터치)가 통과한 것만** 사용자에게 가져간다.
+  PC 의 브라우저 시험만으로 "된다"고 하지 않는다. 새 동작은 `.github/emu/emu_test.py` 에 시험 항목을 추가한다.
 
 ## 보안
 - 서명 키·비밀번호는 GitHub Secrets 에만. `tvrelay.json`·`grants.json` 은 커밋하지 않는다.

@@ -8,6 +8,8 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: #eaeef3;
              -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }   /* 안드로이드 WebView 글자 자동 확대 끔 (작은 화면에서 넘침 방지) */
 html { -webkit-tap-highlight-color: transparent; }
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }   /* 꾹 누르거나 끌어도 글자가 음영(선택)으로 칠해지지 않게 */
+textarea, input { -webkit-user-select: text; user-select: text; }                     /* 공지 입력칸은 그대로 */
 body { font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif; font-weight: 600; color: #1d2b3a; word-break: keep-all; }
 
 #stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden;
