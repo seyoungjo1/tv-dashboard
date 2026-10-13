@@ -47,6 +47,21 @@
   .seg button.on { background:var(--accent); color:#fff; }
   .seg button.on.del { background:var(--danger); }
   .modehint { font-size:13px; color:var(--dim); }
+  /* 엑셀 붙여넣기: 왼쪽 붙여 넣기 · 오른쪽 파일 내용 표(기존 + 새로 넣은 값) */
+  main.wide { max-width:1180px; }
+  .xlGrid { display:grid; grid-template-columns:minmax(340px,5fr) minmax(360px,6fr); gap:16px; align-items:start; margin-top:10px; }
+  @media (max-width:900px) { .xlGrid { grid-template-columns:1fr; } }
+  .xlGrid .pv { max-height:200px; }
+  .xlRh { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:6px; font-size:13px; }
+  .now { max-height:70vh; min-height:200px; overflow:auto; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .xv table { margin:0; border-collapse:collapse; width:100%; font-size:13px; }
+  .xv th { position:sticky; top:0; background:#f0f3f7; padding:6px 8px; text-align:left; white-space:nowrap; z-index:1; }
+  .xv td { padding:4px 8px; border-bottom:1px solid #f0f2f5; white-space:nowrap; } .xv td.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .xv .idx { color:#aab3bd; font-size:11px; text-align:right; width:1%; }
+  .xv tr.vn td { background:#e5f6ec; } .xv tr.vc td { background:#fff4dc; } .xv tr.vr td { background:#fde8e8; color:#8c1d1d; text-decoration:line-through; }
+  .xv tr.gap td { color:var(--dim); text-align:center; background:#fafbfc; font-size:12px; }
+  .lg { display:inline-block; padding:1px 7px; border-radius:6px; font-style:normal; font-size:12px; margin-left:4px; }
+  .lg.vn { background:#e5f6ec; color:#14663d; } .lg.vc { background:#fff4dc; color:#7a5300; } .lg.vr { background:#fde8e8; color:#8c1d1d; }
 </style>
 </head>
 <body>
@@ -54,7 +69,7 @@
   <h1 id="h1">업로드</h1>
   <div class="sub" id="sub"></div>
 </header>
-<main>
+<main class="wide">
   <div class="card row" style="margin-top:0">
     <span>업로드 비밀번호</span>
     <input type="password" class="pw" id="pw" placeholder="관리자에게 받은 비밀번호" autocomplete="current-password" style="flex:1">
@@ -77,20 +92,28 @@
   </div>
   <div class="card" id="xlCard">
     <h2>엑셀 붙여넣기로 JSON 올리기</h2>
-    <div class="hint">JSON 파일을 고르고 [양식 불러오기] → 엑셀에서 표를 복사해 아래에 붙여 넣으면, 지금 파일의 양식에 맞춰 바꿔서 올립니다.
-      첫 줄이 머리글(열 이름)이면 이름으로, 머리글이 없으면 <b>칸 순서대로</b> 들어갑니다.</div>
+    <div class="hint">JSON 파일을 고르고 [양식 불러오기] → 엑셀에서 표를 복사해 붙여 넣으면, 지금 파일의 양식에 맞춰 바꿔서 올립니다.
+      제목 줄 · 합계 줄 · 빈 열이 섞여 있거나 열 이름 · 칸 순서가 달라도, 날짜가 가로로 펼쳐진 표여도 알아서 맞춥니다. 오른쪽 표에서 올린 뒤의 내용을 확인하세요.</div>
     <div class="row">
       <input class="in" id="xlName" list="xlFiles" placeholder="파일 이름 (예: sd.json)" style="flex:1;min-width:200px">
       <datalist id="xlFiles"></datalist>
       <button class="secondary" id="xlLoad">양식 불러오기</button>
       <button class="secondary hidden" id="xlReload" title="이 PC 에 받아 둔 것 대신 TV 에서 지금 내용을 다시 받습니다">TV 에서 다시 받기</button>
     </div>
-    <div class="form hidden" id="xlForm"></div>
-    <textarea class="in" id="xlText" placeholder="엑셀에서 표를 선택해 복사(Ctrl+C)한 뒤 여기를 누르고 붙여 넣기(Ctrl+V)" spellcheck="false"></textarea>
-    <div class="row" style="justify-content:flex-start" id="xlModes"></div>
-    <div id="xlPrev"></div>
-    <div class="row"><span class="hint" id="xlSum"></span><button id="xlSend" disabled>TV 로 올리기</button></div>
-    <div id="xlMsg"></div>
+    <div class="xlGrid">
+      <div class="xlL">
+        <div class="form hidden" id="xlForm"></div>
+        <textarea class="in" id="xlText" placeholder="엑셀에서 표를 선택해 복사(Ctrl+C)한 뒤 여기를 누르고 붙여 넣기(Ctrl+V)" spellcheck="false"></textarea>
+        <div class="row" style="justify-content:flex-start" id="xlModes"></div>
+        <div id="xlPrev"></div>
+        <div class="row"><span class="hint" id="xlSum"></span><button id="xlSend" disabled>TV 로 올리기</button></div>
+        <div id="xlMsg"></div>
+      </div>
+      <div class="xlR">
+        <div class="xlRh"><b id="xlNowT">파일 내용</b><span class="hint" id="xlNowS"></span></div>
+        <div class="now xv" id="xlNow"><div class="hint" style="padding:12px">파일을 고르고 [양식 불러오기]를 누르면 지금 내용이 여기에 표로 보입니다</div></div>
+      </div>
+    </div>
   </div>
   <div class="card hint">
     · 같은 이름의 파일은 새 파일로 바뀝니다(덮어쓰기). 다른 폴더나 다른 형식은 올라가지 않습니다.<br>
@@ -458,11 +481,13 @@ const CFG = /*__CONFIG__*/null;
     const mode = xlMode;
     const text = $('#xlText').value;
     xlOut = null; $('#xlSend').disabled = true; $('#xlSum').textContent = ''; $('#xlPrev').innerHTML = '';
-    if (!f || !text.trim()) return;
+    if (!f) { $('#xlNowT').textContent = '파일 내용'; $('#xlNowS').textContent = ''; $('#xlNow').innerHTML = '<div class="hint" style="padding:12px">파일을 고르고 [양식 불러오기]를 누르면 지금 내용이 여기에 표로 보입니다</div>'; return; }
+    if (!text.trim()) { xlNow(null); return; }
     const rows = X.parse(text);
     const o = X.build(f, rows, { mode });
-    if (o.error) { $('#xlSum').innerHTML = `<span class="bad">${esc(o.error)}</span>`; return; }
+    if (o.error) { $('#xlSum').innerHTML = `<span class="bad">${esc(o.error)}</span>`; xlNow(null); return; }
     xlOut = o;
+    xlNow(o);
     const head = o.cols.map((c, k) => `<th>${esc(c.name)}<br><span class="hint">${o.mapping[k] >= 0 ? (o.mapping[k] + 1) + '번째 칸' : '(비움)'}</span></th>`).join('');
     const show = o.table.slice(0, 50).map(r => '<tr>' + r.map((v, k) => `<td class="${o.cols[k].type === 'num' ? 'n' : ''}">${v === null ? '<span class="hint">·</span>' : esc(typeof v === 'number' ? v.toLocaleString('ko-KR', { maximumFractionDigits: 6 }) : v)}</td>`).join('') + '</tr>').join('');
     $('#xlPrev').innerHTML = `<div class="pv"><table><tr>${head}</tr>${show}</table></div>` +
@@ -474,6 +499,19 @@ const CFG = /*__CONFIG__*/null;
     $('#xlSend').disabled = !o.table.length || (o.mode === 'delete' && !o.removed);
     $('#xlSend').textContent = o.mode === 'delete' ? `${o.removed}개 지우고 TV 로 올리기` : 'TV 로 올리기';
     $('#xlSend').style.background = o.mode === 'delete' ? 'var(--danger)' : '';
+  }
+  /** 오른쪽 표: 지금 파일 내용(o 없음) 또는 올린 뒤 내용(기존 + 새로 · 바뀜 · 지움) — 붙여 넣을 때마다 다시 그리고 바뀐 줄로 스크롤 */
+  function xlNow(o) {
+    const f = xlForm, unit = f.kind === 'map' ? '개' : '줄';
+    const v = X.view(f, o), c = X.viewCounts(v);
+    $('#xlNow').innerHTML = X.viewHtml(v, { max: 600, empty: f.kind === 'new' ? '비어 있는 파일 — 붙여 넣으면 여기에 표가 생깁니다' : '내용이 없습니다' });
+    $('#xlNowT').textContent = o ? `올린 뒤 파일 내용 — ${xlFor}` : `지금 파일 내용 — ${xlFor}`;
+    $('#xlNowS').innerHTML = `${c.total.toLocaleString()}${unit}` + (o
+      ? (o.mode === 'replace' && f.kind !== 'new' ? ` <i class="lg vn">전부 새로 (기존 ${f.count}${unit}은 없어짐)</i>`
+        : `${c.new ? ` <i class="lg vn">새로 ${c.new}</i>` : ''}${c.changed ? ` <i class="lg vc">바뀜 ${c.changed}</i>` : ''}${c.removed ? ` <i class="lg vr">지움 ${c.removed}</i>` : ''}${!c.new && !c.changed && !c.removed ? ' <span class="hint">(바뀌는 줄 없음)</span>' : ''}`)
+      : ' <span class="hint">· 붙여 넣으면 새로 들어갈 줄이 여기에 표시됩니다</span>');
+    const box = $('#xlNow'), hit = box.querySelector('tr.vn, tr.vc, tr.vr');   // 바뀐 첫 줄이 가운데 오게 (표 안만 스크롤, 화면은 그대로)
+    box.scrollTop = hit ? Math.max(0, hit.offsetTop - box.clientHeight / 2) : box.scrollHeight;
   }
   let xlSending = false;
   $('#xlSend').onclick = async () => {

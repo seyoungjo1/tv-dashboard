@@ -36,7 +36,11 @@
                .filter(function (r) { return r.some(function (s) { return s !== ''; }); });
     var w = 0;
     rows.forEach(function (r) { for (var k = r.length; k > 0; k--) if (r[k - 1] !== '') { w = Math.max(w, k); break; } });
-    return rows.map(function (r) { r = r.slice(0, w); while (r.length < w) r.push(''); return r; });
+    rows = rows.map(function (r) { r = r.slice(0, w); while (r.length < w) r.push(''); return r; });
+    var keep = [];                                   // 통째로 비어 있는 열(엑셀의 빈 칸 열)은 뺀다 — 칸 순서가 밀리지 않게
+    for (var c = 0; c < w; c++) if (rows.some(function (r) { return r[c] !== ''; })) keep.push(c);
+    if (keep.length < w) rows = rows.map(function (r) { return keep.map(function (c) { return r[c]; }); });
+    return rows;
   }
 
   // ── 값 읽기 ──
@@ -187,8 +191,107 @@
     return f;
   }
 
+  // ── 붙여 넣은 표 다듬기: 엑셀에서 어떻게 복사했든 알아보게 ──
+  //  · 위쪽 제목·빈 줄은 건너뛰고 머리글(또는 첫 자료 줄)부터
+  //  · '합계·소계·총계' 줄은 뺀다
+  //  · 날짜가 가로(열)로 펼쳐진 표, 구분이 가로로 펼쳐진 표는 세로(날짜 · 구분 · 값)로 바꾼다
+  //  · 열 이름이 양식과 달라도 비슷한 이름(일자=날짜, 품목=구분 …)이나 칸의 종류(날짜 · 글자 · 숫자)로 찾는다
+  function isTotal(s) { return /^(합계|총계|소계|누계|총합|계|total|sum|subtotal|grandtotal)$/i.test(String(s == null ? '' : s).trim().replace(/\s/g, '')); }
+  function cellKind(s) {                           // 칸 하나의 종류: '' · 'date' · 'num' · 'str'
+    s = String(s == null ? '' : s).trim();
+    if (!s) return '';
+    if (/^\d{4}\s*[.\-\/년]/.test(s) && readDate(s)) return 'date';
+    if (/^\d{8}$/.test(s) && readDate(s)) return 'date';
+    if (typeof num(s) === 'number') return 'num';
+    if (readDate(s)) return 'date';
+    return 'str';
+  }
+  function colKind(cells) {                        // 열의 종류: 비어 있지 않은 칸의 다수
+    var n = { date: 0, num: 0, str: 0 }, seen = 0;
+    cells.forEach(function (s) { var k = cellKind(s); if (k) { n[k]++; seen++; } });
+    if (!seen) return '';
+    if (n.date >= seen * 0.6) return 'date';
+    if (n.num >= seen * 0.6) return 'num';
+    return n.str >= n.num && n.str >= n.date ? 'str' : n.num >= n.date ? 'num' : 'date';
+  }
+  function wantKind(col) { return col.type === 'date' ? 'date' : col.type === 'num' ? 'num' : 'str'; }
+  function trimTop(rows, cols) {                   // 위쪽 제목·빈 줄: 머리글(양식 이름이 있거나 글자뿐이고 아래가 숫자·날짜) 또는 첫 자료 줄부터
+    var limit = Math.min(rows.length - 1, 8);
+    for (var i = 0; i < limit; i++) {
+      var r = rows[i], filled = r.filter(function (s) { return s !== ''; });
+      if (filled.length === 1 && r.length >= 3) continue;                         // 제목 한 칸짜리 줄
+      if (cols && headerMatch(cols, r).hit > 0) return rows.slice(i);
+      var allStr = filled.length >= 2 && filled.every(function (s) { return cellKind(s) === 'str'; });
+      var nextData = rows[i + 1].some(function (s) { var k = cellKind(s); return k === 'num' || k === 'date'; });
+      if (allStr && nextData && filled.length >= r.length * 0.6) return rows.slice(i);
+      if (filled.some(function (s) { return cellKind(s) !== 'str'; })) return rows.slice(i);   // 자료 줄이 먼저 — 머리글 없음
+    }
+    return rows;
+  }
+  function unpivot(rows) {                         // 가로로 펼친 표 → [날짜, 구분, 값] 세로 표 (머리글 포함). 아니면 null
+    if (rows.length < 2 || rows[0].length < 3) return null;
+    var head = rows[0], body = rows.slice(1), i, c;
+    var dateCols = [];
+    for (i = 1; i < head.length; i++) if (cellKind(head[i]) === 'date') dateCols.push(i);
+    var firstStr = body.every(function (r) { return cellKind(r[0]) !== 'num' && cellKind(r[0]) !== 'date'; });
+    if (dateCols.length >= 2 && dateCols.length >= (head.length - 1) * 0.6 && firstStr) {   // 날짜가 가로로: 줄 = 구분
+      var out = [['날짜', '구분', '값']];
+      body.forEach(function (r) {
+        if (r[0] === '' || isTotal(r[0])) return;
+        dateCols.forEach(function (k) { if (r[k] !== '') out.push([head[k], r[0], r[k]]); });
+      });
+      return out;
+    }
+    var strHead = 0;
+    for (i = 1; i < head.length; i++) if (cellKind(head[i]) === 'str' && !isTotal(head[i])) strHead++;
+    var numeric = body.every(function (r) { for (c = 1; c < r.length; c++) if (r[c] !== '' && cellKind(r[c]) !== 'num') return false; return true; });
+    var dateDown = body.filter(function (r) { return cellKind(r[0]) === 'date'; }).length;
+    if (strHead >= 2 && numeric && dateDown >= Math.max(1, body.length * 0.6)) {     // 구분이 가로로: 줄 = 날짜
+      var o2 = [['날짜', '구분', '값']];
+      body.forEach(function (r) {
+        if (cellKind(r[0]) !== 'date') return;
+        for (c = 1; c < head.length; c++) if (r[c] !== '' && head[c] !== '' && !isTotal(head[c])) o2.push([r[0], head[c], r[c]]);
+      });
+      return o2;
+    }
+    return null;
+  }
+  function prepare(f, rows, out) {
+    var cols = f.kind === 'new' ? null : f.cols;
+    rows = trimTop(rows, cols);
+    var fits = f.kind === 'new' || (f.kind === 'map' && f.parts === 2 && f.valueKind === 'one') ||
+      (!!cols && cols.some(function (c) { return c.type === 'date'; }) && cols.some(function (c) { return c.type === 'str'; }) && cols.some(function (c) { return c.type === 'num'; }));
+    if (fits && rows.length && !(cols && headerMatch(cols, rows[0]).hit >= 2)) {
+      var u = unpivot(rows);
+      if (u) { rows = u; out.unpivoted = true; }
+    }
+    var n = rows.length;
+    rows = rows.filter(function (r, i) { return i === 0 || !r.some(isTotal); });
+    out.totalsSkipped = n - rows.length;
+    return rows;
+  }
+  function typeMatch(cols, kinds) {                 // 양식 칸마다 같은 종류의 붙여 넣은 칸을 순서대로
+    var used = {};
+    return cols.map(function (col) {
+      var want = wantKind(col);
+      for (var c = 0; c < kinds.length; c++) if (!used[c] && kinds[c] === want) { used[c] = 1; return c; }
+      return -1;
+    });
+  }
+
   // ── 표 → JSON ──
   var normName = function (s) { return String(s == null ? '' : s).toLowerCase().replace(/[\s_\-()\[\]{}·.:/]/g, ''); };
+  // 비슷한 이름: 양식과 엑셀의 열 이름이 달라도 같은 칸으로 (정확히 같은 이름이 먼저, 그 다음 포함 관계 · 같은 무리)
+  var SYN = [['날짜', '일자', '달력일', '기준일', '년월', '년월일', 'date', 'day', 'month'],
+             ['구분', '품목', '제품', '분류', '품명', '항목', '제품계층구조', 'category', 'item', 'name'],
+             ['값', '금액', '매출', '매출실적', '실적', '수량', '생산량', '생산', 'value', 'amount', 'qty', 'quantity', 'sales']];
+  function nameLike(a, b) {
+    a = normName(a); b = normName(b);
+    if (!a || !b) return false;
+    if (a === b) return true;
+    if (a.length >= 2 && b.length >= 2 && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0)) return true;
+    return SYN.some(function (g) { return g.some(function (x) { return normName(x) === a; }) && g.some(function (x) { return normName(x) === b; }); });
+  }
   function convert(col, s, warn, where) {
     if (s === '' || s == null) return null;
     if (col.type === 'num') {
@@ -211,8 +314,12 @@
   }
   function headerMatch(cols, first) {
     var names = cols.map(function (c) { return normName(c.name); });
-    var map = [], hit = 0;
-    first.forEach(function (s, i) { var k = names.indexOf(normName(s)); if (s !== '' && k >= 0 && map.indexOf(k) < 0) { map[i] = k; hit++; } });
+    var map = [], hit = 0, taken = {};
+    first.forEach(function (s, i) { var k = names.indexOf(normName(s)); if (s !== '' && k >= 0 && !taken[k]) { map[i] = k; taken[k] = 1; hit++; } });
+    first.forEach(function (s, i) {                                   // 남은 칸: 비슷한 이름으로
+      if (s === '' || map[i] !== undefined || cellKind(s) !== 'str') return;
+      for (var k = 0; k < cols.length; k++) if (!taken[k] && nameLike(cols[k].name, s)) { map[i] = k; taken[k] = 1; hit++; break; }
+    });
     return { hit: hit, map: map };
   }
   function looksHeader(cols, rows) {   // 숫자·날짜 칸에 글자가 있고, 그 아래 줄은 숫자·날짜
@@ -236,6 +343,10 @@
     var out = { warnings: warns, headerUsed: false, count: 0 };
     if (f.error) { out.error = f.error; return out; }
     if (!rows.length) { out.error = '붙여 넣은 내용이 없습니다'; return out; }
+    rows = prepare(f, rows, out);
+    if (!rows.length) { out.error = '붙여 넣은 내용에 자료 줄이 없습니다'; return out; }
+    if (out.unpivoted) warn('가로로 펼친 표를 세로(날짜 · 구분 · 값)로 바꿔 읽었습니다');
+    if (out.totalsSkipped) warn('합계 줄 ' + out.totalsSkipped + '개는 뺐습니다');
     var cols = f.cols.slice(), kind = f.kind, w = rows[0].length;
     var body = rows, mapping = null;
     if (kind === 'new') {                          // 기존 양식이 없음: 첫 줄이 글자뿐이고 아래가 숫자면 머리글
@@ -257,6 +368,13 @@
       } else {
         if (looksHeader(cols, rows)) { out.headerUsed = true; body = rows.slice(1); }
         mapping = cols.map(function (_, i) { return i < w ? i : -1; });   // 머리글 없음: 순서대로
+        var kinds = [];                                                      // 순서대로 넣으면 종류(날짜·글자·숫자)가 안 맞는 칸이 있으면 종류로 찾는다
+        for (var ci = 0; ci < w; ci++) kinds.push(colKind(body.map(function (r) { return r[ci]; })));
+        var clash = cols.some(function (c, k) { return mapping[k] >= 0 && kinds[mapping[k]] && kinds[mapping[k]] !== wantKind(c); });
+        if (clash) {
+          var byType = typeMatch(cols, kinds);
+          if (byType.some(function (m) { return m >= 0; })) { mapping = byType; out.typeMatched = true; warn('칸 순서가 양식과 달라 종류(날짜 · 글자 · 숫자)로 찾아 넣었습니다 — 미리보기를 확인하세요'); }
+        }
       }
       if (w > cols.length && kind !== 'map') warn('붙여 넣은 칸(' + w + ')이 양식(' + cols.length + ')보다 많습니다 — 뒤의 ' + (w - cols.length) + '칸은 넣지 않습니다');
       if (w < cols.length && opt.mode !== 'delete') warn('붙여 넣은 칸(' + w + ')이 양식(' + cols.length + ')보다 적습니다 — 비는 칸: ' + cols.slice(w).map(function (c) { return c.name; }).join(', '));
@@ -276,25 +394,26 @@
     if (kind === 'map') {
       var nk = f.parts;
       var base = mode === 'replace' ? {} : JSON.parse(JSON.stringify(f.root || {}));
-      var added = 0, changed = 0, removed = 0, missing = 0;
+      var added = 0, changed = 0, removed = 0, missing = 0, st = {};
       table.forEach(function (vals, ri) {
         var parts = vals.slice(0, nk);
         if (parts.some(function (p) { return p === null || p === ''; })) { warn((ri + 1) + '행: 키 칸이 비어 있어 건너뜁니다'); return; }
         var key = parts.join(f.sep || '');
         var has = Object.prototype.hasOwnProperty.call(base, key);
         if (mode === 'delete') {
-          if (has) { delete base[key]; removed++; } else { missing++; if (missing <= 5) warn((ri + 1) + '행 (' + key + '): 지금 파일에 없습니다'); }
+          if (has) { delete base[key]; removed++; st[key] = 'removed'; } else { missing++; if (missing <= 5) warn((ri + 1) + '행 (' + key + '): 지금 파일에 없습니다'); }
           return;
         }
         var v;
         if (f.valueKind === 'obj') { v = {}; cols.slice(nk).forEach(function (c, j) { v[c.name] = vals[nk + j]; }); }
         else v = vals[nk];
         if (v === null) { warn((ri + 1) + '행 (' + key + '): 값이 비어 있어 건너뜁니다'); return; }
-        if (has) changed++; else added++;
+        if (has) { changed++; st[key] = JSON.stringify(base[key]) === JSON.stringify(v) ? 'same' : 'changed'; } else { added++; st[key] = 'new'; }
         base[key] = v;
       });
       data = base; out.count = Object.keys(base).length;
       out.added = added; out.changed = changed; out.removed = removed; out.missing = missing;
+      out.states = st;
     } else {
       var list = table.map(function (vals) {
         if (kind === 'rows-obj') { var o = {}; cols.forEach(function (c, k) { o[c.name] = vals[k]; }); return o; }
@@ -303,7 +422,8 @@
       var hdr = kind === 'rows-arr' && f.header ? 1 : 0;
       var old = f.kind === 'new' ? [] : ((f.path && f.path.length ? f.root[f.path[0]] : f.root) || []);
       out.added = 0; out.removed = 0; out.missing = 0;
-      if (mode === 'replace') { if (hdr) list.unshift(f.header.slice()); out.added = table.length; }
+      var states = null;                                // 최종 목록의 줄마다 'same' · 'new' · 'changed' (삭제는 아래에서 'removed')
+      if (mode === 'replace') { if (hdr) list.unshift(f.header.slice()); out.added = table.length; states = list.map(function () { return 'new'; }); }
       else if (mode === 'add') {
         // 숫자가 아닌 칸(날짜·구분 등)을 키로: 같은 줄은 새 값으로 바꾸고 나머지는 이어 붙임 (같은 날짜가 두 번 들어가지 않게)
         var keyCols = cols.map(function (c, k) { return c.type !== 'num' && mapping[k] >= 0 ? k : -1; }).filter(function (k) { return k >= 0; });
@@ -312,15 +432,19 @@
           var cellOf = function (row, k) { return kind === 'rows-obj' ? (row || {})[cols[k].name] : (row || [])[k]; };
           var keyOf = function (row) { return JSON.stringify(keyCols.map(function (k) { var v = cellOf(row, k); return v == null ? '' : String(v); })); };
           var merged = old.slice(), at = {};
+          states = merged.map(function () { return 'same'; });
           merged.forEach(function (row, i) { if (i >= hdr) at[keyOf(row)] = i; });
           out.added = 0; out.changed = 0;
           list.forEach(function (row) {
             var kk = keyOf(row);
-            if (Object.prototype.hasOwnProperty.call(at, kk)) { merged[at[kk]] = row; out.changed++; }
-            else { at[kk] = merged.length; merged.push(row); out.added++; }
+            if (Object.prototype.hasOwnProperty.call(at, kk)) {
+              var i = at[kk];
+              states[i] = JSON.stringify(merged[i]) === JSON.stringify(row) ? 'same' : 'changed';
+              merged[i] = row; out.changed++;
+            } else { at[kk] = merged.length; merged.push(row); states.push('new'); out.added++; }
           });
           list = merged;
-        } else { list = old.concat(list); out.added = table.length; }
+        } else { states = old.map(function () { return 'same'; }).concat(list.map(function () { return 'new'; })); list = old.concat(list); out.added = table.length; }
       }
       else {                                          // 삭제: 붙여 넣은 칸(머리글로 고른 칸)이 모두 같은 줄을 지운다
         var used = mapping.map(function (m, k) { return m >= 0 ? k : -1; }).filter(function (k) { return k >= 0; });
@@ -337,7 +461,10 @@
         });
         list = old.filter(function (_, oi) { return !hit[oi]; });
         out.removed = hit.filter(Boolean).length;
+        out.removedRows = old.map(function (row, oi) { return hit[oi] ? { i: oi, row: row } : null; }).filter(Boolean);
+        states = list.map(function () { return 'same'; });
       }
+      out.states = states;
       out.count = list.length - hdr;
       if (f.path && f.path.length) { data = JSON.parse(JSON.stringify(f.root)); data[f.path[0]] = list; }
       else data = list;
@@ -357,7 +484,81 @@
     return '표 ' + f.count + '줄' + where + ' · 칸: ' + f.cols.map(t).join(' │ ');
   }
 
-  var X = { parse: parse, form: form, build: build, describe: describe, readDate: readDate, num: num };
+  /** 파일 내용 표: 지금 파일(out 없음) 또는 올린 뒤(out) — {cols:[{name,type}], rows:[{c:[칸…], s:'same'|'new'|'changed'|'removed'}]} */
+  function view(f, out) {
+    var v = { cols: [], rows: [] };
+    if (!f || f.error) return v;
+    var cols = (out && out.cols) || f.cols;
+    v.cols = cols.map(function (c) { return { name: c.name, type: c.type }; });
+    if (f.kind === 'map') {
+      var data = out ? out.data : (f.root || {}), st = (out && out.states) || {}, nk = f.parts;
+      var cells = function (key, val) {
+        var ks = f.sep ? key.split(f.sep) : [key];
+        while (ks.length < nk) ks.push('');
+        var vs = f.valueKind === 'obj' ? cols.slice(nk).map(function (c) { return isPlainObj(val) ? (val[c.name] === undefined ? null : val[c.name]) : null; }) : [val];
+        return ks.slice(0, nk).concat(vs);
+      };
+      if (out && out.mode === 'delete') {
+        Object.keys(f.root || {}).forEach(function (k) { v.rows.push({ c: cells(k, f.root[k]), s: st[k] === 'removed' ? 'removed' : 'same' }); });
+      } else {
+        Object.keys(data).forEach(function (k) { v.rows.push({ c: cells(k, data[k]), s: st[k] || 'same' }); });
+      }
+      return v;
+    }
+    if (f.kind === 'new' && !out) return v;
+    var list = out ? (f.path && f.path.length ? out.data[f.path[0]] : out.data) : ((f.path && f.path.length ? f.root[f.path[0]] : f.root) || []);
+    var kind = out ? out.kind : f.kind, hdr = kind === 'rows-arr' && f.header ? 1 : 0;
+    var states = (out && out.states) || [];
+    var rowCells = function (row) { return cols.map(function (c, k) { var x = kind === 'rows-obj' ? (row || {})[c.name] : (row || [])[k]; return x === undefined ? null : x; }); };
+    var removed = {}; ((out && out.removedRows) || []).forEach(function (r) { removed[r.i] = r.row; });
+    var oi = hdr, li = hdr;                                       // 삭제: 지워진 줄도 제자리에 보여 준다
+    if (out && out.mode === 'delete') {
+      var old = (f.path && f.path.length ? f.root[f.path[0]] : f.root) || [];
+      for (oi = hdr; oi < old.length; oi++) v.rows.push({ c: rowCells(old[oi]), s: removed[oi] ? 'removed' : 'same' });
+      return v;
+    }
+    for (li = hdr; li < list.length; li++) v.rows.push({ c: rowCells(list[li]), s: states[li] || 'same' });
+    return v;
+  }
+  var escHtml = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  /** view → <table> HTML. 줄이 max 보다 많으면 바뀐 줄 둘레(없으면 끝 부분)만 보여 주고 생략한 줄 수를 적는다 */
+  function viewHtml(v, opt) {
+    opt = opt || {};
+    var max = opt.max || 600, n = v.rows.length;
+    if (!v.cols.length) return '<div class="hint" style="padding:12px">' + (opt.empty || '내용이 없습니다') + '</div>';
+    var first = -1;
+    for (var i = 0; i < n; i++) if (v.rows[i].s !== 'same') { first = i; break; }
+    var start = 0, end = n;
+    if (n > max) {
+      if (first < 0) start = n - max;
+      else { start = Math.max(0, first - Math.floor(max / 4)); }
+      end = Math.min(n, start + max);
+      if (first >= 0) { var last = first; for (i = n - 1; i > first; i--) if (v.rows[i].s !== 'same') { last = i; break; } if (last >= end) end = Math.min(n, last + 20), start = Math.max(0, end - max); }
+    }
+    var fmtv = function (x, c) {
+      if (x === null || x === undefined || x === '') return '<span class="hint">·</span>';
+      if (typeof x === 'number') return x.toLocaleString('ko-KR', { maximumFractionDigits: 6 });
+      if (typeof x === 'object') return escHtml(JSON.stringify(x));
+      return escHtml(x);
+    };
+    var h = '<table><tr><th class="idx">#</th>' + v.cols.map(function (c) { return '<th>' + escHtml(c.name) + '</th>'; }).join('') + '</tr>';
+    if (start > 0) h += '<tr class="gap"><td colspan="' + (v.cols.length + 1) + '">… 위 ' + start.toLocaleString() + '줄 생략</td></tr>';
+    for (i = start; i < end; i++) {
+      var r = v.rows[i];
+      h += '<tr class="v' + r.s[0] + '" data-i="' + i + '"><td class="idx">' + (i + 1) + '</td>' +
+        r.c.map(function (x, k) { return '<td class="' + (v.cols[k].type === 'num' || typeof x === 'number' ? 'n' : '') + '">' + fmtv(x, v.cols[k]) + '</td>'; }).join('') + '</tr>';
+    }
+    if (end < n) h += '<tr class="gap"><td colspan="' + (v.cols.length + 1) + '">… 아래 ' + (n - end).toLocaleString() + '줄 생략</td></tr>';
+    return h + '</table>';
+  }
+  function viewCounts(v) {
+    var c = { same: 0, 'new': 0, changed: 0, removed: 0 };
+    v.rows.forEach(function (r) { c[r.s] = (c[r.s] || 0) + 1; });
+    c.total = v.rows.length - c.removed;
+    return c;
+  }
+
+  var X = { parse: parse, form: form, build: build, describe: describe, readDate: readDate, num: num, view: view, viewHtml: viewHtml, viewCounts: viewCounts };
   G.XLPaste = X;
   if (typeof module !== 'undefined' && module.exports) module.exports = X;
 })(typeof window !== 'undefined' ? window : this);

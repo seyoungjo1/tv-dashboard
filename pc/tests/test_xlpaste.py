@@ -22,14 +22,49 @@ out.rowsAdd = X.build(f, X.parse("2025.03\t3000"), {mode: 'add'}).data;
 out.rowsDel = X.build(f, X.parse("월\n2025-02"), {mode: 'delete'}).data;
 out.excelSerial = X.readDate("45662");
 out.quoted = X.parse('"a\nb"\t1\n');
+
+// ── 엑셀을 어떻게 복사했든: 제목 줄 · 빈 열 · 합계 줄 · 열 이름이 다름 · 칸 순서가 다름 · 가로로 펼친 표 ──
+const SD = {columns: ["달력일", "제품계층구조(대,현재기준)", "매출실적"], rows: [
+  {"달력일": "2026.10.01", "제품계층구조(대,현재기준)": "당류", "매출실적": 100},
+  {"달력일": "2026.10.01", "제품계층구조(대,현재기준)": "음용식초", "매출실적": 50}]};
+f = X.form(JSON.stringify(SD));
+// 제목 줄 + 빈 줄 + 이름이 다른 머리글 + 가운데 빈 열 + 합계 줄
+let o = X.build(f, X.parse("10월 매출 현황\n\n일자\t\t품목\t금액(천원)\n2026-10-02\t\t당류\t1,200\n2026-10-02\t\t음용식초\t300\n합계\t\t\t1,500\n"), {mode: 'add'});
+out.messy = o.data.rows; out.messyWarn = o.warnings; out.messyHeader = o.headerUsed;
+// 칸 순서가 다름(구분 · 금액 · 날짜), 머리글 없음 → 종류로 찾기
+o = X.build(f, X.parse("당류\t900\t2026.10.03\n음용식초\t400\t2026.10.03\n"), {mode: 'add'});
+out.reorder = o.data.rows.slice(-2); out.reorderType = !!o.typeMatched;
+// 가로로 펼친 표 (날짜가 열로)
+o = X.build(f, X.parse("구분\t2026-10-04\t2026-10-05\n당류\t10\t20\n음용식초\t1\t2\n합계\t11\t22\n"), {mode: 'add'});
+out.pivotDates = o.data.rows.slice(-4); out.pivoted = !!o.unpivoted;
+// 가로로 펼친 표 (구분이 열로, 날짜가 아래로)
+o = X.build(f, X.parse("날짜\t당류\t음용식초\n2026.10.06\t7\t8\n"), {mode: 'add'});
+out.pivotCats = o.data.rows.slice(-2);
+// 보통 세로 표는 그대로 (가로 표로 오해하지 않음)
+o = X.build(f, X.parse("일자\t품목\t금액\n2026.10.07\t당류\t5\n"), {mode: 'add'});
+out.plain = o.data.rows.slice(-1); out.plainPivot = !!o.unpivoted;
+// 파일 내용 표 (오른쪽): 기존 · 올린 뒤(새로 · 바뀜 · 지움)
+out.viewNow = X.view(f).rows.map(r => r.s);
+o = X.build(f, X.parse("2026.10.01\t당류\t999\n2026.10.08\t당류\t1\n"), {mode: 'add'});
+out.viewAdd = X.view(f, o).rows.map(r => r.s + ':' + r.c.join('|'));
+o = X.build(f, X.parse("2026.10.01\t음용식초\n"), {mode: 'delete'});
+out.viewDel = X.view(f, o).rows.map(r => r.s);
+const html = X.viewHtml(X.view(f, X.build(f, X.parse("2026.10.09\t당류\t3"), {mode: 'add'})));
+out.html = [html.includes('class="vn"'), html.includes('<th>달력일</th>'), html.includes('>100<')];
+// 키-값 모음에서도 오른쪽 표
+f = X.form(JSON.stringify({"2025.01.02|당류": 100}));
+out.viewMap = X.view(f, X.build(f, X.parse("2025.01.02\t당류\t100\n2025.01.03\t당류\t7"), {mode: 'add'})).rows.map(r => r.s + ':' + r.c.join('|'));
 console.log(JSON.stringify(out));
 """
 
 
 @unittest.skipUnless(shutil.which("node"), "node 없음")
 class XlPasteTest(unittest.TestCase):
+    def setUp(self):
+        self.r = json.loads(subprocess.run(["node", "-e", SCRIPT, str(JS)], capture_output=True, text=True, check=True).stdout)
+
     def test_forms(self):
-        r = json.loads(subprocess.run(["node", "-e", SCRIPT, str(JS)], capture_output=True, text=True, check=True).stdout)
+        r = self.r
         self.assertEqual(r["mapAdd"], {"2025.01.02|당류": 100, "2025.01.03|당류": 1500, "2025.01.04|음용식초": -300})
         self.assertEqual(r["mapHeader"], {"2025.01.05|당류": 5})
         self.assertEqual(r["mapDel"], {"2025.01.03|당류": 200})
@@ -39,6 +74,45 @@ class XlPasteTest(unittest.TestCase):
         self.assertEqual(r["rowsDel"], [{"월": "2025.01", "생산량": 1000}])
         self.assertEqual(r["excelSerial"], [2025, 1, 5])
         self.assertEqual(r["quoted"], [["a\nb", "1"]])
+
+    def test_messy_excel(self):
+        """제목 줄 · 빈 줄 · 다른 이름의 머리글 · 빈 열 · 합계 줄이 섞여 있어도 자료 줄만 들어간다"""
+        r = self.r
+        self.assertTrue(r["messyHeader"])
+        self.assertEqual(r["messy"][-2:], [
+            {"달력일": "2026.10.02", "제품계층구조(대,현재기준)": "당류", "매출실적": 1200},
+            {"달력일": "2026.10.02", "제품계층구조(대,현재기준)": "음용식초", "매출실적": 300}])
+        self.assertEqual(len(r["messy"]), 4)
+        self.assertTrue(any("합계" in w for w in r["messyWarn"]))
+
+    def test_reorder_by_kind(self):
+        r = self.r
+        self.assertTrue(r["reorderType"])
+        self.assertEqual(r["reorder"], [
+            {"달력일": "2026.10.03", "제품계층구조(대,현재기준)": "당류", "매출실적": 900},
+            {"달력일": "2026.10.03", "제품계층구조(대,현재기준)": "음용식초", "매출실적": 400}])
+
+    def test_pivot(self):
+        r = self.r
+        self.assertTrue(r["pivoted"])
+        self.assertEqual(r["pivotDates"], [
+            {"달력일": "2026.10.04", "제품계층구조(대,현재기준)": "당류", "매출실적": 10},
+            {"달력일": "2026.10.05", "제품계층구조(대,현재기준)": "당류", "매출실적": 20},
+            {"달력일": "2026.10.04", "제품계층구조(대,현재기준)": "음용식초", "매출실적": 1},
+            {"달력일": "2026.10.05", "제품계층구조(대,현재기준)": "음용식초", "매출실적": 2}])
+        self.assertEqual(r["pivotCats"], [
+            {"달력일": "2026.10.06", "제품계층구조(대,현재기준)": "당류", "매출실적": 7},
+            {"달력일": "2026.10.06", "제품계층구조(대,현재기준)": "음용식초", "매출실적": 8}])
+        self.assertFalse(r["plainPivot"])
+        self.assertEqual(r["plain"], [{"달력일": "2026.10.07", "제품계층구조(대,현재기준)": "당류", "매출실적": 5}])
+
+    def test_view(self):
+        r = self.r
+        self.assertEqual(r["viewNow"], ["same", "same"])
+        self.assertEqual(r["viewAdd"], ["changed:2026.10.01|당류|999", "same:2026.10.01|음용식초|50", "new:2026.10.08|당류|1"])
+        self.assertEqual(r["viewDel"], ["same", "removed"])
+        self.assertEqual(r["html"], [True, True, True])
+        self.assertEqual(r["viewMap"], ["same:2025.01.02|당류|100", "new:2025.01.03|당류|7"])
 
 
 class BakeTest(unittest.TestCase):

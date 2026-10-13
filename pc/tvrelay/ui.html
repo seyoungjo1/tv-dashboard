@@ -185,6 +185,21 @@
   .seg button + button { border-left:1px solid var(--line); }
   .seg button.on { background:var(--accent); color:#fff; } .seg button.on.del { background:var(--danger); }
   .xl .warn { margin-top:10px; padding:10px 12px; border-radius:8px; background:#fff4dc; color:#7a5300; white-space:pre-wrap; font-size:13px; }
+  /* 왼쪽: 붙여 넣기 · 오른쪽: 파일 내용 표(기존 + 새로 넣은 값) */
+  .xl { display:grid; grid-template-columns:minmax(360px,5fr) minmax(380px,6fr); gap:16px; align-items:start; }
+  @media (max-width:1150px) { .xl { grid-template-columns:1fr; } }
+  .xl .pv { max-height:220px; }
+  .xl .xlRh { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:6px; font-size:13px; }
+  .xl .xlRh b { font-size:14px; }
+  .xl .now { max-height:calc(100vh - 210px); min-height:200px; overflow:auto; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .xv table { border-collapse:collapse; width:100%; font-size:13px; }
+  .xv th { position:sticky; top:0; background:#f0f3f7; padding:6px 8px; text-align:left; white-space:nowrap; z-index:1; }
+  .xv td { padding:4px 8px; border-bottom:1px solid #f0f2f5; white-space:nowrap; } .xv td.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .xv .idx { color:#aab3bd; font-size:11px; text-align:right; width:1%; }
+  .xv tr.vn td { background:#e5f6ec; } .xv tr.vc td { background:#fff4dc; } .xv tr.vr td { background:#fde8e8; color:#8c1d1d; text-decoration:line-through; }
+  .xv tr.gap td { color:var(--dim); text-align:center; background:#fafbfc; font-size:12px; }
+  .lg { display:inline-block; padding:1px 7px; border-radius:6px; font-style:normal; font-size:12px; margin-left:4px; }
+  .lg.vn { background:#e5f6ec; color:#14663d; } .lg.vc { background:#fff4dc; color:#7a5300; } .lg.vr { background:#fde8e8; color:#8c1d1d; }
 </style>
 </head>
 <body>
@@ -1343,11 +1358,17 @@
     if (form.error) { pb.innerHTML = `<div class="loading">${esc(form.error)}</div>`; return; }
     xl = { p, form, mode: form.kind === 'map' ? 'add' : 'replace', out: null };
     pb.innerHTML = `<div class="xl">
-      <div class="form" id="xlForm"></div>
-      <textarea id="xlText" placeholder="엑셀에서 표를 선택해 복사(Ctrl+C)한 뒤 여기를 누르고 붙여 넣기(Ctrl+V)&#10;첫 줄이 머리글(열 이름)이면 이름으로, 머리글이 없으면 칸 순서대로 들어갑니다" spellcheck="false"></textarea>
-      <div class="row" id="xlModes"></div>
-      <div id="xlPrev"></div>
-      <div class="row"><span class="hint" id="xlSum" style="flex:1"></span><button class="secondary" id="xlCancel">닫기</button><button id="xlSend" disabled>TV 에 올리기</button></div>
+      <div class="xlL">
+        <div class="form" id="xlForm"></div>
+        <textarea id="xlText" placeholder="엑셀에서 표를 선택해 복사(Ctrl+C)한 뒤 여기를 누르고 붙여 넣기(Ctrl+V)&#10;제목 줄 · 합계 줄 · 빈 열이 섞여 있거나, 열 이름 · 칸 순서가 달라도, 날짜가 가로로 펼쳐진 표여도 알아서 맞춥니다" spellcheck="false"></textarea>
+        <div class="row" id="xlModes"></div>
+        <div id="xlPrev"></div>
+        <div class="row"><span class="hint" id="xlSum" style="flex:1"></span><button class="secondary" id="xlCancel">닫기</button><button id="xlSend" disabled>TV 에 올리기</button></div>
+      </div>
+      <div class="xlR">
+        <div class="xlRh"><b id="xlNowT">파일 내용</b><span class="hint" id="xlNowS"></span></div>
+        <div class="now xv" id="xlNow"></div>
+      </div>
     </div>`;
     $('#xlText').oninput = xlRender;
     $('#xlModes').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { xl.mode = b.dataset.m; xlRender(); } };
@@ -1371,10 +1392,11 @@
     const text = $('#xlText').value;
     xl.out = null; $('#xlSend').disabled = true; $('#xlSum').textContent = ''; $('#xlPrev').innerHTML = '';
     $('#xlSend').textContent = 'TV 에 올리기'; $('#xlSend').className = '';
-    if (!text.trim()) return;
+    if (!text.trim()) { xlNow(null); return; }
     const o = XLPaste.build(f, XLPaste.parse(text), { mode: xl.mode });
-    if (o.error) { $('#xlSum').innerHTML = `<span style="color:var(--danger)">${esc(o.error)}</span>`; return; }
+    if (o.error) { $('#xlSum').innerHTML = `<span style="color:var(--danger)">${esc(o.error)}</span>`; xlNow(null); return; }
     xl.out = o;
+    xlNow(o);
     const head = o.cols.map((c, k) => `<th>${esc(c.name)}<br><span class="hint">${o.mapping[k] >= 0 ? (o.mapping[k] + 1) + '번째 칸' : '(비움)'}</span></th>`).join('');
     const rows = o.table.slice(0, 80).map(r => '<tr>' + r.map((v, k) => `<td class="${o.cols[k].type === 'num' ? 'n' : ''}">${v === null ? '<span class="hint">·</span>' : esc(typeof v === 'number' ? v.toLocaleString('ko-KR', { maximumFractionDigits: 6 }) : v)}</td>`).join('') + '</tr>').join('');
     $('#xlPrev').innerHTML = `<div class="pv"><table><tr>${head}</tr>${rows}</table></div>` +
@@ -1385,6 +1407,19 @@
       ` → 올린 뒤 전체 ${o.count}${o.kind === 'map' ? '개' : '줄'} · ${size(new TextEncoder().encode(o.json).length)}`;
     $('#xlSend').disabled = !o.table.length || (o.mode === 'delete' && !o.removed);
     if (o.mode === 'delete') { $('#xlSend').textContent = `${o.removed}개 지우고 TV 에 올리기`; $('#xlSend').className = 'danger'; }
+  }
+  /** 오른쪽 표: 지금 파일 내용(o 없음) 또는 올린 뒤 내용(기존 + 새로 · 바뀜 · 지움) — 붙여 넣을 때마다 다시 그리고 바뀐 줄로 스크롤 */
+  function xlNow(o) {
+    const f = xl.form, unit = f.kind === 'map' ? '개' : '줄';
+    const v = XLPaste.view(f, o), c = XLPaste.viewCounts(v);
+    $('#xlNow').innerHTML = XLPaste.viewHtml(v, { max: 800, empty: f.kind === 'new' ? '비어 있는 파일 — 붙여 넣으면 여기에 표가 생깁니다' : '내용이 없습니다' });
+    $('#xlNowT').textContent = o ? `올린 뒤 파일 내용 — ${base(xl.p)}` : `지금 파일 내용 — ${base(xl.p)}`;
+    $('#xlNowS').innerHTML = `${c.total.toLocaleString()}${unit}` + (o
+      ? (o.mode === 'replace' && f.kind !== 'new' ? ` <i class="lg vn">전부 새로 (기존 ${f.count}${unit}은 없어짐)</i>`
+        : `${c.new ? ` <i class="lg vn">새로 ${c.new}</i>` : ''}${c.changed ? ` <i class="lg vc">바뀜 ${c.changed}</i>` : ''}${c.removed ? ` <i class="lg vr">지움 ${c.removed}</i>` : ''}${!c.new && !c.changed && !c.removed ? ' <span class="hint">(바뀌는 줄 없음)</span>' : ''}`)
+      : ' <span class="hint">· 붙여 넣으면 새로 들어갈 줄이 여기에 표시됩니다</span>');
+    const box = $('#xlNow'), hit = box.querySelector('tr.vn, tr.vc, tr.vr');   // 바뀐 첫 줄이 가운데 오게 (표 안만 스크롤, 화면은 그대로)
+    box.scrollTop = hit ? Math.max(0, hit.offsetTop - box.clientHeight / 2) : box.scrollHeight;
   }
   async function xlSend() {
     const o = xl && xl.out; if (!o || xl.sending) return;
