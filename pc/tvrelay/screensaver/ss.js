@@ -311,16 +311,20 @@
     });
   }
 
-  /** 일별 그래프: 당월 1일 ~ 말일 막대, 고른 날(sel)은 진하게 + 위에 'M/D 값' */
+  /** 일별 그래프: 당월 1일 ~ 말일 막대(왼쪽 축) + 당월 누적 선(오른쪽 보조축), 고른 날(sel)은 진하게 + 위에 'M/D 값 · 누적' */
   function dayChart(svg, vals, sel, m, color, dec, unit) {
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     var box = svg.parentNode;
     var W = Math.max(200, Math.round(box.clientWidth || 560)), H = Math.max(100, Math.round(box.clientHeight || 250));
     svg.dataset.size = W + 'x' + H + ':d' + sel;
-    var R = 18, T = 46, B = 40, n = vals.length;
+    var T = 46, B = 40, n = vals.length;
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
     var max = niceMax(Math.max.apply(null, vals.map(function (v) { return v || 0; })));
-    var L = 22 + tickLabel(max).length * 12;
+    var cum = [], run = 0;                                       // 당월 누적 (1일부터 그날까지)
+    vals.forEach(function (v) { if (v == null) cum.push(null); else { run += v; cum.push(run); } });
+    var cmax = niceMax(run), ink = DARK ? '#cfd8e2' : '#3b4855';
+    var wid = function (mx) { var w = 0; for (var t = 0; t <= 4; t++) w = Math.max(w, tickLabel(mx * t / 4).length); return w; };   // 1.5 · 0.5 처럼 중간 눈금이 더 길 수 있음
+    var L = 22 + wid(max) * 12, R = 22 + wid(cmax) * 12;
     var slot = (W - L - R) / n, bw = Math.max(3, slot * .64);
     var X = function (i) { return L + slot * (i + .5); };
     var Y = function (v) { return T + (H - T - B) * (1 - v / max); };
@@ -329,6 +333,7 @@
       var v = max * t / 4, yy = Y(v);
       el('line', { x1: L, x2: W - R, y1: yy, y2: yy, stroke: DARK ? (t ? '#232c37' : '#334050') : (t ? '#eef1f4' : '#d9dfe6'), 'stroke-width': 2 }, svg);
       el('text', { x: L - 12, y: yy + 7, 'text-anchor': 'end', 'font-size': 20, fill: DARK ? '#8592a1' : '#7a8796' }, svg).textContent = tickLabel(v);
+      el('text', { x: W - R + 12, y: yy + 7, 'text-anchor': 'start', 'font-size': 20, fill: ink, opacity: .75 }, svg).textContent = tickLabel(cmax * t / 4);   // 오른쪽: 누적
     }
     for (var i = 0; i < n; i++) {                               // 날짜: 1 · 5 · 10 · 15 · 20 · 25 · 말일 (고른 날은 굵게)
       var day = i + 1, on = day === sel;
@@ -345,11 +350,21 @@
         opacity: on ? 1 : .38, 'class': 'dbar', 'data-day': i + 1 }, svg);
       b.style.transformOrigin = X(i) + 'px ' + Y(0) + 'px';
     });
+    var CY = function (v) { return T + (H - T - B) * (1 - v / cmax); }, pts = [];
+    cum.forEach(function (v, i) { if (v != null) pts.push([X(i), CY(v)]); });
+    if (pts.length > 1) {                                       // 누적 선 (왼쪽부터 그려지며 나타남)
+      var line = el('path', { d: smoothPath(pts), fill: 'none', stroke: ink, 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'class': 'dcum' }, svg);
+      var len = line.getTotalLength ? line.getTotalLength() : 2000;
+      line.style.strokeDasharray = len; line.style.strokeDashoffset = len;
+      line.getBoundingClientRect();
+      line.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.3,.7,.2,1)'; line.style.strokeDashoffset = 0;
+    }
+    if (sel && cum[sel - 1] != null) el('circle', { cx: X(sel - 1), cy: CY(cum[sel - 1]), r: 6, fill: DARK ? '#1b222b' : '#fff', stroke: ink, 'stroke-width': 3 }, svg);
     var sv = vals[sel - 1];
     if (sel && sv != null) {                                     // 고른 날의 값
       var x = X(sel - 1), anchor = x > W - 120 ? 'end' : x < L + 100 ? 'start' : 'middle';
       el('text', { x: x, y: T - 16, 'text-anchor': anchor, 'font-size': 22, 'font-weight': 800, fill: color, 'class': 'dsel' }, svg)
-        .textContent = m + '/' + sel + '  ' + fmt(sv, dec) + (unit || '');
+        .textContent = m + '/' + sel + '  ' + fmt(sv, dec) + (unit || '') + '  ·  누적 ' + fmt(cum[sel - 1], dec) + (unit || '');
     }
   }
 

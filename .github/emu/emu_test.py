@@ -334,7 +334,7 @@ def main() -> int:
 
     # ── 월별 · 일별 그래프 토글 (실제 터치): 대시보드로 넘어가지 않고 그래프가 일자별 막대로 바뀌는지, 막대를 누르면 그 날짜 값 ──
     pv = lambda: json.loads(pg.js("JSON.stringify({day: document.querySelector('#perf').classList.contains('day'),"
-                                  " bars: document.querySelectorAll('#p0_chart .dbar').length,"
+                                  " bars: document.querySelectorAll('#p0_chart .dbar').length, cum: document.querySelectorAll('#perf .dcum').length,"
                                   " sel: (document.querySelector('#p0_chart .dsel')||{}).textContent || null})"))
     td = rect('#perfTog b[data-v="day"]')
     ok(bool(td), "실적 칸에 월별 · 일별 토글이 있다")
@@ -342,6 +342,7 @@ def main() -> int:
         tap(td); time.sleep(2)
         s1 = pv(); print("  일별 터치 뒤:", s1)
         ok(s1["day"] and s1["bars"] >= 1, "일별 터치 → 그래프가 일자별 막대로 바뀌었다")
+        ok(s1["cum"] >= 2 and "누적" in (s1["sel"] or ""), "일별: 누적 매출 · 누적 생산이 보조축 선그래프로 그려졌다")
         ok("한 번 더" not in (pg.js("document.querySelector('#hint').textContent") or ""), "토글 터치가 '대시보드로 들어가기' 터치로 잡히지 않았다")
         shot("10-day")
         cb = rect("#p0_chart")
