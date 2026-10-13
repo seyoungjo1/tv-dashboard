@@ -44,7 +44,7 @@
   function reportEdit() {
     if (!TV || !TV.editRects) return;
     var out = [];
-    [].forEach.call(document.querySelectorAll('.nedit, #darkBtn, #restBtn'), function (b) {
+    [].forEach.call(document.querySelectorAll('.nedit, #darkBtn, #restBtn, #perfTog b' + (view === 'day' ? ', #perf .chartbox' : '')), function (b) {
       if (!b.offsetParent) return;                       // 안 보이는 아이콘
       var r = b.getBoundingClientRect();
       out.push([r.left, r.top, r.width, r.height]);
@@ -209,6 +209,9 @@
       for (var k = 1; k <= 12; k++) {                   // 그 해 월별 (당월은 MTD, 데이터 없는 달은 빈칸)
         o.series.push(k <= m && hasMonth(idx, y, k) ? monthSum(idx, y, k, k === m ? d : null) / p.divide : null);
       }
+      var mo = (idx[String(y)] || {})[pad(m)] || [];   // 당월 일별 (기준일까지, 그 뒤는 빈칸) — 일별 그래프
+      o.days = [];
+      for (k = 1; k <= days; k++) o.days.push(k <= d && mo[k - 1] != null ? mo[k - 1] / p.divide : null);
       r.panels.push(o);
     });
     return r;
@@ -308,8 +311,81 @@
     });
   }
 
+  /** 일별 그래프: 당월 1일 ~ 말일 막대, 고른 날(sel)은 진하게 + 위에 'M/D 값' */
+  function dayChart(svg, vals, sel, m, color, dec, unit) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var box = svg.parentNode;
+    var W = Math.max(200, Math.round(box.clientWidth || 560)), H = Math.max(100, Math.round(box.clientHeight || 250));
+    svg.dataset.size = W + 'x' + H + ':d' + sel;
+    var R = 18, T = 46, B = 40, n = vals.length;
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    var max = niceMax(Math.max.apply(null, vals.map(function (v) { return v || 0; })));
+    var L = 22 + tickLabel(max).length * 12;
+    var slot = (W - L - R) / n, bw = Math.max(3, slot * .64);
+    var X = function (i) { return L + slot * (i + .5); };
+    var Y = function (v) { return T + (H - T - B) * (1 - v / max); };
+    svg.dataset.l = L; svg.dataset.slot = slot; svg.dataset.w = W;   // 터치한 자리 → 날짜 환산용
+    for (var t = 0; t <= 4; t++) {
+      var v = max * t / 4, yy = Y(v);
+      el('line', { x1: L, x2: W - R, y1: yy, y2: yy, stroke: DARK ? (t ? '#232c37' : '#334050') : (t ? '#eef1f4' : '#d9dfe6'), 'stroke-width': 2 }, svg);
+      el('text', { x: L - 12, y: yy + 7, 'text-anchor': 'end', 'font-size': 20, fill: DARK ? '#8592a1' : '#7a8796' }, svg).textContent = tickLabel(v);
+    }
+    for (var i = 0; i < n; i++) {                               // 날짜: 1 · 5 · 10 · 15 · 20 · 25 · 말일 (고른 날은 굵게)
+      var day = i + 1, on = day === sel;
+      if (!(day === 1 || day % 5 === 0 || day === n || on)) continue;
+      if (!on && sel && Math.abs(day - sel) < 2) continue;      // 고른 날 숫자와 겹치지 않게
+      if (day !== n && !on && n - day < 3) continue;           // 말일과 겹치지 않게 (30 · 31일)
+      el('text', { x: X(i), y: H - 8, 'text-anchor': 'middle', 'font-size': 20, 'font-weight': on ? 800 : 400,
+        fill: on ? color : DARK ? '#9aa8b8' : '#5d6b7a' }, svg).textContent = day + (day === n && !on ? '일' : '');
+    }
+    vals.forEach(function (v, i) {
+      if (v == null) return;
+      var on = i + 1 === sel, h = Math.max(v > 0 ? 2 : 0, Y(0) - Y(Math.max(0, v)));
+      var b = el('rect', { x: X(i) - bw / 2, y: Y(0) - h, width: bw, height: h, rx: Math.min(4, bw / 3), fill: color,
+        opacity: on ? 1 : .38, 'class': 'dbar', 'data-day': i + 1 }, svg);
+      b.style.transformOrigin = X(i) + 'px ' + Y(0) + 'px';
+    });
+    var sv = vals[sel - 1];
+    if (sel && sv != null) {                                     // 고른 날의 값
+      var x = X(sel - 1), anchor = x > W - 120 ? 'end' : x < L + 100 ? 'start' : 'middle';
+      el('text', { x: x, y: T - 16, 'text-anchor': anchor, 'font-size': 22, 'font-weight': 800, fill: color, 'class': 'dsel' }, svg)
+        .textContent = m + '/' + sel + '  ' + fmt(sv, dec) + (unit || '');
+    }
+  }
+
   // ── 표시 ──
   var lastR = null, panelsKey = '', panels = DEFAULT_PANELS;
+  // 그래프 보기: 월별(그 해 1~12월) · 일별(당월 1일~말일). 고른 보기는 기억 (다음에 켜도 그대로)
+  var VIEW_KEY = 'ssPerfView', selDay = 0;
+  var view = (function () { try { return localStorage.getItem(VIEW_KEY) === 'day' ? 'day' : 'month'; } catch (e) { return 'month'; } })();
+  function setView(v) {
+    view = v === 'day' ? 'day' : 'month';
+    try { localStorage.setItem(VIEW_KEY, view); } catch (e) {}
+    paintView();
+    drawCharts();
+    reportEdit();                                                // 일별일 때는 그래프 칸 터치도 이 페이지로 (날짜 고르기)
+  }
+  function paintView() {
+    $('perf').classList.toggle('day', view === 'day');
+    [].forEach.call(document.querySelectorAll('#perfTog b'), function (b) { b.classList.toggle('on', b.dataset.v === view); });
+  }
+  function drawOne(i) {
+    var o = lastR && lastR.panels[i], svg = $('p' + i + '_chart'), p = panels[i];
+    if (!o || !svg || !p) return;
+    var dec = p.decimals ? 1 : 0;
+    if (view === 'day') dayChart(svg, o.days || [], selDay || lastR.d, lastR.m, p.color, p.decimals ? p.decimals + 1 : 0, p.unit);   // 하루치는 작아서 한 자리 더 (매출 0.16억원)
+    else chart(svg, o.series, p.color, 'g' + i, dec);
+  }
+  /** 일별 그래프를 터치한 자리 → 그 날짜를 고른다 (모든 항목이 같은 날) */
+  function pickDay(svg, clientX) {
+    if (!lastR || !svg.dataset.slot) return;
+    var r = svg.getBoundingClientRect(), k = (+svg.dataset.w || r.width) / (r.width || 1);
+    var x = (clientX - r.left) * k, i = Math.floor((x - +svg.dataset.l) / +svg.dataset.slot);
+    i = Math.max(0, Math.min(lastR.d - 1, i));                  // 기준일 뒤(아직 없는 날)는 기준일로
+    selDay = i + 1;
+    drawCharts();
+  }
+  paintView();
   /** 항목 칸들을 설정대로 만든다 (설정이 바뀔 때만) */
   function buildPanels(list) {
     var key = JSON.stringify(list);
@@ -340,9 +416,10 @@
   }
   function drawCharts() {
     if (!lastR) return;
-    lastR.panels.forEach(function (o, i) { var svg = $('p' + i + '_chart'); if (svg) chart(svg, o.series, panels[i].color, 'g' + i, panels[i].decimals ? 1 : 0); });
+    lastR.panels.forEach(function (o, i) { drawOne(i); });
   }
   function render(r) {
+    if (!r || !lastR || r.y !== lastR.y || r.m !== lastR.m || selDay > r.d) selDay = 0;   // 달이 바뀌면 다시 기준일
     lastR = r;
     $('perf').classList.toggle('nodata', !r);
     if (!r) { $('asOf').textContent = ''; return; }
@@ -359,6 +436,7 @@
       badge($('p' + i + '_mb'), o.label, o.mr); badge($('p' + i + '_yb'), o.label, o.yr);
     });
     drawCharts();
+    reportEdit();                                                // 칸 배치가 바뀌었을 수 있음 (토글 · 그래프 위치)
   }
   /** 숫자가 칸보다 길면(항목이 많거나 자릿수가 클 때) 글자를 줄여 넘치지 않게 */
   function fitNums() {
@@ -1076,6 +1154,10 @@
     if (e.target.closest && e.target.closest('#darkBtn')) { if (!ntOpen) toggleDark(); return; }
     if (e.target.closest && e.target.closest('#restBtn')) { if (!ntOpen && !restOn) restNow(); return; }
     if (restManual && e.target.closest && e.target.closest('#ssRest')) { restManualEnd(); return; }   // 눈 버튼으로 켠 쉬는 화면: 터치하면 끝
+    var tg = e.target.closest && e.target.closest('#perfTog b');
+    if (tg) { if (!ntOpen && tg.dataset.v !== view) setView(tg.dataset.v); return; }   // 월별 · 일별 그래프
+    var cb = view === 'day' && e.target.closest && e.target.closest('#perf .chartbox');
+    if (cb) { if (!ntOpen) pickDay(cb.querySelector('svg'), e.clientX); return; }     // 일별 그래프: 누른 날짜의 값
     var b = e.target.closest && e.target.closest('.nedit');
     if (b && !TV && PREVIEW) {                           // PC 미리보기: 아래 공지사항 입력칸의 그 줄로
       parent.postMessage({ ssEditNotice: b.dataset.line != null ? +b.dataset.line : -1 }, '*');
@@ -1132,7 +1214,7 @@
       lastR.panels.forEach(function (o, i) {
         var svg = $('p' + i + '_chart'); if (!svg) return;
         var b = svg.parentNode;
-        if (svg.dataset.size !== Math.round(b.clientWidth) + 'x' + Math.round(b.clientHeight)) chart(svg, o.series, panels[i].color, 'g' + i, panels[i].decimals ? 1 : 0);
+        if ((svg.dataset.size || '').split(':')[0] !== Math.round(b.clientWidth) + 'x' + Math.round(b.clientHeight)) drawOne(i);
       });
     }, 150);
   }

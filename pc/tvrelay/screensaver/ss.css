@@ -40,7 +40,17 @@ main { position: absolute; left: 38px; right: 38px; top: 122px; bottom: 82px; di
 
 /* 매출 · 생산량 */
 #perf { flex: 1; min-height: 0; position: relative; display: flex; padding: 54px 26px 18px 40px; }
-.asof { position: absolute; right: 30px; top: 18px; font-size: 21px; color: #7a8796; }
+.ptop { position: absolute; right: 26px; top: 8px; display: flex; align-items: center; gap: 18px; }
+.asof { font-size: 21px; color: #7a8796; }
+/* 월별 · 일별 그래프 토글 */
+.ptog { display: flex; padding: 3px; border-radius: 12px; background: #eef1f4; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+.ptog b { min-width: 74px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 20px; font-weight: 700; color: #7a8796; cursor: pointer; transition: background .2s, color .2s; }
+.ptog b.on { background: #fff; color: #1d2b3a; box-shadow: 0 1px 4px rgba(20, 30, 45, .15); }
+html.dark .ptog { background: #1f2731; }
+html.dark .ptog b { color: #8592a1; }
+html.dark .ptog b.on { background: #34404e; color: #e3eaf2; box-shadow: none; }
+#perf.nodata .ptog { visibility: hidden; }
+#perf.day .chartbox { cursor: pointer; }
 .half { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .vline { width: 2px; background: #eef1f4; margin: 30px 26px 10px; }
 .half h2 { margin: 0 0 14px; font-size: 32px; font-weight: 800; }

@@ -332,6 +332,28 @@ def main() -> int:
     ok(st4["dark"] != st["dark"], "달/해 버튼 → 다크 모드가 바뀌었다")
     shot("5-dark")
 
+    # ── 월별 · 일별 그래프 토글 (실제 터치): 대시보드로 넘어가지 않고 그래프가 일자별 막대로 바뀌는지, 막대를 누르면 그 날짜 값 ──
+    pv = lambda: json.loads(pg.js("JSON.stringify({day: document.querySelector('#perf').classList.contains('day'),"
+                                  " bars: document.querySelectorAll('#p0_chart .dbar').length,"
+                                  " sel: (document.querySelector('#p0_chart .dsel')||{}).textContent || null})"))
+    td = rect('#perfTog b[data-v="day"]')
+    ok(bool(td), "실적 칸에 월별 · 일별 토글이 있다")
+    if td:
+        tap(td); time.sleep(2)
+        s1 = pv(); print("  일별 터치 뒤:", s1)
+        ok(s1["day"] and s1["bars"] >= 1, "일별 터치 → 그래프가 일자별 막대로 바뀌었다")
+        ok("한 번 더" not in (pg.js("document.querySelector('#hint').textContent") or ""), "토글 터치가 '대시보드로 들어가기' 터치로 잡히지 않았다")
+        shot("10-day")
+        cb = rect("#p0_chart")
+        if cb:
+            tap([cb[0], cb[1] + cb[3] * 0.4, cb[2] * 0.12, cb[3] * 0.4]); time.sleep(1.5)   # 그래프 왼쪽(달 초) 터치
+            s2 = pv(); print("  그래프 터치 뒤:", s2)
+            ok(s2["sel"] and s2["sel"] != s1["sel"], "일별 그래프 터치 → 그 날짜의 값이 보인다")
+        tm = rect('#perfTog b[data-v="month"]')
+        tap(tm); time.sleep(2)
+        s3 = pv(); print("  월별 터치 뒤:", s3)
+        ok(not s3["day"] and s3["bars"] == 0, "월별 터치 → 월별 그래프로 돌아왔다")
+
     # ── 눈 버튼을 다시 · 여러 번: 한 번 된 뒤에도 계속 되는지 ──
     rest_on = lambda: json.loads(pg.js(STATE))["rest"]
     def eye_cycle(tag, end_by_touch=True):
