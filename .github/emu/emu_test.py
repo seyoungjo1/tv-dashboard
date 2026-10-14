@@ -394,6 +394,11 @@ def main() -> int:
     for m in pg.msgs:
         print("  콘솔:", m[:300])
     ok(not bad, "페이지 JS 오류 없음")
+    # 재생 목록 "repeat": 2 → 같은 동영상을 이어서 두 번 (앱 로그 'play 1/2' · 'play 2/2')
+    lc = sh("adb logcat -d -s Screensaver:I", check=False)
+    plays = [l.split("play ", 1)[1][:30] for l in lc.splitlines() if "play " in l]
+    print("  재생 기록:", plays[:12])
+    ok(any(p.startswith("2/2 test.mp4") for p in plays) and any(p.startswith("1/2 test.mp4") for p in plays), "재생 목록 반복(repeat 2) → 같은 동영상이 1/2 · 2/2 로 이어서 재생됐다")
     open(f"{OUT}/console.txt", "w", encoding="utf-8").write("\n".join(pg.msgs))
     subprocess.run(f"adb logcat -d -v time > {OUT}/logcat.txt", shell=True)
     print("\n결과:", "모두 통과" if not fails else f"실패 {len(fails)}개: " + " / ".join(fails))

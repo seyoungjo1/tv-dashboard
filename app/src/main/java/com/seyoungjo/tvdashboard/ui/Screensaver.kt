@@ -582,8 +582,11 @@ class Screensaver(
         }
         val item = list[index % list.size]
         current = item
+        Log.i(TAG, "play ${index % list.size + 1}/${list.size} ${item.file?.name ?: ("yt:" + item.youtube)}")
+        // 목록이 하나뿐이거나 전부 같은 항목(같은 영상을 반복)이면 끊김 없이 이어 돌린다
+        val loopAll = list.all { it.key == item.key }
         fun opts(o: JSONObject) = o.put("crop", item.crop).put("align", item.align).put("fill", if (item.blur) "blur" else "color")
-            .put("color", String.format("#%06X", item.color and 0xFFFFFF)).put("loop", list.size == 1)
+            .put("color", String.format("#%06X", item.color and 0xFFFFFF)).put("loop", loopAll)
             .put("custom", item.custom).put("base", if (item.cropBase) "crop" else "fit")
             .put("scale", item.scale).put("halign", item.hAlign).put("offsetX", item.offsetX)
             .put("valign", item.vAlign).put("offsetY", item.offsetY)
@@ -648,7 +651,7 @@ class Screensaver(
         try {
             mp.setSurface(s)
             mp.setDataSource(f.path)
-            mp.isLooping = list.size == 1
+            mp.isLooping = loopAll
             val vol = if (AppSettings.prefs.getBoolean("idle_video_sound", false)) 1f else 0f
             mp.setVolume(vol, vol)
             mp.setOnVideoSizeChangedListener { _, w, h -> fitVideo(w, h) }
@@ -709,7 +712,7 @@ class Screensaver(
         val url = ContentStore.WEB_PREFIX + android.net.Uri.encode(folder) + "/" + android.net.Uri.encode(f.name)
         val o = JSONObject().put("seq", seq).put("name", f.name).put("url", url).put("why", why)
             .put("crop", item.crop).put("align", item.align).put("fill", if (item.blur) "blur" else "color")
-            .put("color", String.format("#%06X", item.color and 0xFFFFFF)).put("loop", items.size == 1)
+            .put("color", String.format("#%06X", item.color and 0xFFFFFF)).put("loop", items.all { it.key == item.key })
             .put("custom", item.custom).put("base", if (item.cropBase) "crop" else "fit")
             .put("scale", item.scale).put("halign", item.hAlign).put("offsetX", item.offsetX)
             .put("valign", item.vAlign).put("offsetY", item.offsetY)

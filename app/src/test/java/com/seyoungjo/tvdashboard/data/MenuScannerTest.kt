@@ -60,6 +60,22 @@ class MenuScannerTest {
         assertEquals("dQw4w9WgXcQ", MenuScanner.youtubeId("https://www.youtube.com/watch?app=desktop&v=dQw4w9WgXcQ"))
     }
 
+    @Test fun sameVideoTwiceWithOwnOptionsAndRepeat() {
+        file("main/1.mp4"); file("main/2.mp4")
+        file("main/설정.json", """{"playlist":[
+          {"src":"1.mp4","fit":"crop","align":"top","repeat":2},
+          {"src":"2.mp4","fit":"fit"},
+          {"src":"1.mp4","fit":"fit","fill":"color","color":"#ff0000"}]}""")
+        val p = MenuScanner.mainPlaylist(MenuScanner.mainDir(root))
+        // 1.mp4 두 번(크롭·위) → 2.mp4 → 1.mp4(확장·단색): 같은 파일이라도 항목마다 설정이 따로
+        assertEquals(listOf("1.mp4", "1.mp4", "2.mp4", "1.mp4"), p.map { it.file!!.name })
+        assertTrue(p[0].crop && p[1].crop); assertEquals("top", p[1].align)
+        assertTrue(!p[2].crop)
+        assertTrue(!p[3].crop && !p[3].blur); assertEquals(0xFFFF0000.toInt(), p[3].color)
+        file("main/설정.json", """{"playlist":[{"src":"2.mp4","repeat":99}]}""")
+        assertEquals(21, MenuScanner.mainPlaylist(MenuScanner.mainDir(root)).size)      // 반복은 20번까지 + 목록에 없는 1.mp4
+    }
+
     @Test fun photosInPlaylistWithDurationAndEffect() {
         file("main/1.mp4"); file("main/2.jpg"); file("main/3.png"); file("main/icon.png"); file("main/logo.png"); file("main/_임시.jpg")
         file("main/설정.json", """{"playlist":[{"src":"3.png","dur":15,"effect":"wipe"},{"src":"2.jpg","effect":"없는효과","dur":1}]}""")
