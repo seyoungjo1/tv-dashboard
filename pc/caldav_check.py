@@ -14,6 +14,7 @@ CalDAV 게이트웨이 점검 — 이 계정으로 어떤 캘린더가 내려오
   python caldav_check.py --guess cal/shared/951290_230407113047.nsf   (공유 DB 경로 후보 추가)
   python caldav_check.py --insecure            (회사 인증서 때문에 SSL 오류가 날 때)
   python caldav_check.py --sample              (캘린더마다 이번 달 일정 제목 5개까지 보여 줌)
+  python caldav_check.py --as 951290           (다른 계정·팀 계정의 캘린더 홈을 직접 훑어 봄)
 """
 import argparse
 import base64
@@ -162,6 +163,7 @@ def main():
     ap.add_argument("--guess", action="append", default=[], help="공유 DB 경로 후보 추가 (여러 번 가능)")
     ap.add_argument("--insecure", action="store_true", help="SSL 인증서 검증 생략 (회사 인증서 오류 때)")
     ap.add_argument("--sample", action="store_true", help="캘린더마다 이번 달 제목 5개까지 표시")
+    ap.add_argument("--as", dest="others", action="append", default=[], help="다른 계정(사번·팀 계정)의 캘린더 홈을 직접 훑기 (여러 번 가능)")
     a = ap.parse_args()
 
     url = a.url or input("게이트웨이 주소 [%s]: " % DEFAULT_URL).strip() or DEFAULT_URL
@@ -253,6 +255,45 @@ def main():
                 say("        - %s" % t)
 
     say()
+    say("■ 3b. 게이트웨이 상위 목록 (다른 계정·공용 캘린더가 경로로 드러나는지)")
+    top_homes = []
+    for top in ("", "principals/", "calendars/", "calendars/public/", "public/"):
+        st, _, data = dav.propfind(top, ["d:displayname", "d:resourcetype"], depth=1)
+        rows = parse_multistatus(data) if st == 207 else []
+        say("  PROPFIND %-18s (Depth 1) → HTTP %s%s" % (top or "/", st, ("  · 항목 %d개" % max(0, len(rows) - 1)) if rows else ""))
+        for href, props in rows[1:41]:
+            name_el = props.get(tag(DAV, "displayname"))
+            name = (name_el.text or "").strip() if name_el is not None else ""
+            kind = "캘린더" if is_calendar(props) else ("폴더" if props.get(tag(DAV, "resourcetype")) is not None and len(list(props[tag(DAV, "resourcetype")])) else "항목")
+            say("      %-7s %s%s" % (kind, href, ("  (" + name + ")") if name else ""))
+            if is_calendar(props):
+                top_homes.append((href, name))
+        if len(rows) > 41:
+            say("      ... 외 %d개" % (len(rows) - 41))
+    # 공유 DB 이름 앞의 숫자(사번으로 보임)와 --as 로 준 계정의 캘린더 홈을 직접 훑는다
+    others = list(a.others)
+    for g in (a.guess or [DEFAULT_SHARED]):
+        m = re.match(r"(\d{4,})", g.strip("/").rsplit("/", 1)[-1])
+        if m and m.group(1) not in others:
+            others.append(m.group(1))
+    for who in others:
+        say("  --- 계정 '%s' 의 캘린더 홈 ---" % who)
+        for home in ("calendars/" + who + "/", "principals/" + who + "/", who + "/"):
+            st, _, data = dav.propfind(home, ["d:displayname", "d:resourcetype", "c:calendar-home-set"], depth=1)
+            say("  PROPFIND %-40s → HTTP %s" % (home, st))
+            if st != 207:
+                continue
+            for href, props in parse_multistatus(data):
+                for h in hrefs_in(props.get(tag(CAL, "calendar-home-set"))):
+                    say("      캘린더 홈: %s" % h)
+                if is_calendar(props):
+                    name_el = props.get(tag(DAV, "displayname"))
+                    name = (name_el.text or "").strip() if name_el is not None else ""
+                    st2, n, _ = report_month(dav, href)
+                    say("      ★ 캘린더 %s%s · 이번 달 %s" % (href, (" (" + name + ")") if name else "", ("%d건" % n) if st2 == 207 else "REPORT HTTP %s" % st2))
+                    found.append((href, name or ("계정 " + who), "", "", who))
+
+    say()
     say("■ 4. 공유 DB 경로를 직접 두드려 보기 (게이트웨이가 목록에 안 보여 줘도 경로로는 열릴 수 있음)")
     guesses = a.guess or [DEFAULT_SHARED]
     cands = []
@@ -260,8 +301,11 @@ def main():
         g = g.strip("/")
         short = g.rsplit("/", 1)[-1]
         stem = short[:-4] if short.lower().endswith(".nsf") else short
+        num = re.match(r"(\d{4,})", stem)
+        num = num.group(1) if num else stem
         for c in (g + "/", short + "/", stem + "/", "calendars/" + user + "/" + stem + "/", "calendars/" + stem + "/",
-                  "shared/" + stem + "/", "shared/" + short + "/"):
+                  "shared/" + stem + "/", "shared/" + short + "/", "calendars/" + num + "/", "calendars/" + num + "/Calendar/",
+                  "calendars/" + num + "/default/", "calendars/public/" + stem + "/", "calendars/public/" + num + "/"):
             if c not in cands:
                 cands.append(c)
     ok_any = False
