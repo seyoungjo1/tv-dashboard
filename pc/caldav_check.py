@@ -332,7 +332,15 @@ def main():
                 detail = "  → XML 아님: " + data[:120].decode("utf-8", "replace").replace("\n", " ")
             if len(detail) > 160:
                 detail = detail[:160] + "…"
-        say("  %s %-60s HTTP %s%s" % (mark, c, st, "  ← 캘린더!" if mark == "★" else detail))
+            # 어떤 경로에나 200 을 돌려주는 서버가 있으므로, 진짜 캘린더인지는 REPORT 로 일정이 나오는지로 판정한다
+            st2, n2, _ = report_month(dav, c)
+            if st2 == 207 and n2 > 0:
+                mark = "★"
+                ok_any = True
+                detail = "  → REPORT 로 이번 달 일정 %d건 — 진짜 캘린더!" % n2
+            elif mark == "○":
+                detail += "  · REPORT %s → 일정 없음(빈 응답)" % st2
+        say("  %s %-60s HTTP %s%s" % (mark, c, st, "  ← 캘린더!" if mark == "★" and not detail.startswith("  → REPORT") else detail))
 
     say()
     say("■ 5. 등록 문서의 속성 · 서버가 허용하는 명령 (공유 캘린더를 직접 등록할 여지가 있는지)")
@@ -360,7 +368,7 @@ def main():
                             names.append(ch.tag)
             except ET.ParseError:
                 pass
-        say("      속성 이름 %d개 (★ = 표준 아님, 게이트웨이 고유): " % len(names))
+        say("      속성 이름 %d개 (★ = 표준 아님, 게이트웨이 고유)%s" % (len(names), "  ← 0개면 이 서버는 속성 이름 조회(propname)를 지원하지 않는 것" if not names else ":"))
         for t in names:
             say("        " + shortns(t))
         st, _, data = dav.propfind_raw(href, "<d:allprop/>", depth=0)
