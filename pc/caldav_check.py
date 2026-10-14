@@ -281,21 +281,44 @@ def main():
         if m and m.group(1) not in others:
             others.append(m.group(1))
     for who in others:
-        say("  --- 계정 '%s' 의 캘린더 홈 ---" % who)
+        say("  --- 계정 '%s' 의 캘린더 홈 (내 로그인으로 들여다보기) ---" % who)
         for home in ("calendars/" + who + "/", "principals/" + who + "/", who + "/"):
-            st, _, data = dav.propfind(home, ["d:displayname", "d:resourcetype", "c:calendar-home-set"], depth=1)
-            say("  PROPFIND %-40s → HTTP %s" % (home, st))
+            st, _, data = dav.propfind(home, ["d:displayname", "d:resourcetype", "c:calendar-home-set",
+                                              "d:current-user-privilege-set", "d:owner"], depth=1)
+            note = ""
+            if st != 207:  # Depth 1 이 막히면 Depth 0 으로라도 (홈 주소·권한 속성)
+                st0, _, data0 = dav.propfind(home, ["d:displayname", "d:resourcetype", "c:calendar-home-set",
+                                                    "d:current-user-privilege-set", "d:owner"], depth=0)
+                note = "  · Depth 0 → HTTP %s" % st0
+                if st0 == 207:
+                    data = data0
+                    st = 207
+            say("  PROPFIND %-40s → HTTP %s%s" % (home, st, note))
             if st != 207:
                 continue
             for href, props in parse_multistatus(data):
+                priv = props.get(tag(DAV, "current-user-privilege-set"))
+                if priv is not None:
+                    names_p = [c.tag.split("}", 1)[-1] for pr in priv.findall("d:privilege", NS) for c in pr]
+                    if names_p:
+                        say("      %s 내 권한: %s" % (href, ", ".join(names_p)))
+                own = hrefs_in(props.get(tag(DAV, "owner")))
+                if own:
+                    say("      %s 소유: %s" % (href, own[0]))
                 for h in hrefs_in(props.get(tag(CAL, "calendar-home-set"))):
                     say("      캘린더 홈: %s" % h)
                 if is_calendar(props):
                     name_el = props.get(tag(DAV, "displayname"))
                     name = (name_el.text or "").strip() if name_el is not None else ""
-                    st2, n, _ = report_month(dav, href)
+                    st2, n, titles = report_month(dav, href)
                     say("      ★ 캘린더 %s%s · 이번 달 %s" % (href, (" (" + name + ")") if name else "", ("%d건" % n) if st2 == 207 else "REPORT HTTP %s" % st2))
+                    for t in titles[:3]:
+                        say("          - %s" % t)
                     found.append((href, name or ("계정 " + who), "", "", who))
+            st3, n3, titles3 = report_month(dav, home)
+            say("      REPORT %s → HTTP %s · 이번 달 일정 %d건%s" % (home, st3, n3, ("  ← 일정이 나옵니다!" if n3 else "")))
+            for t in titles3[:3]:
+                say("          - %s" % t)
 
     say()
     say("■ 4. 공유 DB 경로를 직접 두드려 보기 (게이트웨이가 목록에 안 보여 줘도 경로로는 열릴 수 있음)")
