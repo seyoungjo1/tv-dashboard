@@ -312,11 +312,23 @@ def main():
     for c in cands:
         st, hd, data = dav.propfind(c, ["d:displayname", "d:resourcetype"], depth=0)
         mark = "  "
+        detail = ""
         if st == 207:
-            cal = any(is_calendar(p) for _, p in parse_multistatus(data))
+            rows = parse_multistatus(data)
+            cal = any(is_calendar(p) for _, p in rows)
             mark = "★" if cal else "○"
             ok_any = ok_any or cal
-        say("  %s %-60s HTTP %s%s" % (mark, c, st, "  ← 캘린더!" if mark == "★" else ("  (DAV 자원이지만 캘린더 아님)" if mark == "○" else "")))
+            # 207 이라도 안에 404 가 들어 있으면 '없음' 이다 — 실제 내용을 보여 준다
+            try:
+                root = ET.fromstring(data)
+                sts = [(r.findtext("d:href", default="", namespaces=NS) or "").strip() + " " +
+                       " / ".join((x.text or "").strip() for x in r.findall(".//d:status", NS)) for r in root.findall("d:response", NS)]
+                detail = "  → " + ("; ".join(sts) if sts else "응답 비어 있음(response 없음)")
+            except ET.ParseError:
+                detail = "  → XML 아님: " + data[:120].decode("utf-8", "replace").replace("\n", " ")
+            if len(detail) > 160:
+                detail = detail[:160] + "…"
+        say("  %s %-60s HTTP %s%s" % (mark, c, st, "  ← 캘린더!" if mark == "★" else detail))
 
     say()
     say("■ 결론")
