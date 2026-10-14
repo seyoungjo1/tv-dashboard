@@ -75,6 +75,10 @@ class Dav:
         except urllib.error.HTTPError as e:
             return e.code, dict(e.headers), e.read()
 
+    def propfind_raw(self, url, inner, depth=0):
+        body = ('<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:">%s</d:propfind>' % inner)
+        return self.req("PROPFIND", url, body, depth=depth)
+
     def propfind(self, url, props, depth=0):
         body = ('<?xml version="1.0" encoding="utf-8"?>'
                 '<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/">'
@@ -329,6 +333,47 @@ def main():
             if len(detail) > 160:
                 detail = detail[:160] + "…"
         say("  %s %-60s HTTP %s%s" % (mark, c, st, "  ← 캘린더!" if mark == "★" else detail))
+
+    say()
+    say("■ 5. 등록 문서의 속성 · 서버가 허용하는 명령 (공유 캘린더를 직접 등록할 여지가 있는지)")
+    STD = {DAV, CAL, CS, "http://apple.com/ns/ical/", "urn:ietf:params:xml:ns:carddav"}
+    def shortns(t):
+        if t.startswith("{"):
+            ns, nm = t[1:].split("}", 1)
+            return (ns if ns in STD else "★" + ns) + " " + nm
+        return t
+    targets = [("캘린더 홈", homes[0] if homes and homes[0] else "")] + [("캘린더 " + (n or h), h) for h, n, _, _, _ in found[:3]]
+    for label, href in targets:
+        st, hd, _ = dav.req("OPTIONS", href)
+        say("  [%s] %s" % (label, href or dav.base))
+        say("      OPTIONS → HTTP %s · Allow: %s" % (st, hd.get("Allow", "(없음)")))
+        if hd.get("DAV"):
+            say("      DAV: %s" % hd.get("DAV"))
+        st, _, data = dav.propfind_raw(href, "<d:propname/>", depth=0)
+        names = []
+        if st == 207:
+            try:
+                root = ET.fromstring(data)
+                for pe in root.findall(".//d:prop", NS):
+                    for ch in pe:
+                        if ch.tag not in names:
+                            names.append(ch.tag)
+            except ET.ParseError:
+                pass
+        say("      속성 이름 %d개 (★ = 표준 아님, 게이트웨이 고유): " % len(names))
+        for t in names:
+            say("        " + shortns(t))
+        st, _, data = dav.propfind_raw(href, "<d:allprop/>", depth=0)
+        if st == 207:
+            for _, props in parse_multistatus(data):
+                for t, el in props.items():
+                    ns = t[1:].split("}", 1)[0] if t.startswith("{") else ""
+                    if ns in STD:
+                        continue
+                    val = (el.text or "").strip() or "".join(ET.tostring(c, encoding="unicode") for c in el)
+                    val = re.sub(r"\s+", " ", val)[:200]
+                    say("      ★값 %s = %s" % (shortns(t), val or "(비어 있음)"))
+    say("  해석: Allow 에 MKCALENDAR 가 있고 ★속성에 노츠 DB 경로(…nsf)가 보이면, 같은 속성으로 공유 DB 를 등록해 볼 여지가 있습니다.")
 
     say()
     say("■ 결론")
