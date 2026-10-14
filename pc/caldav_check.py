@@ -173,16 +173,28 @@ def main():
     url = a.url or input("게이트웨이 주소 [%s]: " % DEFAULT_URL).strip() or DEFAULT_URL
     user = a.user or input("DSW 아이디: ").strip()
     pw = getpass.getpass("DSW 비밀번호 (화면에 안 보임): ")
+    if not a.others:
+        other = input("공유 캘린더를 만든 사람(공유자)의 DSW 아이디 (모르면 그냥 엔터): ").strip()
+        if other:
+            a.others.append(other)
+    a.sample = True  # 일정 제목은 항상 보여 준다
     dav = Dav(url, user, pw, insecure=a.insecure)
     say()
     say("■ 1. 접속 · 로그인 확인  (%s)" % dav.base)
     try:
         st, hd, data = dav.propfind("", ["d:current-user-principal", "d:resourcetype", "d:displayname"], depth=0)
     except urllib.error.URLError as e:
-        say("  ✖ 접속 실패: %s" % e.reason)
-        if "CERTIFICATE" in str(e.reason).upper() or "SSL" in str(e.reason).upper():
-            say("    회사 인증서 때문일 수 있습니다. --insecure 를 붙여 다시 시도해 보세요.")
-        return 2
+        if ("CERTIFICATE" in str(e.reason).upper() or "SSL" in str(e.reason).upper()) and not a.insecure:
+            say("  인증서 검증 오류(%s) — 회사 인증서로 보여 검증을 생략하고 다시 시도합니다." % e.reason)
+            dav = Dav(url, user, pw, insecure=True)
+            try:
+                st, hd, data = dav.propfind("", ["d:current-user-principal", "d:resourcetype", "d:displayname"], depth=0)
+            except urllib.error.URLError as e2:
+                say("  ✖ 접속 실패: %s" % e2.reason)
+                return 2
+        else:
+            say("  ✖ 접속 실패: %s" % e.reason)
+            return 2
     say("  PROPFIND / → HTTP %s  %s" % (st, "(DAV: %s)" % hd.get("DAV", "") if hd.get("DAV") else ""))
     if st == 401:
         say("  ✖ 아이디·비밀번호가 맞지 않거나 이 주소는 다른 로그인 방식을 씁니다.")
