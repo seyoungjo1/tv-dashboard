@@ -125,7 +125,6 @@ object MenuScanner {
      *     "fill": "blur"|"color", "color": "#000000" }]
      *  직접 조절: "fit": "custom", "base": "crop"|"fit"(100% 기준), "scale": 100(%),
      *            "halign": left|center|right + "offsetX", "valign": top|center|bottom + "offsetY" (px, 1080p 기준, 기준선에서 안쪽으로)
-     *  "repeat": n — 같은 항목을 이어서 n번 (1~20). 같은 파일을 목록에 여러 번 넣을 수도 있고, 항목마다 표시 방식이 따로 붙는다.
      * 목록에 없는 main 의 동영상은 그 뒤에 이름 오름차순으로 붙는다 (자동 업로드 .bat 으로 올린 것 등).
      */
     /** 화면보호기 동영상 쉬는 시간 (main/설정.json 의 "rest": {"enabled", "runMin", "restMin"}) — PC 화면보호기 탭에서 정함 */
@@ -177,15 +176,12 @@ object MenuScanner {
             val o = arr.optJSONObject(k) ?: continue
             val src = o.optString("src").trim()
             val yt = youtubeId(src)
-            // 표시 방식은 '항목'에 붙는다 — 같은 파일이 두 번 들어 있으면 각각 제 설정으로 (순서를 바꿔도 설정이 따라감)
-            val item = if (yt != null) {
-                opts(o, PlayItem(file = null, youtube = yt, vertical = src.contains("/shorts/") || o.optBoolean("vertical")))
+            if (yt != null) {
+                out.add(opts(o, PlayItem(file = null, youtube = yt, vertical = src.contains("/shorts/") || o.optBoolean("vertical"))))
             } else {
                 val f = files.firstOrNull { it.name == src } ?: continue
-                used.add(f.name)
-                opts(o, PlayItem(file = f, image = isPhoto(f)))
+                if (used.add(f.name)) out.add(opts(o, PlayItem(file = f, image = isPhoto(f))))
             }
-            repeat(o.optInt("repeat", 1).coerceIn(1, 20)) { out.add(item) }
         }
         for (f in files) if (f.name !in used) out.add(opts(null, PlayItem(file = f, image = isPhoto(f))))
         return out
