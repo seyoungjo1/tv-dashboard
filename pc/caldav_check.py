@@ -177,6 +177,15 @@ def main():
         other = input("공유 캘린더를 만든 사람(공유자)의 DSW 아이디 (모르면 그냥 엔터): ").strip()
         if other:
             a.others.append(other)
+    calid = input("DSW 웹메일에서 찾은 공유 캘린더 ID (32자리 영숫자, 없으면 엔터): ").strip()
+    if calid:
+        # 개인 캘린더 주소가 calendars/<나>/<32자리ID>_<등록시각>/ 꼴이므로 공유 캘린더도 같은 꼴로 두드려 본다
+        stamp = re.search(r"_(\d{12})", DEFAULT_SHARED)
+        ts = ("20" + stamp.group(1)) if stamp else ""
+        for c in (calid, calid + "_" + ts if ts else "", calid + "_20250204100942"):
+            if c:
+                a.guess.append("calendars/" + user + "/" + c)
+                a.guess.append("calendars/" + c)
     a.sample = True  # 일정 제목은 항상 보여 준다
     dav = Dav(url, user, pw, insecure=a.insecure)
     say()
