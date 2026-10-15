@@ -1,6 +1,9 @@
 """HTML 을 인터넷 없이 뜨게 바꾸기(offline.py) — 가짜 내려받기로 (네트워크 없음)"""
 import base64
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 from tvrelay import offline
 
@@ -31,6 +34,25 @@ def fake_fetch(url):
 
 
 class OfflineTest(unittest.TestCase):
+    def test_ui_conversion_preserves_asset_urls(self):
+        from tvrelay.ui import Api
+
+        with tempfile.TemporaryDirectory() as root:
+            api = Api(Path(root))
+            sid = api.put_stage(HTML)["id"]
+            with patch.object(offline, "default_fetch", side_effect=fake_fetch):
+                result = api.offline_convert({"path": "dash/index.html", "stage": sid})
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["folder"], "dash/_index_files")
+            assets = result["files"][1:]
+            self.assertEqual({f["url"] for f in assets if f["url"]},
+                             set(FAKE) - {"https://cdn.example.com/react.min.js?v=2",
+                                          "https://fonts.example.com/f/P.woff"})
+            for f in assets:
+                self.assertEqual(f["path"], "dash/_index_files/" + f["rel"])
+                self.assertEqual(len((api.stage / f["stage"]).read_bytes()), f["size"])
+            self.assertTrue(any(f["kind"] == "img" and not f["url"] for f in assets))
+
     def test_bundle(self):
         r = offline.convert(HTML, "index.html", fetch=fake_fetch)
         self.assertEqual(r.folder, "_index_files")

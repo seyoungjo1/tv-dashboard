@@ -43,6 +43,7 @@ class Result:
     files: dict[str, bytes] = field(default_factory=dict)   # 묶음 폴더 안 상대 경로 → 내용
     report: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+    by_url: dict[str, str] = field(default_factory=dict)   # 원본 URL → 묶음 안 경로 (UI 최적화에서 사용)
 
 
 def bundle_folder(html_name: str) -> str:
@@ -212,7 +213,7 @@ class Converter:
             self.report.insert(0, "바깥 자료 %d개(%s)를 '%s/' 에 넣었습니다 — 인터넷 없이도 뜹니다" % (len(self.files), _fmt(self.sizes), F))
         for f in self.failed:
             self.report.append("받지 못함: " + f)
-        return Result(html=text.encode("utf-8"), folder=F, files=self.files, report=self.report, failed=self.failed)
+        return Result(html=text.encode("utf-8"), folder=F, files=self.files, report=self.report, failed=self.failed, by_url=self.by_url)
 
     def _split_images(self, text: str) -> str:
         n = 0
