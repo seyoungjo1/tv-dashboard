@@ -393,6 +393,27 @@ class Api:
         (self.stage / sid).write_bytes(data)
         return {"id": sid, "size": len(data)}
 
+    def offline_convert(self, body: dict[str, Any]) -> dict[str, Any]:
+        """올릴 HTML(보관 id)을 인터넷 없이 뜨게 바꿔 다시 보관: {files:[{path, stage, size}], folder, report, changed}"""
+        from . import offline
+        path = str(body.get("path", "")).strip().strip("/")
+        sid = str(body.get("stage", ""))
+        src = self.stage / sid
+        if not sid or not src.is_file():
+            raise ValueError("보관된 파일이 없습니다")
+        data = src.read_bytes()
+        if not offline.needs_convert(data):
+            return {"changed": False, "files": [{"path": path, "stage": sid, "size": len(data)}], "folder": "", "report": ["바깥 자료나 큰 그림이 없어 그대로 올립니다"]}
+        echo("HTML 변환 중: %s (바깥 자료 내려받기%s)" % (path, " · 큰 그림 분리" if body.get("split", True) else ""))
+        r = offline.convert(data, path, split_images=bool(body.get("split", True)), fonts=bool(body.get("fonts", True)))
+        parent = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+        out = [{"path": path, "stage": self.put_stage(r.html)["id"], "size": len(r.html)}]
+        for rel, blob in r.files.items():
+            out.append({"path": parent + r.folder + "/" + rel, "stage": self.put_stage(blob)["id"], "size": len(blob)})
+        for line in r.report:
+            echo("  " + line)
+        return {"changed": True, "files": out, "folder": parent + r.folder, "report": r.report}
+
     def unchanged(self, path: str, data: bytes, v: dict[str, dict[str, Any]]) -> bool:
         return versions.unchanged(self.tree, path, data, v)
 
@@ -759,6 +780,8 @@ class Api:
             return 200, self.cached_state() if one("cached") else self.state()
         if method == "PUT" and path == "/api/stage":
             return 200, self.put_stage(raw)
+        if method == "POST" and path == "/api/offline":
+            return 200, self.offline_convert(body or {})
         if method == "POST" and path == "/api/send":
             return 200, self.send(body)
         if method == "GET" and path == "/api/result":

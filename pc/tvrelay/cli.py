@@ -139,6 +139,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--tv", default="")
     s = sub.add_parser("pair", help="TV 화면의 연결 코드로 TV 연결 (TV 에서는 설정할 것 없음)")
     s.add_argument("code")
+    s = sub.add_parser("offline", help="HTML 을 인터넷 없이 뜨게 바꾸기 (CDN 자료 내려받아 묶음 폴더로, 큰 그림 분리) — 올리지는 않음")
+    s.add_argument("html", help="바꿀 HTML 파일")
+    s.add_argument("--out", default="", help="결과를 둘 폴더 (비우면 '<HTML 이름>_offline')")
+    s.add_argument("--no-split", action="store_true", help="안에 박힌 큰 그림을 파일로 빼지 않음")
+    s.add_argument("--no-fonts", action="store_true", help="글꼴은 내려받지 않음")
+    s.add_argument("--shrink", action="store_true", help="빼낸 그림을 1920px 로 줄임 (Pillow 필요 · 화면이 조금 달라질 수 있음)")
     a = ap.parse_args(argv)
     if a.cmd != "update":
         _ensure_deps()
@@ -153,6 +159,21 @@ def main(argv: list[str] | None = None) -> int:
         print("설정 완료: %s (레포 %s · TV %s)" % (config.path(ROOT), cfg.repo, cfg.tv))
         print("이 tvrelay.json 파일을 TV 의 설정 > '중계 설정 파일 불러오기'로 한 번 불러오세요.")
         return 0
+    if a.cmd == "offline":
+        from . import offline
+        src = Path(a.html)
+        res = offline.convert(src.read_bytes(), src.name, split_images=not a.no_split, fonts=not a.no_fonts, shrink=a.shrink)
+        out = Path(a.out) if a.out else src.with_name(src.stem + "_offline")
+        out.mkdir(parents=True, exist_ok=True)
+        (out / src.name).write_bytes(res.html)
+        for rel, blob in res.files.items():
+            p = out / res.folder / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(blob)
+        print("결과: %s  (HTML %s → %s · 묶음 %d개)" % (out, offline._fmt(src.stat().st_size), offline._fmt(len(res.html)), len(res.files)))
+        for line in res.report:
+            print("  " + line)
+        return 1 if res.failed and not res.files else 0
     if a.cmd == "put":
         r = _relay(a.tv)
         from . import backup

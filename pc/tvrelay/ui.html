@@ -260,6 +260,8 @@
       <button id="mkdirBtn">새 폴더</button>
       <button class="secondary" id="uploadBtn">파일 올리기</button>
       <button class="secondary" id="uploadDirBtn">폴더 올리기</button>
+      <label class="hint" title="HTML 이 쓰는 CDN 스크립트 · CSS · 글꼴 · 그림을 PC 가 내려받아 '_이름_files' 폴더에 같이 올립니다 — TV 에 인터넷이 없어도 뜹니다. 같은 HTML 을 다시 올리면 그 폴더를 지우고 다시 만듭니다"><input type="checkbox" id="offlineOn" checked> HTML 인터넷 없이 동작하게</label>
+      <label class="hint" title="HTML 안에 글자(base64)로 박힌 큰 그림을 파일로 빼냅니다 (8MB 짜리 HTML 이 수백 KB 로) — TV 가 멈추는 주된 원인"><input type="checkbox" id="splitImg" checked> 큰 그림 분리</label>
       <button class="secondary" id="refreshBtn" title="TV 목록 새로고침">⟳</button>
       <input type="file" id="fileInput" multiple class="hidden">
       <input type="file" id="dirInput" webkitdirectory multiple class="hidden">
@@ -1704,12 +1706,26 @@
     if (staging.has(key)) return;               // 같은 파일을 올리는 중 (두 번 누름 · 두 번 끌어다 놓음)
     staging.add(key);
     try {
-      const ops = [];
-      for (const [path, f] of list) { const s = await api('PUT', '/api/stage', f, true); ops.push({ op: 'put', path, stage: s.id }); }
-      await send(ops, desc);
+      const ops = [], notes = [];
+      for (const [path, f] of list) {
+        const s = await api('PUT', '/api/stage', f, true);
+        if (/\.html?$/i.test(path) && $('#offlineOn').checked) {       // HTML: 바깥 자료를 받아 묶음 폴더로, 큰 그림 분리 (옛 묶음은 지우고 다시)
+          const r = await api('POST', '/api/offline', { stage: s.id, path, split: $('#splitImg').checked });
+          if (r.changed) {
+            if (r.folder && entry(r.folder)) ops.push({ op: 'delete', path: r.folder, recursive: true });
+            for (const x of r.files) ops.push({ op: 'put', path: x.path, stage: x.stage });
+            notes.push(...r.report);
+            continue;
+          }
+        }
+        ops.push({ op: 'put', path, stage: s.id });
+      }
+      await send(ops, desc + (notes.length ? ' (HTML 변환)' : ''));
+      if (notes.length) alert('HTML 변환:\n' + notes.join('\n'));
     } catch (e) { alert(e.message); }
     finally { staging.delete(key); }
   }
+  try { for (const id of ['offlineOn', 'splitImg']) { const v = localStorage.getItem(id); if (v !== null) $('#' + id).checked = v === '1'; $('#' + id).onchange = () => localStorage.setItem(id, $('#' + id).checked ? '1' : '0'); } } catch (_) {}
 
   // ── TV 설정 ──
   function fillSettings() {

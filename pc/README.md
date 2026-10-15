@@ -110,6 +110,21 @@ PC (tvrun.bat → 브라우저 화면)  ──암호화된 작업──▶  GitH
 - 명령줄로는 `python -m tvrelay sync <PC 폴더> --to <TV 폴더>` (`--force` = 같은 파일도 다시 보내기)
 - 명령줄: `python -m tvrelay status` (TV 상태), `python -m tvrelay put <PC 파일> <TV 경로>`, `python -m tvrelay pair <연결 코드>`
 
+## HTML 을 인터넷 없이 뜨게 변환해서 올리기
+
+다른 분이 만든 대시보드 HTML 은 CDN 의 React · Tailwind · 글꼴을 쓰고 큰 그림을 base64 로 안에 박아 두는 일이 많아,
+TV 에서 인터넷이 느리면 안 뜨거나 몇 초씩 멈춥니다. 파일 탐색기의 **[HTML 인터넷 없이 동작하게]**(기본 켜짐)가 켜져 있으면
+`.html` 을 올릴 때 PC 가:
+- `<script src>` · `<link href>` · `<img src>` 의 바깥 자료와, CSS 안의 `@import` · `url()`(글꼴 · 그림)을 내려받아
+  HTML 옆 **`_<이름>_files/`** 폴더(예: `_index_files/`)에 넣고 HTML 이 그 폴더를 가리키게 바꿉니다 (`_` 로 시작해 메뉴에 안 보임)
+- `@font-face` 는 woff2 하나만 남겨 글꼴 용량을 줄입니다
+- **[큰 그림 분리]**(기본 켜짐): 안에 박힌 48KB 넘는 base64 그림을 파일로 빼냅니다 (JSON · JS 문자열 안에 있어도). 그림은 그대로이고 경로만 바뀝니다
+- 같은 HTML 을 다시 올리면 **옛 묶음 폴더를 지우고 다시** 만듭니다
+- **보이는 결과는 원본과 같습니다**: 같은 라이브러리를 같은 판으로 TV 옆에 둘 뿐 코드를 고치지 않습니다 (변환 → 되돌리기 = 원본 과 같은지 시험으로 확인).
+  단, Tailwind CDN · Babel 처럼 TV 에서 매번 코드를 만드는 라이브러리는 인터넷 없이 뜨기는 해도 여전히 느립니다 — 변환 결과 창에 알려 줍니다
+- 바깥 자료나 큰 그림이 없는 HTML 은 변환하지 않고 그대로 올립니다. 못 받은 자료는 원래 주소를 그대로 두고 알려 줍니다
+- 명령으로도: `python -m tvrelay offline index.html [--out 폴더] [--no-split] [--no-fonts] [--shrink]` (올리지 않고 결과만 만듦)
+
 ## 직원용 업로드 도구 (Python 없이, 폴더 전용)
 
 관리자가 폴더마다 **업로드 전용 HTML 한 파일**을 만들어 직원에게 나눠 줍니다. 직원은 Python 없이 Edge·Chrome 에서 열어 씁니다.
