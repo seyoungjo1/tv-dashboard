@@ -127,27 +127,27 @@
   #ssVids .v input[type=color] { width:28px; height:24px; padding:0; border:1px solid var(--line); border-radius:6px; }
   .tvi[draggable=true] { cursor:grab; } .tvi.dragover { outline:6px dashed #0bb5e8; outline-offset:-6px; } .tvi.dragging { opacity:.35; }
   .tvinner { position:absolute; left:0; top:0; width:1920px; height:1080px; transform-origin:0 0; display:flex; flex-direction:column; background:#eef1f4; }
-  /* TV 앱과 같은 배치 (TV 1.5배 기준): 상단바 78dp · 왼쪽 로고 · 가운데 제목 · 오른쪽 날짜 │ 시각 */
-  .tvh { height:117px; flex:none; background:#1e2125; display:flex; align-items:center; padding:0 42px 0 33px; color:#fff; position:relative; }
-  .tvh img { height:78px; max-width:300px; object-fit:contain; }
-  .tvh .t { position:absolute; left:0; right:0; text-align:center; font-size:48px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 420px; pointer-events:none; }
-  .tvh .c { margin-left:auto; display:flex; align-items:center; gap:27px; }
-  .tvh .c span { font-size:30px; color:#aeb8c2; font-weight:700; } .tvh .c i { width:2px; height:42px; background:#4a525b; } .tvh .c b { font-size:42px; font-weight:800; }
+  /* TV 앱과 같은 배치 (1920×1080, 1dp = 1px 기준): 상단바 78dp · 왼쪽 로고 · 가운데 제목 · 오른쪽 날짜 │ 시각 */
+  .tvh { height:78px; flex:none; background:#1e2125; display:flex; align-items:center; padding:0 28px 0 22px; color:#fff; position:relative; }
+  .tvh img { height:52px; max-width:200px; object-fit:contain; }
+  .tvh .t { position:absolute; left:50%; transform:translateX(-50%); max-width:760px; text-align:center; font-size:32px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0; pointer-events:none; }
+  .tvh .c { margin-left:auto; display:flex; align-items:center; gap:18px; }
+  .tvh .c span { font-size:20px; color:#aeb8c2; font-weight:700; } .tvh .c i { width:1px; height:28px; background:#4a525b; } .tvh .c b { font-size:28px; font-weight:800; }
   .tvm { flex:1; display:flex; min-height:0; position:relative; }
-  .tvs { width:186px; flex:none; background:#121416; display:flex; flex-direction:column; overflow:hidden; }
+  .tvs { width:124px; flex:none; background:#121416; display:flex; flex-direction:column; overflow:hidden; }
   .tvs.hide { display:none; }
   /* 사이드바 손잡이: 대시보드 위에 반투명으로 겹침 (TV 16dp × 96dp) */
-  .tvhd { position:absolute; left:186px; top:0; bottom:0; width:24px; z-index:3; pointer-events:none; }
+  .tvhd { position:absolute; left:124px; top:0; bottom:0; width:16px; z-index:3; pointer-events:none; }
   .tvs.hide ~ .tvhd { left:0; }
-  .tvhd div { position:absolute; left:0; right:0; bottom:42px; height:144px; background:rgba(18,20,22,.45); border-radius:0 15px 15px 0; color:rgba(255,255,255,.8); font-size:21px; display:flex; align-items:center; justify-content:center; cursor:pointer; pointer-events:auto; }
-  .tvi { display:flex; flex-direction:column; align-items:center; padding:18px 9px; color:#d5dae0; font-size:22px; cursor:pointer; }
-  .tvi .b { width:96px; height:96px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:44px; font-weight:800; overflow:hidden; }
-  .tvi .b img { width:100%; height:100%; object-fit:contain; padding:6px; box-sizing:border-box; }
-  .tvi.sel { background:#26292d; box-shadow:inset 6px 0 #fff; }
-  .tvi span { margin-top:9px; text-align:center; word-break:break-all; }
-  .tvset { margin-top:auto; border-top:1px solid #3c4147; padding:18px 0; text-align:center; color:#d5dae0; font-size:22px; }
-  .tvidle { margin-top:auto; border-top:1px solid #3c4147; padding:16px 0 6px; text-align:center; color:#d5dae0; font-size:22px; cursor:pointer; }
-  .tvidle + .tvset { margin-top:0; border-top:0; padding-top:10px; }
+  .tvhd div { position:absolute; left:0; right:0; bottom:28px; height:96px; background:rgba(18,20,22,.45); border-radius:0 10px 10px 0; color:rgba(255,255,255,.8); font-size:14px; display:flex; align-items:center; justify-content:center; cursor:pointer; pointer-events:auto; }
+  .tvi { display:flex; flex-direction:column; align-items:center; padding:12px 6px; color:#d5dae0; font-size:15px; cursor:pointer; }
+  .tvi .b { width:64px; height:64px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:30px; font-weight:800; overflow:hidden; }
+  .tvi .b img { width:100%; height:100%; object-fit:contain; padding:4px; box-sizing:border-box; }
+  .tvi.sel { background:#26292d; box-shadow:inset 4px 0 #fff; }
+  .tvi span { margin-top:6px; text-align:center; word-break:break-all; }
+  .tvset { margin-top:auto; border-top:1px solid #3c4147; padding:12px 0; text-align:center; color:#d5dae0; font-size:15px; }
+  .tvidle { margin-top:auto; border-top:1px solid #3c4147; padding:12px 0; text-align:center; color:#d5dae0; font-size:15px; cursor:pointer; }
+  .tvidle + .tvset { margin-top:0; border-top:0; padding-top:12px; }
   .tvc { flex:1; position:relative; min-width:0; }
   .tvc iframe { position:absolute; inset:0; width:100%; height:100%; border:0; background:#eef1f4; }
   .tvc .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:34px; color:#6b7785; text-align:center; padding:60px; }
