@@ -62,6 +62,24 @@
   .xv tr.gap td { color:var(--dim); text-align:center; background:#fafbfc; font-size:12px; }
   .lg { display:inline-block; padding:1px 7px; border-radius:6px; font-style:normal; font-size:12px; margin-left:4px; }
   .lg.vn { background:#e5f6ec; color:#14663d; } .lg.vc { background:#fff4dc; color:#7a5300; } .lg.vr { background:#fde8e8; color:#8c1d1d; }
+  /* 머리글 순서 정하기 · 양식 예시 3줄 */
+  .step { margin-top:10px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .step .t { font-size:13px; font-weight:800; margin-bottom:6px; } .step .t small { font-weight:600; color:var(--dim); margin-left:6px; }
+  .ocs { display:flex; flex-wrap:wrap; gap:6px; }
+  .oc { display:inline-flex; align-items:center; gap:3px; border:1px solid var(--line); border-radius:8px; padding:3px 6px; font-size:12.5px; background:#f5f7fa; }
+  .oc b { color:var(--accent); } .oc i { font-style:normal; color:var(--dim); font-size:11px; margin-left:2px; }
+  .oc button { padding:1px 5px; font-size:11px; background:#fff; color:var(--text); border:1px solid var(--line); border-radius:5px; }
+  .oc button:disabled { opacity:.3; } .oc.off { opacity:.55; background:#fff; border-style:dashed; }
+  .step .row { margin-top:8px; justify-content:flex-start; } .step button { padding:6px 12px; font-size:13px; }
+  .smp { overflow:auto; margin-top:8px; border:1px solid var(--line); border-radius:8px; }
+  .smp table { margin:0; border-collapse:collapse; width:100%; font-size:12.5px; } .smp th { background:#f0f3f7; padding:5px 8px; text-align:left; white-space:nowrap; }
+  .smp td { padding:4px 8px; border-top:1px solid #f0f2f5; white-space:nowrap; }
+  select.in { padding:7px 10px; }
+  /* 폴더 내용 (탐색기) */
+  #exList td.a { text-align:right; white-space:nowrap; } #exList td.a button { padding:4px 9px; font-size:12px; margin-left:4px; }
+  #exList tr.json td:first-child { font-weight:800; } #exList .sub { color:var(--dim); font-size:12px; }
+  #exView { margin-top:10px; border:1px solid var(--line); border-radius:8px; max-height:50vh; overflow:auto; }
+  .usage { height:6px; background:#e6ebf1; border-radius:3px; overflow:hidden; width:140px; display:inline-block; vertical-align:middle; } .usage div { height:100%; background:var(--accent); }
 </style>
 </head>
 <body>
@@ -73,6 +91,18 @@
   <div class="card row" style="margin-top:0">
     <span>업로드 비밀번호</span>
     <input type="password" class="pw" id="pw" placeholder="관리자에게 받은 비밀번호" autocomplete="current-password" style="flex:1">
+  </div>
+  <div class="card" id="exCard">
+    <h2>폴더 내용 보기 · 골라서 고치기</h2>
+    <div class="hint">TV 의 '<span id="exFolder"></span>' 폴더에 지금 무엇이 있는지 확인하고, 고칠 파일을 고릅니다. JSON 은 [엑셀로 수정]·[내용 보기], 다른 파일은 [새 파일로 바꾸기].</div>
+    <div class="row" style="justify-content:flex-start">
+      <button class="secondary" id="exLoad">TV 에서 폴더 내용 보기</button>
+      <input class="in" id="exQ" placeholder="이름으로 찾기" style="flex:1;min-width:140px">
+      <span class="hint" id="exMeta"></span>
+    </div>
+    <table id="exList"></table>
+    <div id="exView" class="hidden"></div>
+    <div id="exMsg"></div>
   </div>
   <div class="card">
     <h2>파일 올리기</h2>
@@ -92,8 +122,8 @@
   </div>
   <div class="card" id="xlCard">
     <h2>엑셀 붙여넣기로 JSON 올리기</h2>
-    <div class="hint">JSON 파일을 고르고 [양식 불러오기] → 엑셀에서 표를 복사해 붙여 넣으면, 지금 파일의 양식에 맞춰 바꿔서 올립니다.
-      제목 줄 · 합계 줄 · 빈 열이 섞여 있거나 열 이름 · 칸 순서가 달라도, 날짜가 가로로 펼쳐진 표여도 알아서 맞춥니다. 오른쪽 표에서 올린 뒤의 내용을 확인하세요.</div>
+    <div class="hint">JSON 파일을 고르고 [양식 불러오기] → <b>열 순서를 정해 [머리글 복사]</b> → 엑셀에 붙여 넣고 그 순서대로 값을 채운 뒤 → 전체를 복사해 <b>아래 칸에 붙여 넣기</b>.
+      오른쪽 표에서 올린 뒤의 내용을 확인하고 [TV 로 올리기]. (머리글 줄을 같이 붙여 넣으면 순서가 달라도 이름으로 맞춥니다)</div>
     <div class="row">
       <input class="in" id="xlName" list="xlFiles" placeholder="파일 이름 (예: sd.json)" style="flex:1;min-width:200px">
       <datalist id="xlFiles"></datalist>
@@ -103,7 +133,8 @@
     <div class="xlGrid">
       <div class="xlL">
         <div class="form hidden" id="xlForm"></div>
-        <textarea class="in" id="xlText" placeholder="엑셀에서 표를 선택해 복사(Ctrl+C)한 뒤 여기를 누르고 붙여 넣기(Ctrl+V)" spellcheck="false"></textarea>
+        <div id="xlStep"></div>
+        <textarea class="in" id="xlText" placeholder="③ 엑셀에서 위 순서대로 채운 줄들을 복사(Ctrl+C)해서 여기에 붙여 넣기(Ctrl+V) — 머리글 줄은 있어도 없어도 됩니다" spellcheck="false"></textarea>
         <div class="row" style="justify-content:flex-start" id="xlModes"></div>
         <div id="xlPrev"></div>
         <div class="row"><span class="hint" id="xlSum"></span><button id="xlSend" disabled>TV 로 올리기</button></div>
@@ -170,7 +201,12 @@ const CFG = /*__CONFIG__*/null;
   $('#pw').onkeydown = (e) => { $('#pw').classList.remove('bad'); if (e.key === 'Enter' && !$('#send').disabled) $('#send').click(); };
   const drop = $('#drop');
   drop.onclick = () => { $('#pick').value = ''; $('#pick').click(); };
-  $('#pick').onchange = (e) => add([...e.target.files].map(f => ({ rel: f.name, file: f })));
+  let replaceRel = '';                                       // 탐색기에서 [새 파일로 바꾸기]로 고른 TV 파일 경로 (그 이름으로 올린다)
+  $('#pick').onchange = (e) => {
+    const list = [...e.target.files];
+    if (replaceRel && list.length) { add([{ rel: replaceRel, file: list[0] }]); replaceRel = ''; $('#pick').multiple = true; msg(`'${list[0].name}' 을(를) TV 의 '${files[files.length - 1].path}' 자리에 올립니다 — [TV 로 올리기]를 누르세요.`, 'wait'); return; }
+    add(list.map(f => ({ rel: f.name, file: f })));
+  };
   drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
   drop.ondragleave = () => drop.classList.remove('over');
   drop.ondrop = async (e) => {
@@ -252,11 +288,11 @@ const CFG = /*__CONFIG__*/null;
   //  · 엑셀 붙여넣기는 이어서 붙일 때 TV 내용 대신 방금 보낸 내용을 기준으로 계산한다
   const PEND_MAX = 3 * 24 * 3600 * 1000;
   const pendGet = () => { const p = ls.get('pend') || {}; for (const k of Object.keys(p)) if (Date.now() - (p[k].at || 0) > PEND_MAX) delete p[k]; return p; };
-  async function job(items, prog, say, onQueued) {
+  async function job(items, prog, say, onQueued, force) {
     const pend = pendGet(), dups = [];
     for (const it of items) if (it.data) it.sha = await sha256(it.data);
     items = items.filter(it => { if (it.op === 'put' && pend[it.path] && pend[it.path].h === it.sha) { dups.push(it.path); return false; } return true; });
-    if (!items.length) return { ok: true, dupOnly: true, dups, results: [] };
+    if (!items.length && !force) return { ok: true, dupOnly: true, dups, results: [] };
     const id = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('')}`;
     const kind = `up/${CFG.gid}`;
     const tree = [], ops = [];
@@ -283,7 +319,7 @@ const CFG = /*__CONFIG__*/null;
     ls.set('pend', pd);
     if (onQueued) await onQueued();
     prog(0.92);
-    say(items.some(x => x.op === 'put') ? '보냈습니다. TV 가 받아 반영하기를 기다리는 중… (보통 10~20초)' : 'TV 에 지금 파일의 양식을 묻는 중… (보통 10~20초)', 'wait');
+    say(items.some(x => x.op === 'put') ? '보냈습니다. TV 가 받아 반영하기를 기다리는 중… (보통 10~20초)' : items.length ? 'TV 에 지금 파일의 양식을 묻는 중… (보통 10~20초)' : 'TV 에 폴더 내용을 묻는 중… (보통 10~20초)', 'wait');
     // 결과 기다리기 (relay/<tv>/res/<id>, 이 도구 키로 암호화)
     const resBranch = `relay/${CFG.tv}/res/${id}`;
     for (let i = 0; i < 80; i++) {
@@ -299,7 +335,7 @@ const CFG = /*__CONFIG__*/null;
       const pd2 = pendGet();
       for (const k of Object.keys(pd2)) if (pd2[k].id === id) delete pd2[k];
       ls.set('pend', pd2);
-      if (res.files) rememberFiles(res.files);
+      if (res.files) rememberFiles(res.files, { used: res.used, max: res.maxBytes });
       res.dups = dups;
       return res;
     }
@@ -361,9 +397,12 @@ const CFG = /*__CONFIG__*/null;
     names() { const out = []; try { for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (key.startsWith(LSP + 'f.')) out.push(key.slice(LSP.length + 2)); } } catch (_) {} return out; },
   };
   let listing = ls.get('list');      // [{n, s, h}] 마지막으로 TV 가 알려 준 폴더의 JSON 목록
-  function rememberFiles(list) {
+  let folder = ls.get('folder');     // {files:[{n, s, t, h}], used, max, at} 폴더 전체 (탐색기)
+  function rememberFiles(list, meta) {
     listing = list.filter(x => /\.json$/i.test(x.p)).map(x => ({ n: x.p.slice(CFG.folder.length + 1), s: x.s, h: x.h || '' }));
     ls.set('list', listing);
+    folder = { files: list.map(x => ({ n: x.p.slice(CFG.folder.length + 1), s: x.s, t: x.t || 0, h: x.h || '' })), used: meta && meta.used, max: meta && meta.max, at: Date.now() };
+    ls.set('folder', folder); renderExplorer();
     const pd = pendGet();
     for (const k of Object.keys(pd)) { const e = listing.find(x => CFG.folder + '/' + x.n === k); if (e && e.h === pd[k].h) delete pd[k]; }   // TV 가 반영함
     ls.set('pend', pd);
@@ -391,12 +430,12 @@ const CFG = /*__CONFIG__*/null;
     return !!e && !!e.h && e.h === c.h ? true : (e && !e.h ? null : false);
   }
   const when = (t) => new Date(t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  let xlForm = null, xlFor = '', xlOut = null, xlSrc = '';
+  let xlForm = null, xlFor = '', xlOut = null, xlSrc = '', xlText = '', xlOrder = [];
   const xlPath = () => { let n = $('#xlName').value.trim().replace(/\\/g, '/').replace(/^\/+/, ''); if (n && !/\.json$/i.test(n)) n += '.json'; return n; };
-  function useForm(name, text, src) {
-    const f = X.form(text);
+  function useForm(name, text, src, path) {
+    const f = X.form(text, { path });
     if (f.error) throw new Error(`'${name}' — ${f.error}`);
-    xlForm = f; xlFor = name; xlSrc = src;
+    xlForm = f; xlFor = name; xlSrc = src; xlText = text; xlOrder = f.cols.map((_, i) => i);
     $('#xlReload').classList.toggle('hidden', !text && src !== 'tv');
     renderXl();
   }
@@ -414,8 +453,8 @@ const CFG = /*__CONFIG__*/null;
     if (!quiet) await ensureSecret(xmsg);
     const knew = !!listing;
     const want = name ? [name, ...staleNames(name)] : staleNames('');
-    if (!want.length) return null;
-    const res = await job(want.map(n => ({ op: 'get', path: CFG.folder + '/' + n })), () => {}, quiet ? () => {} : xmsg);
+    if (!want.length && name) return null;
+    const res = await job(want.map(n => ({ op: 'get', path: CFG.folder + '/' + n })), () => {}, quiet ? () => {} : xmsg, null, !name);   // 이름 없이 부르면 폴더 목록만이라도 받는다
     let mine = null;
     for (const r of res.results || []) {
       if (r.op !== 'get') continue;
@@ -478,13 +517,14 @@ const CFG = /*__CONFIG__*/null;
       : `<div class="seg">${[['replace', '덮어쓰기'], ['add', '추가하기'], ['delete', '삭제']].map(([k, t]) =>
           `<button type="button" data-m="${k}" class="${xlMode === k ? 'on' : ''} ${k === 'delete' ? 'del' : ''}">${t}</button>`).join('')}</div>
          <span class="modehint">${esc(HINT[xlMode])}</span>`;
+    xlStepRender();
     const mode = xlMode;
     const text = $('#xlText').value;
     xlOut = null; $('#xlSend').disabled = true; $('#xlSum').textContent = ''; $('#xlPrev').innerHTML = '';
     if (!f) { $('#xlNowT').textContent = '파일 내용'; $('#xlNowS').textContent = ''; $('#xlNow').innerHTML = '<div class="hint" style="padding:12px">파일을 고르고 [양식 불러오기]를 누르면 지금 내용이 여기에 표로 보입니다</div>'; return; }
     if (!text.trim()) { xlNow(null); return; }
     const rows = X.parse(text);
-    const o = X.build(f, rows, { mode });
+    const o = X.build(f, rows, { mode, order: xlOrder });
     if (o.error) { $('#xlSum').innerHTML = `<span class="bad">${esc(o.error)}</span>`; xlNow(null); return; }
     xlOut = o;
     xlNow(o);
@@ -493,13 +533,88 @@ const CFG = /*__CONFIG__*/null;
     $('#xlPrev').innerHTML = `<div class="pv"><table><tr>${head}</tr>${show}</table></div>` +
       (o.table.length > 50 ? `<div class="hint">… ${o.table.length - 50}줄 더</div>` : '') +
       (o.warnings.length ? `<div class="msg wait">확인하세요:\n${esc(o.warnings.join('\n'))}</div>` : '');
-    $('#xlSum').textContent = `붙여 넣은 ${o.table.length}줄${o.headerUsed ? ' (첫 줄은 머리글로 보고 뺐습니다)' : ' (머리글 없음 — 칸 순서대로)'}` +
+    $('#xlSum').textContent = `붙여 넣은 ${o.table.length}줄${o.headerUsed ? ' (첫 줄은 머리글로 보고 뺐습니다)' : o.orderUsed ? ' (정한 열 순서대로)' : ' (머리글 없음 — 칸 순서대로)'}` +
       (o.mode === 'delete' ? ` · 지움 ${o.removed}${o.missing ? ` · 없는 것 ${o.missing}` : ''}` : o.kind === 'map' || o.changed != null ? ` · 새로 ${o.added} · 바뀜 ${o.changed}` : ` · 더함 ${o.added}`) +
       ` → 올린 뒤 전체 ${o.count}${o.kind === 'map' ? '개' : '줄'} · ${size(new TextEncoder().encode(o.json).length)}`;
     $('#xlSend').disabled = !o.table.length || (o.mode === 'delete' && !o.removed);
     $('#xlSend').textContent = o.mode === 'delete' ? `${o.removed}개 지우고 TV 로 올리기` : 'TV 로 올리기';
     $('#xlSend').style.background = o.mode === 'delete' ? 'var(--danger)' : '';
   }
+  /** ① 어느 표(JSON 안에 표가 여럿이면) · ② 머리글 순서 정하기 + 예시 3줄 + [머리글 복사] */
+  function xlStepRender() {
+    const f = xlForm, st = $('#xlStep');
+    if (!f) { st.innerHTML = ''; return; }
+    if (f.kind === 'new' || !f.cols.length) { st.innerHTML = f.kind === 'new' ? '<div class="step"><div class="t">양식이 없는 새 파일</div><span class="hint">엑셀 첫 줄에 열 이름(머리글)을 적고 그 아래 줄들을 함께 복사해 붙여 넣으면, 그 이름으로 표를 만듭니다.</span></div>' : ''; return; }
+    const tables = f.tables && f.tables.length > 1 ? `<div class="step"><div class="t">① 어느 표에 넣을까요 <small>이 JSON 안에 표가 ${f.tables.length}개</small></div>
+      <select class="in" id="xlTable">${f.tables.map(t => `<option value="${esc(t.key)}"${f.path && f.path.join('.') === t.key ? ' selected' : ''}>${esc(t.label)} (${t.count}줄 · ${esc(t.key)})</option>`).join('')}</select></div>` : '';
+    st.innerHTML = tables + `<div class="step"><div class="t">${tables ? '②' : '①'} 엑셀에 적을 열 순서 <small>이 순서대로 엑셀 칸을 채워 복사하세요 · ◀▶ 로 바꾸고 ✕ 로 빼기</small></div>
+      <div class="ocs">${X.orderHtml(f, xlOrder)}</div>
+      <div class="row"><button class="secondary" data-o="copy" title="이 순서의 머리글 한 줄을 복사 — 엑셀 1행에 붙여 넣고 아래에 값을 채우세요">머리글 복사</button><button class="secondary" data-o="copy3" title="머리글 + 지금 파일의 앞 3줄을 복사 — 엑셀에 붙여 넣어 모양을 보고 그대로 채우세요">예시 3줄 복사</button><button class="secondary" data-o="reset">원래 순서</button><span class="hint" id="xlCopied"></span></div>
+      <div class="t" style="margin-top:10px">양식 예시 <small>지금 파일의 앞 3줄 — 이렇게 적으면 됩니다</small></div><div class="smp">${X.sampleHtml(f, xlOrder)}</div></div>`;
+  }
+  $('#xlStep').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-o]'); if (!b || !xlForm) return;
+    const i = +b.dataset.i, o = xlOrder;
+    if (b.dataset.o === 'l' && i > 0) [o[i - 1], o[i]] = [o[i], o[i - 1]];
+    else if (b.dataset.o === 'r' && i < o.length - 1) [o[i + 1], o[i]] = [o[i], o[i + 1]];
+    else if (b.dataset.o === 'x') o.splice(i, 1);
+    else if (b.dataset.o === 'a') o.push(+b.dataset.k);
+    else if (b.dataset.o === 'reset') xlOrder = xlForm.cols.map((_, k) => k);
+    else if (b.dataset.o === 'copy' || b.dataset.o === 'copy3') return copyText(X.headerLine(xlForm, xlOrder, b.dataset.o === 'copy3'));
+    renderXl();
+  });
+  $('#xlStep').addEventListener('change', (e) => {
+    if (e.target.id !== 'xlTable') return;
+    try { useForm(xlFor, xlText, xlSrc, e.target.value); } catch (err) { xmsg(err.message, 'err'); }
+  });
+  async function copyText(t) {
+    const ok = await (navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(t).then(() => true, () => false) : Promise.resolve(false));
+    if (!ok) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (_) {} ta.remove(); }
+    const h = $('#xlCopied'); if (h) { h.textContent = '복사했습니다 — 엑셀 A1 칸을 누르고 붙여 넣으세요 (Ctrl+V)'; setTimeout(() => { if (h.textContent.startsWith('복사')) h.textContent = ''; }, 4000); }
+  }
+  // ── 폴더 내용 (탐색기): 마지막으로 TV 가 알려 준 목록을 바로 보여 주고, [TV 에서 폴더 내용 보기]로 새로 받는다 ──
+  const exmsg = (t, k) => $('#exMsg').innerHTML = t ? `<div class="msg ${k}">${esc(t)}</div>` : '';
+  $('#exFolder').textContent = CFG.folder;
+  let exOpen = '';                                           // 내용을 펼쳐 보고 있는 JSON 이름
+  function renderExplorer() {
+    const q = $('#exQ').value.trim().toLowerCase();
+    const list = (folder && folder.files || []).filter(f => !q || f.n.toLowerCase().includes(q)).sort((a, b) => a.n.localeCompare(b, undefined, { numeric: true }));
+    $('#exMeta').innerHTML = folder ? `${(folder.files || []).length}개 · 마지막 확인 ${when(folder.at)}` +
+      (folder.max ? ` · 사용량 ${size(folder.used || 0)} / ${size(folder.max)} <span class="usage"><div style="width:${Math.min(100, (folder.used || 0) / folder.max * 100).toFixed(0)}%"></div></span>` : '') : '';
+    $('#exList').innerHTML = !folder ? '' : !list.length ? `<tr><td class="hint">${q ? '찾는 이름의 파일이 없습니다' : '폴더가 비어 있습니다'}</td></tr>` : list.map(f => {
+      const json = /\.json$/i.test(f.n), cached = json && !!ls.get('f.' + f.n), can = CFG.types.includes(ext(f.n));
+      return `<tr class="${json ? 'json' : ''}"><td>${esc(f.n)}<div class="sub">${size(f.s)}${f.t ? ' · ' + when(f.t) : ''}${cached ? ' · 받아 둠' : ''}</div></td>
+        <td class="a">${json ? `<button class="secondary" data-ex="view" data-n="${esc(f.n)}">${exOpen === f.n ? '닫기' : '내용 보기'}</button><button data-ex="xl" data-n="${esc(f.n)}">엑셀로 수정</button>` : ''}
+        ${can ? `<button class="secondary" data-ex="rep" data-n="${esc(f.n)}">새 파일로 바꾸기</button>` : '<span class="hint">이 도구로는 못 올리는 형식</span>'}</td></tr>`;
+    }).join('');
+  }
+  $('#exQ').oninput = renderExplorer;
+  $('#exLoad').onclick = async () => {
+    $('#exLoad').disabled = true;
+    try { await ensureSecret(exmsg); await fetchFromTv('', false); exmsg(''); }
+    catch (e) { exmsg(/비밀번호|TV 응답/.test(e.message) ? e.message : '폴더 내용을 받지 못했습니다: ' + e.message, e.queued ? 'wait' : 'err'); }
+    finally { $('#exLoad').disabled = false; }
+  };
+  $('#exList').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-ex]'); if (!b) return;
+    const n = b.dataset.n;
+    if (b.dataset.ex === 'rep') { replaceRel = n; $('#pick').multiple = false; $('#pick').value = ''; $('#pick').click(); return; }
+    if (b.dataset.ex === 'xl') { $('#xlName').value = n; await loadForm(false); $('#xlCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    if (b.dataset.ex === 'view') {                            // 내용 보기: 받아 둔 것, 없으면 TV 에서 받아서
+      if (exOpen === n) { exOpen = ''; $('#exView').classList.add('hidden'); renderExplorer(); return; }
+      let c = ls.get('f.' + n);
+      if (!c || cacheFresh(n) === false) { try { await ensureSecret(exmsg); await fetchFromTv(n); c = ls.get('f.' + n); exmsg(''); } catch (err) { return exmsg(err.message, 'err'); } }
+      if (!c) return exmsg(`'${n}' 을(를) 읽지 못했습니다.`, 'err');
+      const f = X.form(c.text);
+      exOpen = n; renderExplorer();
+      const v = $('#exView'); v.classList.remove('hidden');
+      v.innerHTML = f.error ? `<div class="hint" style="padding:12px">${esc(f.error)}</div>` :
+        (f.tables && f.tables.length > 1 ? `<div class="hint" style="padding:8px 12px">이 JSON 에는 표가 ${f.tables.length}개 있습니다: ${f.tables.map(t => esc(t.label) + ' (' + t.count + '줄)').join(' · ')} — 가장 큰 표를 보여 줍니다</div>` : '') +
+        `<div class="xv">${X.viewHtml(X.view(f), { max: 300 })}</div>`;
+      v.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  });
+  renderExplorer();
   /** 오른쪽 표: 지금 파일 내용(o 없음) 또는 올린 뒤 내용(기존 + 새로 · 바뀜 · 지움) — 붙여 넣을 때마다 다시 그리고 바뀐 줄로 스크롤 */
   function xlNow(o) {
     const f = xlForm, unit = f.kind === 'map' ? '개' : '줄';
@@ -529,7 +644,7 @@ const CFG = /*__CONFIG__*/null;
       const sent = xlOut.json, name = xlFor;
       const queued = async () => {               // GitHub 에 맡겨진 순간부터 이 내용이 기준 (TV 가 꺼져 있어도 이어서 붙일 수 있게)
         ls.set('f.' + name, { text: sent, h: await shaText(sent), at: Date.now() });
-        xlForm = X.form(sent); xlSrc = 'cache'; $('#xlText').value = ''; renderXl();
+        xlForm = X.form(sent, { path: xlForm.path }); xlSrc = 'cache'; xlText = sent; $('#xlText').value = ''; renderXl();
       };
       const res = await job([{ op: 'put', path: CFG.folder + '/' + name, data: enc.encode(sent) }], () => {}, xmsg, queued);
       if (res.dupOnly) { await queued(); return xmsg('같은 내용을 이미 보냈습니다 — TV 가 받으면 반영됩니다. 다시 보내지 않았습니다.', 'wait'); }

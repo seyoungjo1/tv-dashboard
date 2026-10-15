@@ -200,6 +200,19 @@
   .xv tr.gap td { color:var(--dim); text-align:center; background:#fafbfc; font-size:12px; }
   .lg { display:inline-block; padding:1px 7px; border-radius:6px; font-style:normal; font-size:12px; margin-left:4px; }
   .lg.vn { background:#e5f6ec; color:#14663d; } .lg.vc { background:#fff4dc; color:#7a5300; } .lg.vr { background:#fde8e8; color:#8c1d1d; }
+  /* 머리글 순서 정하기 (엑셀에 적을 순서) · 양식 예시 3줄 */
+  .step { margin-top:10px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .step .t { font-size:13px; font-weight:800; margin-bottom:6px; } .step .t small { font-weight:600; color:var(--dim); margin-left:6px; }
+  .ocs { display:flex; flex-wrap:wrap; gap:6px; }
+  .oc { display:inline-flex; align-items:center; gap:3px; border:1px solid var(--line); border-radius:8px; padding:3px 6px; font-size:12.5px; background:#f5f7fa; }
+  .oc b { color:var(--accent); } .oc i { font-style:normal; color:var(--dim); font-size:11px; margin-left:2px; }
+  .oc button { padding:1px 5px; font-size:11px; background:#fff; color:var(--text); border:1px solid var(--line); border-radius:5px; }
+  .oc button:disabled { opacity:.3; } .oc.off { opacity:.55; background:#fff; border-style:dashed; }
+  .smp { overflow:auto; margin-top:8px; border:1px solid var(--line); border-radius:8px; }
+  .smp table { border-collapse:collapse; width:100%; font-size:12.5px; } .smp th { background:#f0f3f7; padding:5px 8px; text-align:left; white-space:nowrap; }
+  .smp td { padding:4px 8px; border-top:1px solid #f0f2f5; white-space:nowrap; }
+  .xl select, .xlGrid select { font:inherit; font-size:13px; padding:5px 8px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); }
+
 </style>
 </head>
 <body>
@@ -1383,11 +1396,12 @@
     try { text = await (await fetch(prevUrl(p) + '?t=' + Date.now())).text(); } catch (_) {}
     const form = XLPaste.form(text);
     if (form.error) { pb.innerHTML = `<div class="loading">${esc(form.error)}</div>`; return; }
-    xl = { p, form, mode: form.kind === 'map' ? 'add' : 'replace', out: null };
+    xl = { p, text, form, mode: form.kind === 'map' ? 'add' : 'replace', out: null, order: form.cols.map((_, i) => i) };
     pb.innerHTML = `<div class="xl">
       <div class="xlL">
         <div class="form" id="xlForm"></div>
-        <textarea id="xlText" placeholder="엑셀에서 표를 선택해 복사(Ctrl+C)한 뒤 여기를 누르고 붙여 넣기(Ctrl+V)&#10;제목 줄 · 합계 줄 · 빈 열이 섞여 있거나, 열 이름 · 칸 순서가 달라도, 날짜가 가로로 펼쳐진 표여도 알아서 맞춥니다" spellcheck="false"></textarea>
+        <div id="xlStep"></div>
+        <textarea id="xlText" placeholder="③ 엑셀에서 위 순서대로 적은 줄들을 복사(Ctrl+C)해서 여기에 붙여 넣기(Ctrl+V) — 머리글 줄은 있어도 없어도 됩니다&#10;(제목 줄 · 합계 줄 · 빈 열이 섞여 있어도, 머리글이 있으면 순서가 달라도 알아서 맞춥니다)" spellcheck="false"></textarea>
         <div class="row" id="xlModes"></div>
         <div id="xlPrev"></div>
         <div class="row"><span class="hint" id="xlSum" style="flex:1"></span><button class="secondary" id="xlCancel">닫기</button><button id="xlSend" disabled>TV 에 올리기</button></div>
@@ -1399,6 +1413,23 @@
     </div>`;
     $('#xlText').oninput = xlRender;
     $('#xlModes').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { xl.mode = b.dataset.m; xlRender(); } };
+    $('#xlStep').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-o]'); if (!b) return;
+      const i = +b.dataset.i, o = xl.order;
+      if (b.dataset.o === 'l' && i > 0) [o[i - 1], o[i]] = [o[i], o[i - 1]];
+      else if (b.dataset.o === 'r' && i < o.length - 1) [o[i + 1], o[i]] = [o[i], o[i + 1]];
+      else if (b.dataset.o === 'x') o.splice(i, 1);
+      else if (b.dataset.o === 'a') o.push(+b.dataset.k);
+      else if (b.dataset.o === 'reset') xl.order = xl.form.cols.map((_, k) => k);
+      else if (b.dataset.o === 'copy' || b.dataset.o === 'copy3') return copyText(XLPaste.headerLine(xl.form, xl.order, b.dataset.o === 'copy3'), b);
+      xlRender();
+    });
+    $('#xlStep').addEventListener('change', (e) => {
+      if (e.target.id !== 'xlTable') return;                       // ① 어느 표
+      const f = XLPaste.form(xl.text, { path: e.target.value });
+      if (f.error) return;
+      xl.form = f; xl.order = f.cols.map((_, i) => i); xl.out = null; xlRender();
+    });
     $('#xlCancel').onclick = () => { xl = null; pb.dataset.for = '\u0000'; renderPane(true); };
     $('#xlSend').onclick = xlSend;
     xlRender();
@@ -1408,6 +1439,7 @@
     const f = xl.form, isMap = f.kind === 'map', isNew = f.kind === 'new';
     if (isNew) xl.mode = 'replace';
     $('#xlForm').textContent = `양식 — ${base(xl.p)}\n${XLPaste.describe(f)}`;
+    xlStepRender();
     const HINT = {
       replace: '붙여 넣은 표로 파일 전체를 바꿉니다 (기존 내용은 없어짐)',
       add: isMap ? '붙여 넣은 줄을 더합니다 — 같은 키(날짜·구분 등)는 새 값으로 바뀌고, 나머지는 그대로' : '날짜·구분 등(숫자가 아닌 칸)이 같은 줄은 새 값으로 바뀌고, 새 줄은 아래에 이어 붙습니다',
@@ -1420,7 +1452,7 @@
     xl.out = null; $('#xlSend').disabled = true; $('#xlSum').textContent = ''; $('#xlPrev').innerHTML = '';
     $('#xlSend').textContent = 'TV 에 올리기'; $('#xlSend').className = '';
     if (!text.trim()) { xlNow(null); return; }
-    const o = XLPaste.build(f, XLPaste.parse(text), { mode: xl.mode });
+    const o = XLPaste.build(f, XLPaste.parse(text), { mode: xl.mode, order: xl.order });
     if (o.error) { $('#xlSum').innerHTML = `<span style="color:var(--danger)">${esc(o.error)}</span>`; xlNow(null); return; }
     xl.out = o;
     xlNow(o);
@@ -1429,11 +1461,27 @@
     $('#xlPrev').innerHTML = `<div class="pv"><table><tr>${head}</tr>${rows}</table></div>` +
       (o.table.length > 80 ? `<div class="hint">… ${o.table.length - 80}줄 더</div>` : '') +
       (o.warnings.length ? `<div class="warn">확인하세요:\n${esc(o.warnings.join('\n'))}</div>` : '');
-    $('#xlSum').textContent = `붙여 넣은 ${o.table.length}줄${o.headerUsed ? ' (첫 줄은 머리글로 보고 뺐습니다)' : ' (머리글 없음 — 칸 순서대로)'}` +
+    $('#xlSum').textContent = `붙여 넣은 ${o.table.length}줄${o.headerUsed ? ' (첫 줄은 머리글로 보고 뺐습니다)' : o.orderUsed ? ' (정한 열 순서대로)' : ' (머리글 없음 — 칸 순서대로)'}` +
       (o.mode === 'delete' ? ` · 지움 ${o.removed}${o.missing ? ` · 없는 것 ${o.missing}` : ''}` : o.kind === 'map' || o.changed != null ? ` · 새로 ${o.added} · 바뀜 ${o.changed}` : ` · 더함 ${o.added}`) +
       ` → 올린 뒤 전체 ${o.count}${o.kind === 'map' ? '개' : '줄'} · ${size(new TextEncoder().encode(o.json).length)}`;
     $('#xlSend').disabled = !o.table.length || (o.mode === 'delete' && !o.removed);
     if (o.mode === 'delete') { $('#xlSend').textContent = `${o.removed}개 지우고 TV 에 올리기`; $('#xlSend').className = 'danger'; }
+  }
+  /** ① 어느 표(JSON 안에 표가 여럿이면) · ② 머리글 순서 정하기(엑셀에 적을 순서) + 예시 3줄 + [머리글 복사] */
+  function xlStepRender() {
+    const f = xl.form, st = $('#xlStep');
+    if (f.kind === 'new' || !f.cols.length) { st.innerHTML = f.kind === 'new' ? '<div class="step"><div class="t">양식이 없는 새 파일</div><span class="hint">엑셀 첫 줄에 열 이름(머리글)을 적고 그 아래 줄들을 함께 복사해 붙여 넣으면, 그 이름으로 표를 만듭니다.</span></div>' : ''; return; }
+    const tables = f.tables && f.tables.length > 1 ? `<div class="step"><div class="t">① 어느 표에 넣을까요 <small>이 JSON 안에 표가 ${f.tables.length}개</small></div>
+      <select id="xlTable">${f.tables.map(t => `<option value="${esc(t.key)}"${f.path && f.path.join('.') === t.key ? ' selected' : ''}>${esc(t.label)} (${t.count}줄 · ${esc(t.key)})</option>`).join('')}</select></div>` : '';
+    st.innerHTML = tables + `<div class="step"><div class="t">${tables ? '②' : '①'} 엑셀에 적을 열 순서 <small>이 순서대로 엑셀 칸을 채워 복사하세요 · ◀▶ 로 바꾸고 ✕ 로 빼기</small></div>
+      <div class="ocs">${XLPaste.orderHtml(f, xl.order)}</div>
+      <div class="row" style="margin-top:8px"><button class="secondary" data-o="copy" title="이 순서의 머리글 한 줄을 복사 — 엑셀 1행에 붙여 넣고 아래에 값을 채우세요">머리글 복사</button><button class="secondary" data-o="copy3" title="머리글 + 지금 파일의 앞 3줄을 복사 — 엑셀에 붙여 넣어 모양을 보고 그대로 채우세요">예시 3줄 복사</button><button class="secondary" data-o="reset">원래 순서</button><span class="hint" id="xlCopied"></span></div>
+      <div class="t" style="margin-top:10px">양식 예시 <small>지금 파일의 앞 3줄 — 이렇게 적으면 됩니다</small></div><div class="smp">${XLPaste.sampleHtml(f, xl.order)}</div></div>`;
+  }
+  async function copyText(t, btn) {
+    const ok = await (navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(t).then(() => true, () => false) : Promise.resolve(false));
+    if (!ok) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (_) {} ta.remove(); }
+    const h = $('#xlCopied'); if (h) { h.textContent = '복사했습니다 — 엑셀 A1 칸을 누르고 붙여 넣으세요 (Ctrl+V)'; setTimeout(() => { if (h.textContent.startsWith('복사')) h.textContent = ''; }, 4000); }
   }
   /** 오른쪽 표: 지금 파일 내용(o 없음) 또는 올린 뒤 내용(기존 + 새로 · 바뀜 · 지움) — 붙여 넣을 때마다 다시 그리고 바뀐 줄로 스크롤 */
   function xlNow(o) {
@@ -1455,7 +1503,7 @@
     const label = { replace: '덮어쓰기', add: '추가하기', delete: '삭제' }[o.mode];
     xl.sending = true; $('#xlSend').disabled = true; $('#xlSend').textContent = '보내는 중…';
     try { await stageAndSend([[xl.p, new File([o.json], base(xl.p), { type: 'application/json' })]], `엑셀 붙여넣기(${label}): ${xl.p}`); } finally { xl.sending = false; }
-    xl.form = XLPaste.form(o.json);           // 이어서 붙여 넣으면 방금 올린 내용 기준
+    xl.text = o.json; xl.form = XLPaste.form(o.json, { path: xl.form.path });   // 이어서 붙여 넣으면 방금 올린 내용 기준 (같은 표)
     $('#xlText').value = ''; xlRender();
     $('#xlSum').textContent = '보냈습니다. 아래 작업 목록에서 TV 반영을 확인하세요.';
   }

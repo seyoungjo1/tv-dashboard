@@ -1,6 +1,7 @@
 /* 엑셀 붙여넣기 → JSON (관리자 PC 화면 · 직원용 업로드 HTML 공용)
  *
- * 1) form(기존 JSON 글)  : 지금 파일의 모양(양식)을 읽는다
+ * 1) form(기존 JSON 글, {path}) : 지금 파일의 모양(양식)을 읽는다. 어디에 있든 표(객체 배열)를 모두 찾아 f.tables 에 두고, path 로 고른다
+ *      예: {"datasets":{"voc":{"title":"VOC 현황","records":[…]}, "material":{…}}} → 'VOC 현황' · '원·포자재 부적합 현황' 두 표
  *      rows-obj  [{열: 값, …}, …]                (또는 {…, "rows": [ … ]} 처럼 안에 든 표)
  *      rows-arr  [[값, 값, …], …]                (첫 줄이 글자뿐이면 머리글 줄로 본다)
  *      map       {"2025.01.03|당류": 123, …}     (키를 '|' 로 나눈 칸 + 값 · 값이 {sd, fi} 면 그 칸들)
@@ -115,8 +116,27 @@
 
   // ── 기존 JSON → 양식 ──
   function isPlainObj(o) { return o && typeof o === 'object' && !Array.isArray(o); }
-  function form(text) {
-    var f = { kind: 'new', cols: [], indent: 0 };
+  function getPath(o, path) { for (var i = 0; o != null && i < path.length; i++) o = o[path[i]]; return o; }
+  function setPath(o, path, v) { var c = o; for (var i = 0; i < path.length - 1; i++) c = c[path[i]]; c[path[path.length - 1]] = v; }
+  function isTable(v) { return Array.isArray(v) && v.length > 0 && (isPlainObj(v[0]) || Array.isArray(v[0])); }
+  /** JSON 어디에 있든 표(객체·배열의 배열)를 모두 찾는다: [{path:[…], label, count, key}] (문서 순서) */
+  function findTables(data) {
+    var out = [];
+    (function walk(v, path, parent, depth) {
+      if (depth > 6) return;
+      if (isTable(v)) {
+        var label = parent && typeof parent.title === 'string' ? parent.title : parent && typeof parent.name === 'string' ? parent.name : '';
+        out.push({ path: path.slice(), label: label || (path.length ? path.join('.') : '(전체)'), count: v.length, key: path.join('.') });
+        return;
+      }
+      if (Array.isArray(v) || !isPlainObj(v)) return;
+      Object.keys(v).forEach(function (k) { walk(v[k], path.concat([k]), v, depth + 1); });
+    })(data, [], null, 0);
+    return out;
+  }
+  function form(text, opt) {
+    opt = opt || {};
+    var f = { kind: 'new', cols: [], indent: 0, tables: [] };
     if (text == null || !String(text).trim()) return f;
     var src = String(text).replace(/^﻿/, ''), data;
     try { data = JSON.parse(src); } catch (e) { f.error = 'JSON 형식이 아닙니다: ' + e.message; return f; }
@@ -124,20 +144,20 @@
     f.indent = im ? (im[1][0] === '\t' ? '\t' : im[1].length) : 0;
     f.root = data;
     var arr = data, path = [];
-    if (isPlainObj(data)) {                     // {…, rows:[…]} — 안에 든 가장 큰 표
-      var best = null;
-      Object.keys(data).forEach(function (k) {
-        var v = data[k];
-        if (Array.isArray(v) && v.length && (isPlainObj(v[0]) || Array.isArray(v[0])) && (!best || v.length > data[best].length)) best = k;
-      });
+    f.tables = findTables(data);
+    if (isPlainObj(data)) {
       var keys = Object.keys(data);
-      var mapLike = keys.length > 0 && keys.every(function (k) { var v = data[k]; return !Array.isArray(v) || !v.length || !isPlainObj(v[0]); }) &&
+      var mapLike = keys.length > 0 && keys.every(function (k) { return !isTable(data[k]); }) &&
         keys.filter(function (k) { return typeof data[k] === 'number' || isPlainObj(data[k]) || typeof data[k] === 'string'; }).length >= Math.max(1, keys.length * 0.8);
-      if (best && !(mapLike && keys.length > 3)) { arr = data[best]; path = [best]; }
+      var wantKey = opt.path ? (Array.isArray(opt.path) ? opt.path.join('.') : String(opt.path)) : null;
+      var want = wantKey ? f.tables.filter(function (t) { return t.key === wantKey; })[0] : null;
+      var pick = want || f.tables.slice().sort(function (a, b) { return b.count - a.count; })[0];   // 고른 표, 없으면 가장 큰 표
+      if (pick && !(mapLike && keys.length > 3 && !want)) { arr = getPath(data, pick.path); path = pick.path; }
       else return mapForm(f, data);
     }
     if (!Array.isArray(arr)) { f.error = '표 모양이 아닌 JSON 입니다'; return f; }
     f.path = path;
+    f.table = f.tables.filter(function (t) { return t.key === path.join('.'); })[0] || null;
     if (!arr.length) { f.kind = 'new'; f.empty = true; return f; }
     if (isPlainObj(arr[0])) {
       f.kind = 'rows-obj';
@@ -360,7 +380,13 @@
       mapping = cols.map(function (_, i) { return i; });
     } else {
       var hm = headerMatch(cols, rows[0]);
-      if (hm.hit > 0 && (hm.hit >= Math.min(2, cols.length) || looksHeader(cols, rows))) {
+      var order = Array.isArray(opt.order) && opt.order.length ? opt.order.filter(function (k) { return k >= 0 && k < cols.length; }) : null;   // 미리 정한 머리글 순서 (붙여 넣은 i번째 칸 → 양식 order[i] 칸)
+      if (order && !(hm.hit >= Math.min(2, cols.length))) {
+        if (looksHeader(cols, rows)) { out.headerUsed = true; body = rows.slice(1); }
+        mapping = cols.map(function () { return -1; });
+        order.forEach(function (k, i) { if (i < w && mapping[k] < 0) mapping[k] = i; });
+        out.orderUsed = true;
+      } else if (hm.hit > 0 && (hm.hit >= Math.min(2, cols.length) || looksHeader(cols, rows))) {
         out.headerUsed = true; body = rows.slice(1);
         mapping = cols.map(function () { return -1; });
         hm.map.forEach(function (k, i) { if (k !== undefined) mapping[k] = i; });
@@ -376,8 +402,15 @@
           if (byType.some(function (m) { return m >= 0; })) { mapping = byType; out.typeMatched = true; warn('칸 순서가 양식과 달라 종류(날짜 · 글자 · 숫자)로 찾아 넣었습니다 — 미리보기를 확인하세요'); }
         }
       }
-      if (w > cols.length && kind !== 'map') warn('붙여 넣은 칸(' + w + ')이 양식(' + cols.length + ')보다 많습니다 — 뒤의 ' + (w - cols.length) + '칸은 넣지 않습니다');
-      if (w < cols.length && opt.mode !== 'delete') warn('붙여 넣은 칸(' + w + ')이 양식(' + cols.length + ')보다 적습니다 — 비는 칸: ' + cols.slice(w).map(function (c) { return c.name; }).join(', '));
+      if (out.orderUsed) {                                                 // 정한 열 순서 기준으로 안내
+        if (w > order.length) warn('붙여 넣은 칸(' + w + ')이 정한 열(' + order.length + ')보다 많습니다 — 뒤의 ' + (w - order.length) + '칸은 넣지 않습니다');
+        if (w < order.length && opt.mode !== 'delete') warn('붙여 넣은 칸(' + w + ')이 정한 열(' + order.length + ')보다 적습니다 — 비는 칸: ' + order.slice(w).map(function (k) { return cols[k].name; }).join(', '));
+        var skipped = cols.filter(function (c, k) { return mapping[k] < 0; }).map(function (c) { return c.name; });
+        if (skipped.length && opt.mode !== 'delete') warn('✕ 로 뺀 칸은 빈 값으로 들어갑니다: ' + skipped.join(', '));
+      } else {
+        if (w > cols.length && kind !== 'map') warn('붙여 넣은 칸(' + w + ')이 양식(' + cols.length + ')보다 많습니다 — 뒤의 ' + (w - cols.length) + '칸은 넣지 않습니다');
+        if (w < cols.length && opt.mode !== 'delete') warn('붙여 넣은 칸(' + w + ')이 양식(' + cols.length + ')보다 적습니다 — 비는 칸: ' + cols.slice(w).map(function (c) { return c.name; }).join(', '));
+      }
     }
     out.cols = cols; out.mapping = mapping; out.kind = kind;
     var table = [];                                  // 미리보기용 (양식 칸 순서)
@@ -420,7 +453,7 @@
         return vals.slice();
       });
       var hdr = kind === 'rows-arr' && f.header ? 1 : 0;
-      var old = f.kind === 'new' ? [] : ((f.path && f.path.length ? f.root[f.path[0]] : f.root) || []);
+      var old = f.kind === 'new' ? [] : (getPath(f.root, f.path || []) || []);
       out.added = 0; out.removed = 0; out.missing = 0;
       var states = null;                                // 최종 목록의 줄마다 'same' · 'new' · 'changed' (삭제는 아래에서 'removed')
       if (mode === 'replace') { if (hdr) list.unshift(f.header.slice()); out.added = table.length; states = list.map(function () { return 'new'; }); }
@@ -466,7 +499,10 @@
       }
       out.states = states;
       out.count = list.length - hdr;
-      if (f.path && f.path.length) { data = JSON.parse(JSON.stringify(f.root)); data[f.path[0]] = list; }
+      if (f.path && f.path.length) {
+        data = JSON.parse(JSON.stringify(f.root)); setPath(data, f.path, list);
+        if (isPlainObj(data)) ['savedAt', 'updatedAt'].forEach(function (k) { if (typeof data[k] === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(data[k])) data[k] = new Date().toISOString(); });   // 저장 시각이 있으면 지금으로
+      }
       else data = list;
     }
     out.data = data;
@@ -479,7 +515,7 @@
     if (f.error) return f.error;
     var t = function (c) { return c.name + (c.type === 'num' ? '(숫자)' : c.type === 'date' ? '(날짜 ' + writeDate([2025, 1, 3], c.shape) + ')' : c.type === 'bool' ? '(예/아니오)' : ''); };
     if (f.kind === 'new') return '기존 내용이 없습니다 — 첫 줄이 머리글이면 그 이름으로, 아니면 칸 순서대로 표를 만듭니다';
-    var where = f.path && f.path.length ? " ('" + f.path[0] + "' 안의 표)" : '';
+    var where = f.path && f.path.length ? " ('" + (f.table && f.table.label !== f.path.join('.') ? f.table.label + ' · ' : '') + f.path.join('.') + "' 안의 표)" : '';
     if (f.kind === 'map') return '키-값 모음 ' + f.count + '개' + ' · 칸: ' + f.cols.map(t).join(' │ ') + (f.sep ? "  (키는 앞 " + f.parts + "칸을 '" + f.sep + "' 로 이어 붙임)" : '');
     return '표 ' + f.count + '줄' + where + ' · 칸: ' + f.cols.map(t).join(' │ ');
   }
@@ -506,14 +542,14 @@
       return v;
     }
     if (f.kind === 'new' && !out) return v;
-    var list = out ? (f.path && f.path.length ? out.data[f.path[0]] : out.data) : ((f.path && f.path.length ? f.root[f.path[0]] : f.root) || []);
+    var list = out ? getPath(out.data, f.path || []) : (getPath(f.root, f.path || []) || []);
     var kind = out ? out.kind : f.kind, hdr = kind === 'rows-arr' && f.header ? 1 : 0;
     var states = (out && out.states) || [];
     var rowCells = function (row) { return cols.map(function (c, k) { var x = kind === 'rows-obj' ? (row || {})[c.name] : (row || [])[k]; return x === undefined ? null : x; }); };
     var removed = {}; ((out && out.removedRows) || []).forEach(function (r) { removed[r.i] = r.row; });
     var oi = hdr, li = hdr;                                       // 삭제: 지워진 줄도 제자리에 보여 준다
     if (out && out.mode === 'delete') {
-      var old = (f.path && f.path.length ? f.root[f.path[0]] : f.root) || [];
+      var old = getPath(f.root, f.path || []) || [];
       for (oi = hdr; oi < old.length; oi++) v.rows.push({ c: rowCells(old[oi]), s: removed[oi] ? 'removed' : 'same' });
       return v;
     }
@@ -558,7 +594,45 @@
     return c;
   }
 
-  var X = { parse: parse, form: form, build: build, describe: describe, readDate: readDate, num: num, view: view, viewHtml: viewHtml, viewCounts: viewCounts };
+  /** 양식 예시: 머리글(고른 순서) + 지금 파일의 앞 n줄 — 엑셀에 어떻게 적어야 하는지. {cols:[이름…], rows:[[…]…]} */
+  function sample(f, order, n) {
+    n = n || 3;
+    var cols = f.cols || [], idx = order && order.length ? order : cols.map(function (_, i) { return i; });
+    var v = view(f, null), rows = v.rows.slice(0, n).map(function (r) { return idx.map(function (k) { return r.c[k]; }); });
+    return { cols: idx.map(function (k) { return cols[k] ? cols[k].name : ''; }), rows: rows };
+  }
+  /** 엑셀에 붙여 넣을 머리글 줄(탭 구분) — withRows 면 예시 3줄까지 */
+  function headerLine(f, order, withRows) {
+    var sm = sample(f, order, 3), cell = function (x) { return x == null ? '' : typeof x === 'object' ? JSON.stringify(x) : String(x); };
+    var lines = [sm.cols.join('\t')];
+    if (withRows) sm.rows.forEach(function (r) { lines.push(r.map(cell).join('\t')); });
+    return lines.join('\n');
+  }
+
+  /** 머리글 순서 정하기 칩: [◀ 이름 ▶ ✕] … + 뺀 칸은 흐리게 [+] (페이지가 data-o 클릭을 처리) */
+  function orderHtml(f, order) {
+    var cols = f.cols || [], h = '';
+    order.forEach(function (k, i) {
+      h += '<span class="oc" data-k="' + k + '"><button type="button" data-o="l" data-i="' + i + '" title="왼쪽으로"' + (i ? '' : ' disabled') + '>◀</button>' +
+        '<b>' + (i + 1) + '</b> ' + escHtml(cols[k].name) + '<i>' + (cols[k].type === 'num' ? '숫자' : cols[k].type === 'date' ? '날짜' : cols[k].type === 'bool' ? '예/아니오' : '글자') + '</i>' +
+        '<button type="button" data-o="r" data-i="' + i + '" title="오른쪽으로"' + (i < order.length - 1 ? '' : ' disabled') + '>▶</button>' +
+        (order.length > 1 ? '<button type="button" data-o="x" data-i="' + i + '" title="이 칸은 붙여 넣지 않음 (빈 값)">✕</button>' : '') + '</span>';
+    });
+    cols.forEach(function (c, k) { if (order.indexOf(k) < 0) h += '<span class="oc off" data-k="' + k + '">' + escHtml(c.name) + '<button type="button" data-o="a" data-k="' + k + '" title="다시 넣기">＋</button></span>'; });
+    return h;
+  }
+  /** 양식 예시 표: 머리글(고른 순서) + 지금 파일의 앞 3줄 (없으면 '(비어 있음)') */
+  function sampleHtml(f, order) {
+    var sm = sample(f, order, 3);
+    var cell = function (x) { return x == null || x === '' ? '<span class="hint">·</span>' : typeof x === 'number' ? x.toLocaleString('ko-KR', { maximumFractionDigits: 6 }) : escHtml(typeof x === 'object' ? JSON.stringify(x) : x); };
+    var h = '<table><tr>' + sm.cols.map(function (c, i) { return '<th>' + (i + 1) + '. ' + escHtml(c) + '</th>'; }).join('') + '</tr>';
+    if (!sm.rows.length) h += '<tr><td colspan="' + sm.cols.length + '" class="hint">(아직 줄이 없습니다 — 이 머리글 순서로 적어 붙여 넣으세요)</td></tr>';
+    sm.rows.forEach(function (r) { h += '<tr>' + r.map(function (x) { return '<td>' + cell(x) + '</td>'; }).join('') + '</tr>'; });
+    return h + '</table>';
+  }
+
+  var X = { parse: parse, form: form, build: build, describe: describe, readDate: readDate, num: num, view: view, viewHtml: viewHtml, viewCounts: viewCounts,
+            findTables: findTables, sample: sample, headerLine: headerLine, orderHtml: orderHtml, sampleHtml: sampleHtml };
   G.XLPaste = X;
   if (typeof module !== 'undefined' && module.exports) module.exports = X;
 })(typeof window !== 'undefined' ? window : this);

@@ -54,6 +54,22 @@ out.html = [html.includes('class="vn"'), html.includes('<th>달력일</th>'), ht
 // 키-값 모음에서도 오른쪽 표
 f = X.form(JSON.stringify({"2025.01.02|당류": 100}));
 out.viewMap = X.view(f, X.build(f, X.parse("2025.01.02\t당류\t100\n2025.01.03\t당류\t7"), {mode: 'add'})).rows.map(r => r.s + ':' + r.c.join('|'));
+// ── JSON 어디에 있든 표: {datasets:{voc:{title, records}, material:{…}}} · 표 고르기 · 머리글 순서 먼저 정하고 붙여 넣기 · savedAt 갱신
+const NEST = {schemaVersion: 1, savedAt: "2026-10-12T01:24:13.174Z", datasets: {
+  voc: {title: "VOC 현황", records: [{"접수번호": "D1", "품명": "물엿", "Risk 분류": "Low"}, {"접수번호": "D2", "품명": "후추", "Risk 분류": "High"}]},
+  material: {title: "원·포자재 부적합 현황", records: [{"구분": "원자재", "발생일": "2025-06-09", "업체": "A"}]}}};
+f = X.form(JSON.stringify(NEST));
+out.tables = f.tables.map(t => [t.label, t.key, t.count]); out.defaultPath = f.path;
+f = X.form(JSON.stringify(NEST), {path: 'datasets.material.records'});
+out.pickCols = f.cols.map(c => c.name);
+o = X.build(f, X.parse("포자재\t2026-01-01\tB"), {mode: 'add'});
+out.nestAdd = o.data.datasets.material.records; out.nestVocKept = o.data.datasets.voc.records.length; out.savedAtBumped = o.data.savedAt !== NEST.savedAt;
+out.headerLine = X.headerLine(f, [2, 0, 1], true);
+o = X.build(f, X.parse("C\t포자재\t2026-02-02"), {mode: 'add', order: [2, 0, 1]});
+out.orderUsed = !!o.orderUsed; out.orderRow = o.data.datasets.material.records.slice(-1)[0];
+o = X.build(f, X.parse("업체\t구분\n D\t원자재"), {mode: 'add', order: [2, 0, 1]});      // 머리글이 있으면 이름이 우선
+out.orderWithHeader = o.data.datasets.material.records.slice(-1)[0];
+out.sample = X.sample(f, [1, 0], 3);
 console.log(JSON.stringify(out));
 """
 
@@ -105,6 +121,21 @@ class XlPasteTest(unittest.TestCase):
             {"달력일": "2026.10.06", "제품계층구조(대,현재기준)": "음용식초", "매출실적": 8}])
         self.assertFalse(r["plainPivot"])
         self.assertEqual(r["plain"], [{"달력일": "2026.10.07", "제품계층구조(대,현재기준)": "당류", "매출실적": 5}])
+
+    def test_nested_tables_and_header_order(self):
+        """JSON 안 어디에 있든 표를 찾고(datasets.voc.records …), 고른 표에만 넣으며, 미리 정한 열 순서로 붙여 넣는다"""
+        r = self.r
+        self.assertEqual(r["tables"], [["VOC 현황", "datasets.voc.records", 2], ["원·포자재 부적합 현황", "datasets.material.records", 1]])
+        self.assertEqual(r["defaultPath"], ["datasets", "voc", "records"])                      # 기본은 가장 큰 표
+        self.assertEqual(r["pickCols"], ["구분", "발생일", "업체"])
+        self.assertEqual(r["nestAdd"], [{"구분": "원자재", "발생일": "2025-06-09", "업체": "A"}, {"구분": "포자재", "발생일": "2026-01-01", "업체": "B"}])
+        self.assertEqual(r["nestVocKept"], 2)
+        self.assertTrue(r["savedAtBumped"])
+        self.assertEqual(r["headerLine"], "업체\t구분\t발생일\nA\t원자재\t2025-06-09")
+        self.assertTrue(r["orderUsed"])
+        self.assertEqual(r["orderRow"], {"구분": "포자재", "발생일": "2026-02-02", "업체": "C"})
+        self.assertEqual(r["orderWithHeader"], {"구분": "원자재", "발생일": None, "업체": "D"})
+        self.assertEqual(r["sample"], {"cols": ["발생일", "구분"], "rows": [["2025-06-09", "원자재"]]})
 
     def test_view(self):
         r = self.r
