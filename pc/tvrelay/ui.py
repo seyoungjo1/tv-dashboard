@@ -75,6 +75,7 @@ class Api:
         self.root = root
         self.stage = root / "out" / "stage"
         self.downloads = root / "downloads"
+        self.pbundles: dict[str, dict[str, str]] = {}   # 변환 중인 HTML 묶음 미리보기 (token → {상대 경로: 보관 id})
         self.stage.mkdir(parents=True, exist_ok=True)
         self.downloads.mkdir(parents=True, exist_ok=True)
         try:
@@ -407,12 +408,29 @@ class Api:
         echo("HTML 변환 중: %s (바깥 자료 내려받기%s)" % (path, " · 큰 그림 분리" if body.get("split", True) else ""))
         r = offline.convert(data, path, split_images=bool(body.get("split", True)), fonts=bool(body.get("fonts", True)))
         parent = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
-        out = [{"path": path, "stage": self.put_stage(r.html)["id"], "size": len(r.html)}]
+        out = [{"path": path, "stage": self.put_stage(r.html)["id"], "size": len(r.html), "rel": "", "url": "", "kind": "html"}]
+        by_rel = {v: k for k, v in r.by_url.items() if v}
         for rel, blob in r.files.items():
-            out.append({"path": parent + r.folder + "/" + rel, "stage": self.put_stage(blob)["id"], "size": len(blob)})
+            out.append({"path": parent + r.folder + "/" + rel, "stage": self.put_stage(blob)["id"], "size": len(blob),
+                        "rel": rel, "url": by_rel.get(rel, ""), "kind": rel.split("/", 1)[0]})
         for line in r.report:
             echo("  " + line)
         return {"changed": True, "files": out, "folder": parent + r.folder, "report": r.report}
+
+    def offline_preview(self, body: dict[str, Any]) -> dict[str, Any]:
+        """브라우저가 변환 중인 묶음을 실제로 띄워 볼 수 있게 (Tailwind CSS 만들기): {files:[{rel, stage}]} → token"""
+        files = {str(f.get("rel", "")).strip("/"): str(f.get("stage", "")) for f in body.get("files") or [] if f.get("rel") and f.get("stage")}
+        token = uuid.uuid4().hex
+        self.pbundles[token] = files
+        if len(self.pbundles) > 8:
+            del self.pbundles[next(iter(self.pbundles))]
+        return {"token": token}
+
+    def staged_file(self, sid: str) -> Path | None:
+        if not re.fullmatch(r"[0-9a-f]{32}", sid or ""):
+            return None
+        f = self.stage / sid
+        return f if f.is_file() else None
 
     def unchanged(self, path: str, data: bytes, v: dict[str, dict[str, Any]]) -> bool:
         return versions.unchanged(self.tree, path, data, v)
@@ -782,6 +800,8 @@ class Api:
             return 200, self.put_stage(raw)
         if method == "POST" and path == "/api/offline":
             return 200, self.offline_convert(body or {})
+        if method == "POST" and path == "/api/offline/preview":
+            return 200, self.offline_preview(body or {})
         if method == "POST" and path == "/api/send":
             return 200, self.send(body)
         if method == "GET" and path == "/api/result":
@@ -902,6 +922,28 @@ def make_handler(api: Api):
                 if not f.is_file() or api.preview.resolve() not in f.resolve().parents:
                     return self._send(404, {"error": "아직 받지 않은 파일입니다"})
                 ctype = MIME.get(f.suffix.lower().lstrip(".")) or mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+                if ctype.startswith("text/") or ctype in ("application/json", "application/javascript"):
+                    ctype += "; charset=utf-8"
+                return self._send(200, f.read_bytes(), ctype)
+            if method == "GET" and u.path == "/api/staged":            # 보관 중인 파일 (브라우저가 변환할 때 읽는다)
+                q = parse_qs(u.query)
+                f = api.staged_file((q.get("id") or [""])[0])
+                if f is None:
+                    return self._send(404, {"error": "없음"})
+                name = Path((q.get("name") or ["file"])[0]).name
+                ctype = MIME.get(Path(name).suffix.lower().lstrip(".")) or mimetypes.guess_type(name)[0] or "application/octet-stream"
+                if ctype.startswith("text/") or ctype in ("application/json", "application/javascript"):
+                    ctype += "; charset=utf-8"
+                return self._send(200, f.read_bytes(), ctype)
+            if method == "GET" and u.path.startswith("/pb/"):             # 변환 중인 묶음 미리보기: /pb/<token>/<상대 경로>
+                from urllib.parse import unquote
+                parts = u.path.split("/", 3)
+                files = api.pbundles.get(parts[2] if len(parts) > 2 else "")
+                rel = unquote(parts[3]) if len(parts) > 3 else ""
+                f = api.staged_file(files.get(rel, "")) if files else None
+                if f is None:
+                    return self._send(404, {"error": "없음"})
+                ctype = MIME.get(Path(rel).suffix.lower().lstrip(".")) or mimetypes.guess_type(rel)[0] or "application/octet-stream"
                 if ctype.startswith("text/") or ctype in ("application/json", "application/javascript"):
                     ctype += "; charset=utf-8"
                 return self._send(200, f.read_bytes(), ctype)

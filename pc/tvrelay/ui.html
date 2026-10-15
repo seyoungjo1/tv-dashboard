@@ -262,6 +262,8 @@
       <button class="secondary" id="uploadDirBtn">폴더 올리기</button>
       <label class="hint" title="HTML 이 쓰는 CDN 스크립트 · CSS · 글꼴 · 그림을 PC 가 내려받아 '_이름_files' 폴더에 같이 올립니다 — TV 에 인터넷이 없어도 뜹니다. 같은 HTML 을 다시 올리면 그 폴더를 지우고 다시 만듭니다"><input type="checkbox" id="offlineOn" checked> HTML 인터넷 없이 동작하게</label>
       <label class="hint" title="HTML 안에 글자(base64)로 박힌 큰 그림을 파일로 빼냅니다 (8MB 짜리 HTML 이 수백 KB 로) — TV 가 멈추는 주된 원인"><input type="checkbox" id="splitImg" checked> 큰 그림 분리</label>
+      <label class="hint" title="TV 에서 매번 하던 일을 이 PC 브라우저가 한 번만 합니다: Tailwind CDN 이 만드는 CSS 를 파일로 넣고 CDN 스크립트를 빼기 · text/babel(JSX) 스크립트를 같은 Babel 로 미리 변환해 Babel 을 빼기. 보이는 결과는 같습니다"><input type="checkbox" id="fastOn" checked> 빠르게 (Tailwind CSS 빌드 · JSX 미리 변환)</label>
+      <label class="hint" title="빼낸 그림을 TV 화면 폭의 절반(960px)으로 줄입니다 (투명 PNG 는 PNG, 나머지는 JPEG)"><input type="checkbox" id="shrinkImg" checked> 그림 TV 절반 크기로</label>
       <button class="secondary" id="refreshBtn" title="TV 목록 새로고침">⟳</button>
       <input type="file" id="fileInput" multiple class="hidden">
       <input type="file" id="dirInput" webkitdirectory multiple class="hidden">
@@ -466,6 +468,7 @@
 <div id="toast" class="hidden"></div>
 
 <script src="/static/xlpaste.js"></script>
+<script src="/static/optimize.js"></script>
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
@@ -1710,8 +1713,12 @@
       for (const [path, f] of list) {
         const s = await api('PUT', '/api/stage', f, true);
         if (/\.html?$/i.test(path) && $('#offlineOn').checked) {       // HTML: 바깥 자료를 받아 묶음 폴더로, 큰 그림 분리 (옛 묶음은 지우고 다시)
-          const r = await api('POST', '/api/offline', { stage: s.id, path, split: $('#splitImg').checked });
+          let r = await api('POST', '/api/offline', { stage: s.id, path, split: $('#splitImg').checked });
           if (r.changed) {
+            if ($('#fastOn').checked || $('#shrinkImg').checked) {        // 이 브라우저가 Tailwind CSS 빌드 · JSX 변환 · 그림 줄이기
+              try { const o = await Optimize.run(r, { tailwind: $('#fastOn').checked, babel: $('#fastOn').checked, images: $('#shrinkImg').checked }); r = Object.assign({}, r, { files: o.files, report: r.report.concat(o.report) }); }
+              catch (e) { r.report.push('빠르게 만들기 실패 — 변환 없이 올립니다: ' + e.message); }
+            }
             if (r.folder && entry(r.folder)) ops.push({ op: 'delete', path: r.folder, recursive: true });
             for (const x of r.files) ops.push({ op: 'put', path: x.path, stage: x.stage });
             notes.push(...r.report);
@@ -1725,7 +1732,7 @@
     } catch (e) { alert(e.message); }
     finally { staging.delete(key); }
   }
-  try { for (const id of ['offlineOn', 'splitImg']) { const v = localStorage.getItem(id); if (v !== null) $('#' + id).checked = v === '1'; $('#' + id).onchange = () => localStorage.setItem(id, $('#' + id).checked ? '1' : '0'); } } catch (_) {}
+  try { for (const id of ['offlineOn', 'splitImg', 'fastOn', 'shrinkImg']) { const v = localStorage.getItem(id); if (v !== null) $('#' + id).checked = v === '1'; $('#' + id).onchange = () => localStorage.setItem(id, $('#' + id).checked ? '1' : '0'); } } catch (_) {}
 
   // ── TV 설정 ──
   function fillSettings() {
