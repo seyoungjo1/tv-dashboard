@@ -460,6 +460,7 @@ class Api:
                 self.state(max_age=20)                         # 최신 TV 목록·버전으로 비교 (20초 안에 확인했으면 그대로)
             except Exception:
                 pass
+        deleted: list[tuple[str, bool]] = []
         for op in body.get("ops") or []:
             kind = op.get("op")
             if kind in ("put", "apk"):
@@ -470,19 +471,23 @@ class Api:
                 data = f.read_bytes()
                 used.append(f)
                 path = str(op.get("path", ""))
+                # 같은 작업에서 먼저 지운 파일은 TV 해시·전송 대기 기록과 같아도 반드시 다시 보낸다.
+                replaced = any(path == p or (recursive and (not p or path.startswith(p + "/")))
+                               for p, recursive in deleted)
+                must_put = force or replaced
                 q = self.queued.get(path) if kind == "put" else None
-                if q and not force and q.get("h") == versions.sha(data):
+                if q and not must_put and q.get("h") == versions.sha(data):
                     skipped.append(path)                    # 같은 내용을 이미 보냈고 TV 가 아직 안 받음 (두 번 누름 등)
                     queued_skip.append(path)
                     continue
-                if kind == "put" and not force and not q and self.unchanged(path, data, vers):
+                if kind == "put" and not must_put and not q and self.unchanged(path, data, vers):
                     skipped.append(path)                    # 바뀌지 않은 파일은 보내지 않는다
                     continue
                 if kind == "put" and video.is_main_path(path) and video.is_video(path):
                     data = video.prepare(path.rsplit("/", 1)[-1], data, echo)   # 화면보호기 동영상은 TV 가 반드시 트는 규격으로
-                    if q and q.get("h") == versions.sha(data):
+                    if q and not must_put and q.get("h") == versions.sha(data):
                         skipped.append(path); queued_skip.append(path); continue
-                    if not force and not q and self.unchanged(path, data, vers):
+                    if not must_put and not q and self.unchanged(path, data, vers):
                         skipped.append(path); continue
                 if kind == "put":
                     versions.remember(vers, str(op["path"]), data)
@@ -495,6 +500,8 @@ class Api:
                 else:
                     job.apk(data)
             elif kind in ("mkdir", "delete", "rename", "sample", "settings", "reload", "get", "ping", "list"):
+                if kind == "delete":
+                    deleted.append((str(op.get("path", "")).replace("\\", "/").strip("/"), bool(op.get("recursive"))))
                 job.op(kind, **{k: v for k, v in op.items() if k != "op"})
                 if kind in ("mkdir", "delete", "rename", "settings"):
                     rec.append((kind, op))

@@ -34,7 +34,12 @@
     const tw = files.find(f => /cdn\.tailwindcss\.com/.test(f.url || ''));
     if (!tw) return null;
     // 미리보기 묶음: 원본 HTML + 숨은 원문(아직 안 그려진 화면의 클래스도 만들어지게)
-    const injected = html.replace(/<\/body>/i, `<div hidden id="__twsrc" style="display:none">${esc(html)}</div></body>`);
+    // JS 안의 배포용 HTML 문자열이 아니라 실제 문서 body 에 원문을 넣는다.
+    const previewDoc = new DOMParser().parseFromString(html, 'text/html');
+    const source = previewDoc.createElement('div');
+    source.hidden = true; source.id = '__twsrc'; source.style.display = 'none'; source.textContent = html;
+    previewDoc.body.appendChild(source);
+    const injected = '<!doctype html>\n' + previewDoc.documentElement.outerHTML;
     const previewHtml = await stage(new Blob([injected], { type: 'text/html' }));
     const htmlName = base(ctx.htmlPath);
     const map = [{ rel: htmlName, stage: previewHtml }].concat(files.map(f => ({ rel: bundle + '/' + f.rel, stage: f.stage })));

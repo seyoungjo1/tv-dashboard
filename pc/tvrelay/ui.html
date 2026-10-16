@@ -1564,7 +1564,7 @@
     const cur = items.find(i => i.folder === tvFolder);
     const logo = entry('logo.png');
     const need = items.filter(i => i.image).map(i => i.image).concat(logo ? ['logo.png'] : []);
-    if (cur && cur.index) need.push(...entries().filter(x => !x.d && x.p.startsWith(cur.folder + '/') && x.p.split('/').length <= 3).map(x => x.p));
+    if (cur && cur.index) need.push(...entries().filter(x => !x.d && x.p.startsWith(cur.folder + '/')).map(x => x.p));
     if (!items.length) { content.innerHTML = '<div class="empty">표시할 자료가 없습니다<br><br>왼쪽 폴더 창에 폴더를 만들고 index.html 을 올리세요</div>'; return; }
     const say = (t) => { if (seq === tvSeq) content.innerHTML = `<div class="empty">${esc(t)}</div>`; };
     if (!await ensure([...new Set(need)], () => seq === tvSeq, say)) return;
