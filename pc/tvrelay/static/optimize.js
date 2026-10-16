@@ -71,12 +71,20 @@
     const list = (v) => (v || '').split(',').map(s => s.trim()).filter(Boolean);
     const presets = attrs['data-presets'] ? list(attrs['data-presets']) : ['react', 'es2015'];
     const plugins = attrs['data-plugins'] ? list(attrs['data-plugins']) : ['proposal-class-properties', 'proposal-object-rest-spread', 'transform-flow-strip-types'];
-    const opts = { presets, plugins, sourceType: attrs['data-type'] === 'module' ? 'module' : 'script' };
+    // HTML 은 UMD React 전역을 사용한다. Babel 8의 automatic 기본값은 require()를 만들어 브라우저에서 실패한다.
+    const browserPresets = presets.map(p => p === 'react' ? ['react', { runtime: 'classic' }] : p);
+    const opts = { presets: browserPresets, plugins, sourceType: attrs['data-type'] === 'module' ? 'module' : 'script' };
     try { return B.transform(code, opts).code; }
     catch (e) {
       const alt = plugins.map(p => p.replace(/^proposal-/, 'transform-'));          // 새 Babel 은 proposal-* 이름이 바뀜
       return B.transform(code, Object.assign({}, opts, { plugins: alt })).code;
     }
+  }
+  // Babel standalone 은 DOMContentLoaded 뒤 실행한다. head 안의 JSX 도 root 생성 뒤 실행해야 한다.
+  function compiledScript(code, attrs) {
+    const payload = JSON.stringify(code).replace(/</g, '\\u003c');
+    const type = attrs['data-type'] === 'module' ? 'module' : 'text/javascript';
+    return `<script${attrs.id ? ` id="${esc(attrs.id)}"` : ''}>(function(){function run(){var s=document.createElement('script');s.type=${JSON.stringify(type)};s.textContent=${payload};document.head.appendChild(s);}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',run,{once:true});}else{run();}})();</script>`;
   }
   const attrsOf = (tag) => { const o = {}; tag.replace(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/g, (m, k, a, b, c) => { o[k.toLowerCase()] = a ?? b ?? c ?? ''; }); return o; };
 
@@ -138,8 +146,8 @@
           let n = 0, failed = 0;
           html = html.replace(/<script\b([^>]*\stype\s*=\s*["']text\/babel["'][^>]*)>([\s\S]*?)<\/script>/gi, (m, tag, code) => {
             const a = attrsOf(tag);
-            if (a.src) return m;                                           // 바깥 파일을 가리키는 babel 스크립트는 그대로
-            try { const out = transpile(B, code, a); n++; const keep = tag.replace(/\s(type|data-presets|data-plugins|data-type)\s*=\s*("[^"]*"|'[^']*'|\S+)/gi, ''); return `<script${keep}>\n${out}\n</script>`; }
+            if (a.src) { failed++; return m; }                                           // 바깥 파일을 가리키는 babel 스크립트는 그대로
+            try { const out = transpile(B, code, a); n++; return compiledScript(out, a); }
             catch (e) { failed++; report.push('Babel: 변환 실패 — ' + (e.message || e).toString().split('\n')[0]); return m; }
           });
           close();
@@ -174,5 +182,5 @@
     return { files: [{ path: htmlPath, stage: htmlStage, rel: '', kind: 'html', url: '' }].concat(files), report };
   }
 
-  G.Optimize = { run, transpile, attrsOf };
+  G.Optimize = { run, transpile, attrsOf, compiledScript };
 })(window);
