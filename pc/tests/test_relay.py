@@ -37,6 +37,9 @@ def fake_tv_process(gh: GitHub, box: Box, tv: str, store: dict[str, bytes]) -> N
                     names.append(n)
                 results.append({"op": "get", "path": op["path"], "ok": True, "name": op["path"].split("/")[-1],
                                 "chunks": names, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+            elif op["op"] == "delete":
+                store.pop(op["path"], None)
+                results.append({"op": "delete", "path": op["path"], "ok": True})
             else:
                 results.append({"op": op["op"], "ok": False, "error": "unsupported"})
         out["m"] = box.seal(json.dumps({"v": 1, "id": id_, "ok": all(r["ok"] for r in results), "results": results}).encode(),

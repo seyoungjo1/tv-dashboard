@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, backup, config, grants, syncbat, update, versions, video
+from . import __version__, backup, config, grants, groups, syncbat, update, versions, video
 from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
@@ -76,6 +76,8 @@ class Api:
         self.stage = root / "out" / "stage"
         self.downloads = root / "downloads"
         self.pbundles: dict[str, dict[str, str]] = {}   # 변환 중인 HTML 묶음 미리보기 (token → {상대 경로: 보관 id})
+        self.gk: dict[str, Any] = {}                       # TV 그룹 전체 맞추기 진행 상황
+        self._gsync_at: dict[str, float] = {}             # 그룹 이름 → 마지막 주기 맞추기 시각
         self.stage.mkdir(parents=True, exist_ok=True)
         self.downloads.mkdir(parents=True, exist_ok=True)
         try:
@@ -533,7 +535,8 @@ class Api:
         if sig:
             self.recent[sig] = (time.time(), id_)
         self._record(rec)
-        return {"id": id_, "skipped": skipped, "queued": queued_skip}
+        mirrored = self._mirror(rec)
+        return {"id": id_, "skipped": skipped, "queued": queued_skip, "mirrored": mirrored}
 
     def _record(self, rec: list[tuple[str, Any]]) -> None:
         """PC 에서 보낸 그대로 백업(tv-backup)에 반영 — 새 TV 를 연결하면 이걸 그대로 올린다"""
@@ -554,6 +557,201 @@ class Api:
             echo("백업 기록 실패: %s" % e)
 
     # ── TV 백업 · 새 TV 로 복원 ──
+    # ── TV 그룹: 주 TV 를 따르는 TV 들 ──
+    def _mirror(self, rec: list[tuple[str, Any]]) -> list[str]:
+        """지금 TV 가 어느 그룹의 주 TV 면, 방금 보낸 작업을 따르는 TV 들의 우편함에도 넣는다 (꺼져 있어도 켜지면 받는다)"""
+        try:
+            cfg = config.load(self.root)
+            if cfg is None:
+                return []
+            g = groups.group_of_main(groups.load(self.root), cfg.tv)
+            if not g:
+                return []
+            ops = groups.mirror_ops(rec, g["exclude"])
+            if not ops:
+                return []
+            done: list[str] = []
+            for f in g["followers"]:
+                try:
+                    r = Relay(cfg.with_tv(f))
+                    vers = versions.load(self.root, f)
+                    job = Job()
+                    frec: list[tuple[str, Any]] = []
+                    for kind, a in ops:
+                        if kind == "put":
+                            if versions.unchanged({}, a[0], a[1], vers):
+                                continue
+                            job.put(a[0], a[1], True)
+                            versions.remember(vers, a[0], a[1])
+                        else:
+                            job.op(kind, **{k: v for k, v in a.items() if k != "op"})
+                        frec.append((kind, a))
+                    if not job.ops:
+                        continue
+                    id_ = r.submit(job)
+                    versions.save(self.root, vers, f)
+                    for kind, a in frec:
+                        if kind == "put":
+                            backup.record_put(self.root, f, a[0], a[1])
+                        elif kind == "delete":
+                            backup.record_delete(self.root, f, str(a.get("path", "")))
+                        elif kind == "rename":
+                            backup.record_rename(self.root, f, str(a.get("path", "")), str(a.get("to", "")))
+                        elif kind == "mkdir":
+                            backup.record_mkdir(self.root, f, str(a.get("path", "")))
+                    echo("그룹 '%s': 따르는 TV '%s' 에도 같이 보냄 (%d개, %s)" % (g["name"], f, len(job.ops), id_))
+                    done.append(f)
+                except Exception as e:
+                    echo("그룹 '%s': '%s' 에 같이 보내지 못함 — %s" % (g["name"], f, e))
+            return done
+        except Exception as e:
+            echo("그룹 같이 보내기 실패: %s" % e)
+            return []
+
+    def groups_info(self) -> dict[str, Any]:
+        cfg = config.load(self.root)
+        return {"groups": groups.load(self.root), "tvs": list(cfg.all_tvs) if cfg else [], "current": cfg.tv if cfg else "", "job": self.gk}
+
+    def groups_save(self, body: dict[str, Any]) -> dict[str, Any]:
+        cfg = config.load(self.root)
+        tvs = cfg.all_tvs if cfg else ()
+        gl = [groups.norm(g) for g in body.get("groups") or [] if isinstance(g, dict)]
+        for g in gl:
+            groups.validate(g, tvs)
+        mains = [g["main"] for g in gl]
+        if len(set(mains)) != len(mains):
+            raise ValueError("같은 TV 가 두 그룹의 주 TV 일 수 없습니다")
+        for g in gl:
+            for f in g["followers"]:
+                if f in mains:
+                    raise ValueError("'%s' 는 다른 그룹의 주 TV 라 따르는 TV 가 될 수 없습니다" % f)
+        groups.save(self.root, gl)
+        echo("TV 그룹 저장: " + (", ".join("%s(주 %s → %s)" % (g["name"], g["main"], "·".join(g["followers"])) for g in gl) or "없음"))
+        return self.groups_info()
+
+    def groups_sync(self, body: dict[str, Any]) -> dict[str, Any]:
+        """전체 맞추기: 주 TV 의 파일을 PC 백업에 받은 뒤, 따르는 TV 마다 다른 것만 보낸다 (백업에서 보냄)"""
+        name = str(body.get("name", ""))
+        g = next((x for x in groups.load(self.root) if x["name"] == name), None)
+        if g is None:
+            raise ValueError("그룹이 없습니다: %s" % name)
+        if self.gk.get("running"):
+            raise ValueError("전체 맞추기가 이미 진행 중입니다")
+        self.gk = {"running": True, "name": name, "msg": "준비 중…", "at": time.time()}
+
+        def run() -> None:
+            try:
+                self._sync_group(g)
+                self.gk.update(running=False, ok=True)
+            except Exception as e:
+                echo(traceback.format_exc())
+                self.gk.update(running=False, ok=False, msg="실패: %s" % e)
+        threading.Thread(target=run, daemon=True).start()
+        return self.gk
+
+    def _sync_group(self, g: dict[str, Any]) -> None:
+        cfg = config.load(self.root)
+        if cfg is None:
+            raise ValueError("설정이 없습니다")
+        main = g["main"]
+        mr = Relay(cfg.with_tv(main))
+        st = mr.state(config.tv_dir(self.root, main) / "state-cache.json")
+        if st is None:
+            raise ValueError("주 TV '%s' 가 아직 연결되지 않았습니다" % main)
+        tree = {e["p"]: e for e in st.get("tree") or []}
+        # 1) 주 TV → PC 백업 (바뀐 것만 받기)
+        for p, e in tree.items():
+            if e.get("d"):
+                backup.record_mkdir(self.root, main, p)
+        local = dict(backup.files(self.root, main))
+        need = [p for p, e in tree.items() if not e.get("d") and not groups.excluded(p, g["exclude"]) and not (p in local and backup.same_on_tv(tree, p, local[p]))]
+        for p in [p for p in local if p not in tree]:
+            backup.record_delete(self.root, main, p)
+        fails: list[str] = []
+        got = 0
+        groupq: list[str] = []
+        size = 0
+
+        def flush() -> None:
+            nonlocal groupq, size, got
+            if not groupq:
+                return
+            job = Job()
+            for p in groupq:
+                job.op("get", path=p)
+            self.gk["msg"] = "주 TV '%s' 에서 받는 중… %d/%d" % (main, got, len(need))
+            id_ = mr.submit(job)
+            r = mr.wait(id_, timeout=300 + size / 1048576 * 10)
+            if r is None:
+                raise ValueError("주 TV '%s' 응답이 없습니다 — 켜져 있는지 확인하고 다시 누르세요" % main)
+            for item in r.get("results", []):
+                if "data" in item:
+                    backup.record_put(self.root, main, str(item.get("path")), item.pop("data"))
+                elif not item.get("ok"):
+                    fails.append("%s(%s)" % (item.get("path"), item.get("error")))
+            got += len(groupq)
+            groupq, size = [], 0
+        for p in need:
+            n = int(tree[p].get("s") or 0)
+            if groupq and size + n > backup.BATCH:
+                flush()
+            groupq.append(p)
+            size += n
+        flush()
+        # 2) PC 백업 → 따르는 TV (다른 것만 · 꺼져 있어도 우편함에 넣어 두면 켜질 때 받는다)
+        main_files = dict(backup.files(self.root, main))
+        report: list[str] = []
+        for f in g["followers"]:
+            fr = Relay(cfg.with_tv(f))
+            fst = fr.state(config.tv_dir(self.root, f) / "state-cache.json")
+            if fst is None:
+                report.append("%s: 아직 연결되지 않음 — 건너뜀" % f)
+                continue
+            ftree = {e["p"]: e for e in fst.get("tree") or []}
+            puts, dels = groups.plan(main_files, ftree, g["exclude"], g["deleteExtra"], backup.same_on_tv)
+            vers = versions.load(self.root, f)
+            items = [(p, main_files[p]) for p in puts]
+            sent = 0
+            for part in backup.batches(items):
+                job = Job()
+                for p, fl in part:
+                    blob = fl.read_bytes()
+                    job.put(p, blob, True)
+                    versions.remember(vers, p, blob)
+                    backup.record_put(self.root, f, p, blob)
+                self.gk["msg"] = "'%s' 로 보내는 중… %d/%d개" % (f, sent, len(items))
+                fr.submit(job)
+                sent += len(part)
+            if dels:
+                job = Job()
+                for p in dels:
+                    job.op("delete", path=p)
+                    backup.record_delete(self.root, f, p)
+                fr.submit(job)
+            versions.save(self.root, vers, f)
+            report.append("%s: %d개 보냄%s%s" % (f, len(items), (" · %d개 지움" % len(dels)) if dels else "", "" if items or dels else " (이미 같음)"))
+        self.gk["msg"] = "전체 맞추기 끝 — " + " / ".join(report) + ((" · 주 TV 에서 받지 못함 %d개: %s" % (len(fails), ", ".join(fails[:3]))) if fails else "")
+        self.gk["finished"] = time.time()
+        echo("그룹 '%s' %s" % (g["name"], self.gk["msg"]))
+
+    def groups_tick(self) -> None:
+        """주기적 전체 맞추기 (everyMin 이 정해진 그룹) — 1분마다 불린다"""
+        if self.gk.get("running") or self.bk.get("running"):
+            return
+        now = time.time()
+        for g in groups.load(self.root):
+            if not g["everyMin"]:
+                continue
+            last = self._gsync_at.get(g["name"], 0.0)
+            if now - last < g["everyMin"] * 60:
+                continue
+            self._gsync_at[g["name"]] = now
+            try:
+                self.groups_sync({"name": g["name"]})
+            except Exception as e:
+                echo("그룹 '%s' 주기 맞추기 시작 실패: %s" % (g["name"], e))
+            return                                             # 한 번에 하나씩
+
     def backup_info(self) -> dict[str, Any]:
         cfg = config.load(self.root)
         tv = cfg.tv if cfg else ""
@@ -843,6 +1041,12 @@ class Api:
             return 200, {"done": bool(cfg) and pair_done(cfg, one("branch"))}
         if method == "POST" and path == "/api/preview":
             return 200, self.request_preview(body)
+        if method == "GET" and path == "/api/groups":
+            return 200, self.groups_info()
+        if method == "POST" and path == "/api/groups":
+            return 200, self.groups_save(body or {})
+        if method == "POST" and path == "/api/groups/sync":
+            return 200, self.groups_sync(body or {})
         if method == "GET" and path == "/api/backup":
             return 200, self.backup_info()
         if method == "POST" and path == "/api/backup/pull":
@@ -1039,6 +1243,15 @@ def serve(root: Path, port: int = 8790, open_browser: bool = True) -> int:
     print("=" * 60, flush=True)
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+
+    def ticker() -> None:                                   # TV 그룹 주기 맞추기
+        while SERVER[0] is srv:
+            time.sleep(60)
+            try:
+                api.groups_tick()
+            except Exception as e:
+                echo("그룹 주기 확인 실패: %s" % e)
+    threading.Thread(target=ticker, daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
