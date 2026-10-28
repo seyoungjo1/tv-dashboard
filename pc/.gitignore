@@ -10,3 +10,6 @@ __pycache__/
 .update.lock
 grants.json
 tv-backup/
+
+# 직접 연결(Tailscale) 주소·TV 관리 비밀번호 — PC 사용자 것
+tv-direct.json

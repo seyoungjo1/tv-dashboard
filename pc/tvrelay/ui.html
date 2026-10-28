@@ -445,6 +445,15 @@
     <div style="margin-top:10px"><button id="tvAddBtn">+ TV 추가</button></div>
   </div>
   <div class="card">
+    <h3 style="margin-top:0">⚡ 직접 연결 (Tailscale · 같은 망)</h3>
+    <p class="hint">GitHub 우편함은 TV 가 10초마다 확인하므로 10~30초가 걸립니다. PC 와 TV 가 <b>Tailscale</b>(TV 주소 100.x.x.x)이나 같은 망에 있으면
+      TV 앱의 관리 서버(포트 8080)로 <b>바로</b> 올리고·지우고·미리보기를 받습니다 (초 단위). 안 닿으면 저절로 GitHub 로 보내니 그대로 두어도 됩니다.<br>
+      비밀번호는 TV 앱 ⚙ 설정의 <b>관리 비밀번호</b>입니다. 주소를 비워 두면 TV 가 알려 준 주소(Tailscale 먼저)를 차례로 찔러 봅니다.
+      이 정보는 이 PC 의 <code>tv-direct.json</code> 에만 저장됩니다.</p>
+    <table id="directList" style="width:100%"></table>
+    <div id="directMsg" class="msg hidden" style="margin-top:8px"></div>
+  </div>
+  <div class="card">
     <h3 style="margin-top:0">TV 백업</h3>
     <p class="hint">TV 이름별로 이 PC 에 백업됩니다 (<code>tv-backup</code> 폴더). PC 에서 올린 파일·설정은 자동으로 백업되고,
       직원 도구·TV 에서 고친 것까지 맞추려면 <b>[백업 파일 넣기]</b>를 누르세요.
@@ -545,7 +554,7 @@
     $('#dock').classList.toggle('hidden', t !== 'explorer');
     for (const [id, name] of [['#ssPage','ss'],['#settingsPage','settings'],['#updatePage','update'],['#connPage','conn'],['#setupPage','setup'],['#groupsPage','groups']]) $(id).classList.toggle('hidden', t !== name);
     if (t === 'groups') loadGroups();
-    if (t === 'conn') { loadBackup(); loadTvs(); }
+    if (t === 'conn') { loadBackup(); loadTvs(); loadDirect(); }
     ssTab(t === 'ss');
   }
   // [화면보호기] 탭: 오른쪽 미리보기 칸(tvpane)을 통째로 옮겨 와 화면보호기 모드로 (돌아갈 때 제자리로)
@@ -639,6 +648,40 @@
       location.reload();
     } catch (e) { alert(e.message); loadTvs(); }
   }
+  // ── 직접 연결 (Tailscale · 같은 망): TV 마다 주소·관리 비밀번호 ──
+  async function loadDirect() {
+    let r;
+    try { r = await api('GET', '/api/direct'); } catch (e) { $('#directList').innerHTML = `<tr><td class="hint">${esc(e.message)}</td></tr>`; return; }
+    $('#directList').innerHTML = r.items.map(t => `<tr data-dtv="${esc(t.tv)}">
+      <td style="white-space:nowrap"><b>${esc(t.tv)}</b><br><span class="hint">${t.connected ? `<span class="pill on" style="font-size:11px">연결됨 ${esc(t.connected)}</span>` : t.hasPassword ? (t.enabled ? '설정됨 · 닿으면 씀' : '꺼 둠 (GitHub 로만)') : 'GitHub 로만'}</span></td>
+      <td><input class="durl" placeholder="비워 두면 TV 가 알려 준 주소로 (예: 100.64.0.9 또는 192.168.0.20:8080)" value="${esc(t.url || '')}" style="width:100%">
+        <div class="hint" style="margin-top:3px">TV 가 알려 준 주소: ${t.known.length ? t.known.map(esc).join(' · ') : '아직 없음 (TV 가 한 번 상태를 올려야 보입니다)'}</div></td>
+      <td><input class="dpw" type="password" placeholder="${t.hasPassword ? '저장됨 (바꿀 때만)' : 'TV 관리 비밀번호'}" style="width:140px"></td>
+      <td style="white-space:nowrap"><label class="hint"><input type="checkbox" class="dauto"${t.auto ? ' checked' : ''}> 주소 자동</label>
+        <label class="hint" style="margin-left:6px"><input type="checkbox" class="den"${t.enabled ? ' checked' : ''}> 사용</label></td>
+      <td style="text-align:right;white-space:nowrap"><button class="secondary ddtest">시험</button> <button class="ddsave">저장</button>${t.hasPassword ? ' <button class="secondary ddrm" title="주소·비밀번호를 지우고 GitHub 로만 보냅니다">지우기</button>' : ''}</td></tr>`).join('');
+  }
+  $('#directList').addEventListener('click', async (e) => {
+    const tr = e.target.closest('tr[data-dtv]'); if (!tr) return;
+    const body = { tv: tr.dataset.dtv, url: tr.querySelector('.durl').value, password: tr.querySelector('.dpw').value,
+                   auto: tr.querySelector('.dauto').checked, enabled: tr.querySelector('.den').checked };
+    const m = $('#directMsg');
+    try {
+      if (e.target.closest('.ddtest')) {
+        msg(m, `'${body.tv}' 에 직접 연결 시험 중…`, 'warn');
+        const r = await api('POST', '/api/direct/test', body);
+        if (r.ok) msg(m, `연결 성공: ${r.url} · 앱 v${r.app || '?'} · 남은 공간 ${size(r.free || 0)} — [저장] 을 누르면 이제부터 바로 보냅니다`);
+        else msg(m, `연결 실패: ${r.error}` + (r.tried?.length ? ` (시도: ${r.tried.join(', ')})` : ''), 'err');
+      } else if (e.target.closest('.ddsave')) {
+        await api('POST', '/api/direct', body);
+        msg(m, `'${body.tv}' 직접 연결 저장 — 닿으면 바로 보내고, 안 닿으면 GitHub 로 보냅니다`);
+        loadDirect(); loadState();
+      } else if (e.target.closest('.ddrm') && confirm(`'${body.tv}' 의 직접 연결 정보를 지울까요? (GitHub 로만 보냅니다)`)) {
+        await api('POST', '/api/direct', { tv: body.tv, remove: true });
+        msg(m, `'${body.tv}' 직접 연결 지움`); loadDirect(); loadState();
+      }
+    } catch (er) { msg(m, er.message, 'err'); }
+  });
   $('#tvSel').onchange = (e) => { const v = e.target.value; if (v === '__add') addTv(); else selectTv(v); };
   $('#tvAddBtn').onclick = addTv;
   $('#tvList').addEventListener('click', async (e) => {
@@ -751,8 +794,8 @@
         pill.className = 'pill ' + (state.online ? 'on' : 'off');
         const ago = state.age_sec < 60 ? '방금' : state.age_sec < 3600 ? Math.round(state.age_sec / 60) + '분 전' : Math.round(state.age_sec / 3600) + '시간 전';
         verWarn(state.status?.versionName);
-        pill.textContent = `📺 ${info?.tv || 'TV'} · ` + (state.online ? `응답 ${ago}` : `꺼진 것 같음 (마지막 응답 ${ago})`) + ` · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}` + (state.status?.videoError ? ` · ⚠ 화면보호기 동영상 재생 실패: ${state.status.videoError}` : '');
-        pill.title = state.cached ? '저장해 둔 마지막 상태 — TV 확인 중' : '';
+        pill.textContent = `📺 ${info?.tv || 'TV'} · ` + (state.via === 'direct' ? '⚡ 직접 연결' : state.online ? `응답 ${ago}` : `꺼진 것 같음 (마지막 응답 ${ago})`) + ` · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}` + (state.status?.videoError ? ` · ⚠ 화면보호기 동영상 재생 실패: ${state.status.videoError}` : '');
+        pill.title = state.cached ? '저장해 둔 마지막 상태 — TV 확인 중' : state.via === 'direct' ? `Tailscale/같은 망으로 바로 연결 중: ${state.directUrl || ''}` : '';
       }
       await loadGrants();
       renderTree(); fillSettings();
@@ -1701,8 +1744,9 @@
         jobs.unshift({ id: 'skip-' + Date.now(), at: Date.now(), desc, st: 'ok', note });
         renderJobs(); toast(desc + ' — ' + note); return null;
       }
-      jobs.unshift({ id: r.id, at: Date.now(), desc: desc + (sk ? ` (${qd ? `이미 보낸 ${qd}개 · ` : ''}바뀌지 않은 ${sk - qd}개 건너뜀)` : ''), st: 'wait', note: 'GitHub 에 맡김 — TV 가 가져가면 반영됩니다' });
-      renderJobs(); toast('보냈습니다 — ' + desc + '\nTV 가 가져가면 반영됩니다 (결과는 아래 [전송 결과])'); poll(r.id); return r.id;
+      jobs.unshift({ id: r.id, at: Date.now(), desc: desc + (sk ? ` (${qd ? `이미 보낸 ${qd}개 · ` : ''}바뀌지 않은 ${sk - qd}개 건너뜀)` : ''), st: 'wait',
+                     note: r.direct ? '⚡ 직접 연결로 바로 보냄' : 'GitHub 에 맡김 — TV 가 가져가면 반영됩니다' });
+      renderJobs(); toast(r.direct ? '⚡ TV 에 바로 반영했습니다 — ' + desc : '보냈습니다 — ' + desc + '\nTV 가 가져가면 반영됩니다 (결과는 아래 [전송 결과])'); poll(r.id); return r.id;
     } catch (e) { alert(e.message); }
     finally { setTimeout(() => inflight.delete(key), 1500); }
   }

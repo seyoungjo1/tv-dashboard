@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import re
 import shutil
 import threading
@@ -32,7 +33,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, backup, config, grants, groups, syncbat, update, versions, video
+from . import __version__, backup, config, direct, grants, groups, syncbat, update, versions, video
 from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
@@ -101,6 +102,83 @@ class Api:
         self.send_lock = threading.Lock()                 # 보내기는 한 번에 하나씩 (동시에 온 두 요청이 서로를 보도록)
         self.queued: dict[str, dict[str, Any]] = {}       # 경로 → {h, id, at} TV 가 아직 반영 안 한 올리기 (TV 별)
         self.recent: dict[str, tuple[float, str]] = {}    # 같은 작업(삭제·이름 변경 등)을 방금 보냈는가 → (시각, 작업 id)
+        # 직접 연결 (Tailscale · 같은 망): 닿는 TV 는 GitHub 를 거치지 않고 바로
+        self.finder = direct.Finder(root, self._saved_state)
+        self.direct_results: dict[str, dict[str, Any]] = {}   # 직접 보낸 작업 id(d-…) → 결과 (한 번 읽으면 지움)
+
+    # ── 직접 연결 ──
+    def _saved_state(self, tv: str) -> dict[str, Any] | None:
+        """TV 가 마지막으로 알려 준 상태(주소 포함) — 직접 연결 주소를 찾는 데 씀"""
+        try:
+            c = json.loads((config.tv_dir(self.root, tv) / "state-cache.json").read_text(encoding="utf-8"))
+            return dict(c["state"]) if isinstance(c.get("state"), dict) else None
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def direct_for(self, tv: str | None = None) -> direct.Direct | None:
+        """이 TV 로 직접 연결이 닿으면 클라이언트, 아니면 None (GitHub 로)"""
+        try:
+            return self.finder.get(tv or self._cur_tv())
+        except Exception as e:
+            echo("직접 연결 확인 실패: %s" % e)
+            return None
+
+    def _save_state_cache(self, tv: str, st: dict[str, Any]) -> None:
+        """직접 받은 상태를 TV 별 캐시에 (화면을 다시 켤 때·TV 목록에 바로 보이게). sha 가 없어 GitHub 상태와는 섞이지 않는다"""
+        try:
+            p = config.tv_dir(self.root, tv) / "state-cache.json"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"tv": tv, "sha": "", "state": st}, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, p)
+        except OSError:
+            pass
+
+    def direct_info(self) -> dict[str, Any]:
+        cfg = config.load(self.root)
+        data = direct.load(self.root)
+        items = []
+        for t in (cfg.all_tvs if cfg else ()):
+            e = data.get(t) or {}
+            hit = self.finder.ok.get(t)
+            st = self._saved_state(t) or {}
+            addrs = [a.get("ip") for a in (st.get("status") or {}).get("addresses") or [] if a.get("ip") and ":" not in str(a.get("ip"))]
+            items.append({"tv": t, "url": e.get("url", ""), "hasPassword": bool(e.get("password")), "auto": e.get("auto", True),
+                          "enabled": e.get("enabled", True), "connected": hit[1].url if hit and time.time() - hit[0] < direct.PROBE_CACHE else "",
+                          "known": addrs})
+        return {"items": items, "file": str(self.root / direct.FILE)}
+
+    def direct_save(self, body: dict[str, Any]) -> dict[str, Any]:
+        tv = str(body.get("tv", "")).strip()
+        cfg = config.load(self.root)
+        if not cfg or tv not in cfg.all_tvs:
+            raise ValueError("모르는 TV 입니다: %s" % tv)
+        data = direct.load(self.root)
+        e = dict(data.get(tv) or {})
+        e["url"] = direct.norm_url(str(body.get("url", "")))
+        if body.get("password"):
+            e["password"] = str(body["password"])
+        e["auto"] = bool(body.get("auto", True))
+        e["enabled"] = bool(body.get("enabled", True))
+        if body.get("remove"):
+            data.pop(tv, None)
+        else:
+            data[tv] = e
+        direct.save(self.root, data)
+        self.finder.forget(tv)
+        echo("직접 연결 %s: %s%s" % ("삭제" if body.get("remove") else "저장", tv, (" " + e["url"]) if e.get("url") and not body.get("remove") else ""))
+        return self.direct_info()
+
+    def direct_test(self, body: dict[str, Any]) -> dict[str, Any]:
+        tv = str(body.get("tv", "")).strip()
+        e = direct.load(self.root).get(tv) or {}
+        pw = str(body.get("password") or e.get("password") or "")
+        if not pw:
+            raise ValueError("TV 관리 비밀번호를 넣으세요 (TV 앱 ⚙ 설정의 관리 비밀번호)")
+        r = self.finder.test(tv, str(body.get("url", "")), pw, self._saved_state(tv))
+        self.finder.forget(tv)
+        echo("직접 연결 시험 %s: %s" % (tv, ("성공 " + r["url"]) if r.get("ok") else r.get("error")))
+        return r
 
     def relay(self) -> Relay:
         cfg = config.load(self.root)
@@ -156,7 +234,10 @@ class Api:
             return {"current": "", "items": []}
         items = []
         for t in cfg.all_tvs:
-            it: dict[str, Any] = {"tv": t, "online": False, "age_sec": None, "files": None, "app": ""}
+            hit = self.finder.ok.get(t)
+            it: dict[str, Any] = {"tv": t, "online": False, "age_sec": None, "files": None, "app": "",
+                                  "direct": bool(self.finder.configured(t)),
+                                  "directOn": bool(hit and time.time() - hit[0] < direct.PROBE_CACHE)}
             try:
                 c = json.loads((config.tv_dir(self.root, t) / "state-cache.json").read_text(encoding="utf-8"))
                 st = Relay._with_age(dict(c["state"]))
@@ -282,7 +363,17 @@ class Api:
     def state(self, max_age: float = 0) -> dict[str, Any]:
         if max_age and self._last_state and time.time() - self._state_at < max_age:
             return self._last_state                        # 방금 확인했으면 다시 묻지 않는다
-        st = self.relay().state(self.state_cache)
+        st = None
+        d = self.direct_for()
+        if d is not None:
+            try:
+                st = d.state()                                 # 직접 연결: TV 에서 바로 (GitHub 를 거치지 않음)
+                self._save_state_cache(d.tv, st)
+            except Exception as e:
+                echo("직접 연결로 상태를 받지 못해 GitHub 로 확인합니다: %s" % e)
+                self.finder.forget(d.tv)
+        if st is None:
+            st = self.relay().state(self.state_cache)
         self._state_at = time.time()
         if st is None:
             return {"none": True, "online": False}
@@ -376,6 +467,18 @@ class Api:
             raise ValueError("미리보기로 받기에는 너무 큽니다 (%.0f MB). 필요한 파일만 '다운로드' 하세요." % (total / 1048576))
         if not need:
             return {"ready": True}
+        d = self.direct_for()
+        if d is not None:                                    # 직접 연결: 지금 바로 받아 둔다
+            tv = d.tv
+            for p in need:
+                try:
+                    blob = d.get(p)
+                except direct.DirectError as e:
+                    raise ValueError("TV 에서 받지 못했습니다: %s (%s)" % (p, e))
+                self._cache_put(p, blob, t=(self.tree.get(p) or {}).get("t"))
+                backup.record_put(self.root, tv, p, blob)
+            echo("미리보기용으로 TV 에서 %d개 받음 (직접 연결)" % len(need))
+            return {"ready": True}
         with self.lock:
             ids = {self.pending_paths[p] for p in need if p in self.pending_paths}
             new = [p for p in need if p not in self.pending_paths]
@@ -452,6 +555,7 @@ class Api:
             echo("같은 작업을 방금 보냈습니다 — 한 번만 보냅니다 (%s)" % self.recent[sig][1])
             return {"id": self.recent[sig][1], "duplicate": True, "skipped": []}
         job = Job()
+        blobs: list[bytes | None] = []                      # job.ops 와 나란히 — 직접 연결로 보낼 때 쓰는 파일 내용
         used: list[Path] = []
         skipped: list[str] = []
         rec: list[tuple[str, Any]] = []                     # 보낸 뒤 백업(tv-backup)에 반영할 것
@@ -501,10 +605,12 @@ class Api:
                         pass
                 else:
                     job.apk(data)
+                blobs.append(data)
             elif kind in ("mkdir", "delete", "rename", "sample", "settings", "reload", "get", "ping", "list"):
                 if kind == "delete":
                     deleted.append((str(op.get("path", "")).replace("\\", "/").strip("/"), bool(op.get("recursive"))))
                 job.op(kind, **{k: v for k, v in op.items() if k != "op"})
+                blobs.append(None)
                 if kind in ("mkdir", "delete", "rename", "settings"):
                     rec.append((kind, op))
             else:
@@ -520,6 +626,18 @@ class Api:
             echo("바뀌지 않은 %d개는 건너뜀" % len(skipped))
         versions.save(self.root, vers, self._cur_tv())
         mb = job.size / 1048576
+        d = self.direct_for()
+        if d is not None:
+            r = self._send_direct(d, job, blobs)
+            if r is not None:                               # 직접 보냈음 — 결과도 바로
+                for f in used:
+                    f.unlink(missing_ok=True)
+                if sig:
+                    self.recent[sig] = (time.time(), r["id"])
+                self._record(rec)
+                mirrored = self._mirror(rec)
+                self._state_at = 0.0                        # 다음 상태 확인은 바로 TV 에서
+                return {"id": r["id"], "skipped": skipped, "queued": queued_skip, "mirrored": mirrored, "direct": True}
         echo("TV 로 작업 보내는 중… (%d개, %.1f MB)" % (len(job.ops), mb))
         id_ = self.relay().submit(job)
         for f in used:
@@ -537,6 +655,30 @@ class Api:
         self._record(rec)
         mirrored = self._mirror(rec)
         return {"id": id_, "skipped": skipped, "queued": queued_skip, "mirrored": mirrored}
+
+    def _send_direct(self, d: direct.Direct, job: Job, blobs: list[bytes | None]) -> dict[str, Any] | None:
+        """직접 연결로 작업을 바로 실행. 연결이 중간에 끊기면(첫 작업도 못 함) None → GitHub 로"""
+        id_ = "d-" + uuid.uuid4().hex[:12]
+        echo("TV 로 직접 보내는 중… (%d개, %.1f MB, %s)" % (len(job.ops), job.size / 1048576, d.url))
+        results: list[dict[str, Any]] = []
+        for op, blob in zip(job.ops, blobs):
+            try:
+                r = d.run_op(op, blob)
+            except (OSError, ValueError) as e:              # 연결이 끊김
+                if not results:
+                    echo("직접 연결이 끊겨 GitHub 로 보냅니다: %s" % e)
+                    self.finder.forget(d.tv)
+                    return None
+                r = {"op": op.get("op"), "path": op.get("path"), "ok": False, "error": "연결이 끊겼습니다: %s" % e}
+            results.append(r)
+        ok = all(x.get("ok") for x in results)
+        res = {"v": 1, "id": id_, "ok": ok, "results": results, "time": int(time.time() * 1000), "via": "direct"}
+        self.direct_results[id_] = res
+        if len(self.direct_results) > 50:
+            del self.direct_results[next(iter(self.direct_results))]
+        bad = [x for x in results if not x.get("ok")]
+        echo("직접 보냄 %s: %s" % (id_, "모두 성공" if ok else "실패 %d개 — %s" % (len(bad), ", ".join("%s(%s)" % (x.get("path"), x.get("error")) for x in bad[:3]))))
+        return res
 
     def _record(self, rec: list[tuple[str, Any]]) -> None:
         """PC 에서 보낸 그대로 백업(tv-backup)에 반영 — 새 TV 를 연결하면 이걸 그대로 올린다"""
@@ -573,9 +715,9 @@ class Api:
             done: list[str] = []
             for f in g["followers"]:
                 try:
-                    r = Relay(cfg.with_tv(f))
                     vers = versions.load(self.root, f)
                     job = Job()
+                    blobs: list[bytes | None] = []
                     frec: list[tuple[str, Any]] = []
                     for kind, a in ops:
                         if kind == "put":
@@ -583,12 +725,16 @@ class Api:
                                 continue
                             job.put(a[0], a[1], True)
                             versions.remember(vers, a[0], a[1])
+                            blobs.append(a[1])
                         else:
                             job.op(kind, **{k: v for k, v in a.items() if k != "op"})
+                            blobs.append(None)
                         frec.append((kind, a))
                     if not job.ops:
                         continue
-                    id_ = r.submit(job)
+                    fd = self.direct_for(f)
+                    r = self._send_direct(fd, job, blobs) if fd is not None else None
+                    id_ = r["id"] if r is not None else Relay(cfg.with_tv(f)).submit(job)
                     versions.save(self.root, vers, f)
                     for kind, a in frec:
                         if kind == "put":
@@ -655,7 +801,17 @@ class Api:
             raise ValueError("설정이 없습니다")
         main = g["main"]
         mr = Relay(cfg.with_tv(main))
-        st = mr.state(config.tv_dir(self.root, main) / "state-cache.json")
+        md = self.direct_for(main)
+        st = None
+        if md is not None:
+            try:
+                st = md.state()
+                self._save_state_cache(main, st)
+            except Exception as e:
+                echo("주 TV '%s' 직접 연결 실패 — GitHub 로: %s" % (main, e))
+                self.finder.forget(main); md = None
+        if st is None:
+            st = mr.state(config.tv_dir(self.root, main) / "state-cache.json")
         if st is None:
             raise ValueError("주 TV '%s' 가 아직 연결되지 않았습니다" % main)
         tree = {e["p"]: e for e in st.get("tree") or []}
@@ -676,12 +832,15 @@ class Api:
             nonlocal groupq, size, got
             if not groupq:
                 return
-            job = Job()
-            for p in groupq:
-                job.op("get", path=p)
             self.gk["msg"] = "주 TV '%s' 에서 받는 중… %d/%d" % (main, got, len(need))
-            id_ = mr.submit(job)
-            r = mr.wait(id_, timeout=300 + size / 1048576 * 10)
+            if md is not None:
+                r = {"results": [md.run_op({"op": "get", "path": p}) for p in groupq]}
+            else:
+                job = Job()
+                for p in groupq:
+                    job.op("get", path=p)
+                id_ = mr.submit(job)
+                r = mr.wait(id_, timeout=300 + size / 1048576 * 10)
             if r is None:
                 raise ValueError("주 TV '%s' 응답이 없습니다 — 켜져 있는지 확인하고 다시 누르세요" % main)
             for item in r.get("results", []):
@@ -703,7 +862,17 @@ class Api:
         report: list[str] = []
         for f in g["followers"]:
             fr = Relay(cfg.with_tv(f))
-            fst = fr.state(config.tv_dir(self.root, f) / "state-cache.json")
+            fd = self.direct_for(f)
+            fst = None
+            if fd is not None:
+                try:
+                    fst = fd.state()
+                    self._save_state_cache(f, fst)
+                except Exception as e:
+                    echo("'%s' 직접 연결 실패 — GitHub 로: %s" % (f, e))
+                    self.finder.forget(f); fd = None
+            if fst is None:
+                fst = fr.state(config.tv_dir(self.root, f) / "state-cache.json")
             if fst is None:
                 report.append("%s: 아직 연결되지 않음 — 건너뜀" % f)
                 continue
@@ -712,24 +881,33 @@ class Api:
             vers = versions.load(self.root, f)
             items = [(p, main_files[p]) for p in puts]
             sent = 0
+            fails: list[str] = []
             for part in backup.batches(items):
                 job = Job()
+                blobs: list[bytes | None] = []
                 for p, fl in part:
                     blob = fl.read_bytes()
                     job.put(p, blob, True)
+                    blobs.append(blob)
                     versions.remember(vers, p, blob)
                     backup.record_put(self.root, f, p, blob)
                 self.gk["msg"] = "'%s' 로 보내는 중… %d/%d개" % (f, sent, len(items))
-                fr.submit(job)
+                r = self._send_direct(fd, job, blobs) if fd is not None else None
+                if r is None:
+                    fr.submit(job)
+                else:
+                    fails.extend("%s(%s)" % (x.get("path"), x.get("error")) for x in r["results"] if not x.get("ok"))
                 sent += len(part)
             if dels:
                 job = Job()
                 for p in dels:
                     job.op("delete", path=p)
                     backup.record_delete(self.root, f, p)
-                fr.submit(job)
+                if fd is None or self._send_direct(fd, job, [None] * len(dels)) is None:
+                    fr.submit(job)
             versions.save(self.root, vers, f)
-            report.append("%s: %d개 보냄%s%s" % (f, len(items), (" · %d개 지움" % len(dels)) if dels else "", "" if items or dels else " (이미 같음)"))
+            report.append("%s: %d개 보냄%s%s%s" % (f, len(items), (" · %d개 지움" % len(dels)) if dels else "", "" if items or dels else " (이미 같음)",
+                                                 (" · 실패 %d개: %s" % (len(fails), ", ".join(fails[:3]))) if fails else ""))
         self.gk["msg"] = "전체 맞추기 끝 — " + " / ".join(report) + ((" · 주 TV 에서 받지 못함 %d개: %s" % (len(fails), ", ".join(fails[:3]))) if fails else "")
         self.gk["finished"] = time.time()
         echo("그룹 '%s' %s" % (g["name"], self.gk["msg"]))
@@ -805,17 +983,22 @@ class Api:
             got_mb = 0.0
             fails: list[str] = []
 
+            d = self.direct_for(tv)
+
             def flush() -> None:
                 nonlocal group, size, got_mb
                 if not group:
                     return
-                job = Job()
-                for p in group:
-                    job.op("get", path=p)
                 names = ", ".join(p.rsplit("/", 1)[-1] for p in group[:3]) + (" 외 %d개" % (len(group) - 3) if len(group) > 3 else "")
                 self.bk["msg"] = "TV 에서 받는 중… %.1f/%.1f MB · 지금: %s" % (got_mb, total_mb, names)
-                id_ = relay.submit(job)
-                r = relay.wait(id_, timeout=300 + size / 1048576 * 10)     # 큰 파일은 그만큼 더 기다림
+                if d is not None:
+                    r = {"results": [d.run_op({"op": "get", "path": p}) for p in group]}
+                else:
+                    job = Job()
+                    for p in group:
+                        job.op("get", path=p)
+                    id_ = relay.submit(job)
+                    r = relay.wait(id_, timeout=300 + size / 1048576 * 10)     # 큰 파일은 그만큼 더 기다림
                 if r is None:
                     raise ValueError("TV 응답이 없습니다 — TV 가 켜져 있는지 확인하고 다시 누르세요 (받은 것은 남아 있어 이어서 받습니다)")
                 for item in r.get("results", []):
@@ -860,20 +1043,25 @@ class Api:
             total_mb = sum(f.stat().st_size for _, f in items) / 1048576
             self.bk.update(total=len(items), msg="백업 파일 보내는 중… %d개(%.1f MB)" % (len(items), total_mb))
             relay = self.relay()
+            dc = self.direct_for(tv)
             vers = versions.load(self.root, self._cur_tv())
             sent_mb = 0.0
             fails: list[str] = []
             for part in parts:
                 job = Job()
+                blobs: list[bytes | None] = []
                 part_mb = sum(f.stat().st_size for _, f in part) / 1048576
                 names = ", ".join(p.rsplit("/", 1)[-1] for p, _ in part[:3]) + (" 외 %d개" % (len(part) - 3) if len(part) > 3 else "")
                 self.bk["msg"] = "백업 파일 보내는 중… %.1f/%.1f MB · 지금: %s" % (sent_mb, total_mb, names)
                 for p, f in part:
                     blob = f.read_bytes()
                     job.put(p, blob, True)
+                    blobs.append(blob)
                     versions.remember(vers, p, blob)
-                id_ = relay.submit(job)
-                r = relay.wait(id_, timeout=300 + part_mb * 10)
+                r = self._send_direct(dc, job, blobs) if dc is not None else None
+                if r is None:
+                    id_ = relay.submit(job)
+                    r = relay.wait(id_, timeout=300 + part_mb * 10)
                 if r is None:
                     versions.save(self.root, vers, self._cur_tv())
                     raise ValueError("TV 응답이 없습니다 — 다시 누르면 올라간 것은 건너뛰고 이어서 올립니다")
@@ -901,9 +1089,12 @@ class Api:
             job.ops.extend(g_ops)
             if job.ops:
                 self.bk["msg"] = "TV 설정 · 직원용 도구 적용 중…"
-                r = relay.wait(relay.submit(job), timeout=600)
-                if r is None:
-                    raise ValueError("TV 응답이 없습니다 (파일은 모두 올라감) — 다시 누르면 설정만 적용합니다")
+                if dc is not None and not g_ops:               # 직원용 도구 등록(grant)은 GitHub 우편함으로만
+                    self._send_direct(dc, job, [None] * len(job.ops))
+                else:
+                    r = relay.wait(relay.submit(job), timeout=600)
+                    if r is None:
+                        raise ValueError("TV 응답이 없습니다 (파일은 모두 올라감) — 다시 누르면 설정만 적용합니다")
             self.bk["msg"] = "백업 파일 보내기 완료 — 파일 %d개%s%s%s" % (len(items) - len(fails), " (TV 와 이미 같아 보낼 파일 없음)" if not items else "",
                                                          " · TV 설정" if m.get("settings") else "",
                                                          (" · 직원용 도구 %d개" % len(g_ops) if g_ops else "") +
@@ -916,7 +1107,12 @@ class Api:
     def result(self, id_: str) -> dict[str, Any]:
         if id_ in self.preview_done:
             return {"ok": True, "results": [], "cached": True}
-        r = self.relay().result(id_)
+        if id_.startswith("d-"):                             # 직접 보낸 작업: 결과를 이미 들고 있다
+            r = self.direct_results.pop(id_, None)
+            if r is None:
+                return {"ok": True, "results": [], "cached": True}
+        else:
+            r = self.relay().result(id_)
         if r is None:
             return {"pending": True}
         if any(q.get("id") == id_ for q in self.queued.values()):
@@ -1014,6 +1210,8 @@ class Api:
         if method == "GET" and path == "/api/pending":
             return 200, {"ids": self.relay().pending()}
         if method == "POST" and path == "/api/cancel":
+            if str(body.get("id", "")).startswith("d-"):
+                return 200, {"ok": True}                    # 직접 보낸 작업은 이미 끝났다
             self.relay().cancel(str(body.get("id", "")))
             self._settle_queued(str(body.get("id", "")))
             return 200, {"ok": True}
@@ -1041,6 +1239,12 @@ class Api:
             return 200, {"done": bool(cfg) and pair_done(cfg, one("branch"))}
         if method == "POST" and path == "/api/preview":
             return 200, self.request_preview(body)
+        if method == "GET" and path == "/api/direct":
+            return 200, self.direct_info()
+        if method == "POST" and path == "/api/direct":
+            return 200, self.direct_save(body or {})
+        if method == "POST" and path == "/api/direct/test":
+            return 200, self.direct_test(body or {})
         if method == "GET" and path == "/api/groups":
             return 200, self.groups_info()
         if method == "POST" and path == "/api/groups":
