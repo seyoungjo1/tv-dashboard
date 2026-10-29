@@ -209,6 +209,9 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        if (!intent.getBooleanExtra(EXTRA_PREVIEW_IDLE, false)) {
+            com.seyoungjo.tvdashboard.relay.BtServer.autoSetup(this)   // 블루투스 받기: 권한 · '항상 찾을 수 있게' (한 번만 묻는다)
+        }
         applyKeepScreenOn()
         applyHeader()
         hideSystemBars()

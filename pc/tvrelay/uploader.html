@@ -91,6 +91,7 @@
   <div class="card row" style="margin-top:0">
     <span>업로드 비밀번호</span>
     <input type="password" class="pw" id="pw" placeholder="관리자에게 받은 비밀번호" autocomplete="current-password" style="flex:1">
+    <span id="viaBox" class="hidden" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span>보내는 길</span><span class="seg" id="via"></span><span class="modehint" id="viaHint"></span></span>
   </div>
   <div class="card" id="exCard">
     <h2>폴더 내용 보기 · 골라서 고치기</h2>
@@ -148,7 +149,8 @@
   </div>
   <div class="card hint">
     · 같은 이름의 파일은 새 파일로 바뀝니다(덮어쓰기). 다른 폴더나 다른 형식은 올라가지 않습니다.<br>
-    · TV 가 10~20초 안에 받아 반영합니다. 결과가 이 화면에 표시될 때까지 창을 닫지 마세요.<br>
+    · 인터넷(GitHub)으로 보내면 TV 가 10~20초 안에 받아 반영합니다. 결과가 이 화면에 표시될 때까지 창을 닫지 마세요.<br>
+    · <b>블루투스</b>로 보내려면 이 PC 와 TV 를 한 번 짝지은 뒤(Windows 설정 → 블루투스 → 기기 추가 → TV 이름), 위에서 '블루투스' 를 고르고 보낼 때 뜨는 창에서 'Bluetooth 링크를 통한 표준 직렬 (COMn)' 을 고르세요. 인터넷이 없어도 TV 근처(10m)에서 바로 들어갑니다 (크롬·엣지 PC 전용).<br>
     · 올릴 때 관리자에게 받은 <b>업로드 비밀번호</b>를 입력하세요. 열쇠는 비밀번호로 잠겨 있어 비밀번호 없이는 올릴 수 없습니다.
   </div>
 </main>
@@ -291,11 +293,11 @@ const CFG = /*__CONFIG__*/null;
   async function job(items, prog, say, onQueued, force) {
     const pend = pendGet(), dups = [];
     for (const it of items) if (it.data) it.sha = await sha256(it.data);
-    items = items.filter(it => { if (it.op === 'put' && pend[it.path] && pend[it.path].h === it.sha) { dups.push(it.path); return false; } return true; });
+    if (via !== 'bt') items = items.filter(it => { if (it.op === 'put' && pend[it.path] && pend[it.path].h === it.sha) { dups.push(it.path); return false; } return true; });   // 블루투스는 바로 반영되므로 '보내 둔 것' 과 겹쳐도 다시 보낸다
     if (!items.length && !force) return { ok: true, dupOnly: true, dups, results: [] };
     const id = `${Date.now()}-${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('')}`;
     const kind = `up/${CFG.gid}`;
-    const tree = [], ops = [];
+    const tree = [], ops = [], sealed = [];           // sealed = [[이름, 암호화된 내용]] — GitHub 에 올리거나 블루투스로 한 줄에 보낸다
     let n = 0, done = 0;
     const total = items.reduce((s, f) => s + (f.data ? f.data.length : 0), 0) || 1;
     for (const it of items) {
@@ -303,14 +305,27 @@ const CFG = /*__CONFIG__*/null;
       const data = it.data, chunks = [];
       for (let i = 0; i < data.length; i += CHUNK) {
         const name = 'd' + (n++);
-        tree.push({ path: name, mode: '100644', type: 'blob', sha: await blob(await seal(data.subarray(i, i + CHUNK), aad(kind, id, name))) });
+        sealed.push([name, await seal(data.subarray(i, i + CHUNK), aad(kind, id, name))]);
         chunks.push(name);
-        done += Math.min(CHUNK, data.length - i); prog(done / total * 0.9);
+        done += Math.min(CHUNK, data.length - i); prog(done / total * (via === 'bt' ? 0.1 : 0.9));
       }
       ops.push({ op: 'put', path: it.path, chunks, size: data.length, sha256: it.sha, overwrite: true });
     }
     const man = enc.encode(JSON.stringify({ v: 1, id, created: Date.now(), ops }));
-    tree.push({ path: 'm', mode: '100644', type: 'blob', sha: await blob(await seal(man, aad(kind, id, 'm'))) });
+    sealed.push(['m', await seal(man, aad(kind, id, 'm'))]);
+    if (via === 'bt') {                                // ── 블루투스: TV 가 바로 처리하고 결과를 돌려준다 (기다릴 것 없음) ──
+      say(items.some(x => x.op === 'put') ? '블루투스로 TV 에 보내는 중…' : '블루투스로 TV 에 묻는 중…', 'wait');
+      const got = await btExchange(kind, id, sealed, (p) => prog(0.1 + p * 0.85));
+      if (got.e && !got.m) throw new Error('TV 가 거절했습니다: ' + (JSON.parse(dec.decode(got.e)).error || ''));
+      if (!got.m) throw new Error('TV 응답에 결과가 없습니다');
+      const res = JSON.parse(dec.decode(await open(got.m, aad('res', id, 'm'))));
+      prog(1);
+      if (onQueued) await onQueued();
+      if (res.files) rememberFiles(res.files, { used: res.used, max: res.maxBytes });
+      res.dups = dups; res.via = 'bt';
+      return res;
+    }
+    for (const [name, data] of sealed) { tree.push({ path: name, mode: '100644', type: 'blob', sha: await blob(data) }); }
     const t = await gh('POST', 'git/trees', { tree });
     const c = await gh('POST', 'git/commits', { message: 'up', tree: t.sha, parents: [] });
     await gh('POST', 'git/refs', { ref: `refs/heads/relay/${CFG.tv}/up/${CFG.gid}/${id}`, sha: c.sha });
@@ -350,6 +365,7 @@ const CFG = /*__CONFIG__*/null;
     const btn = $('#send'); btn.disabled = true; $('#clear').disabled = true;
     const prog = (p) => $('#prog').style.width = Math.round(p * 100) + '%';
     try {
+      await btReady();
       await ensureSecret(msg);
       msg('암호화해서 보내는 중…', 'wait');
       const items = [];
@@ -362,7 +378,7 @@ const CFG = /*__CONFIG__*/null;
       const res = await job(items, prog, msg, keepJson);
       if (res.dupOnly) { files = []; render(); prog(0); return msg(`같은 내용을 이미 보냈습니다 (${res.dups.length}개) — TV 가 받으면 반영됩니다. 다시 보내지 않았습니다.`, 'wait'); }
       const bad = (res.results || []).filter(x => !x.ok);
-      if (res.ok) { const n = files.length; files = []; render(); msg(`완료! ${n}개를 TV 에 반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${listText(res)}`, 'ok'); }
+      if (res.ok) { const n = files.length; files = []; render(); msg(`완료! ${n}개를 TV 에 ${res.via === 'bt' ? '블루투스로 바로 ' : ''}반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${listText(res)}`, 'ok'); }
       else msg('일부 올리지 못했습니다:\n' + bad.map(x => `  ${x.path || ''} — ${x.error}`).join('\n'), 'err');
     } catch (e) {
       if (e.queued) { files = []; render(); }    // GitHub 에 맡겨짐 → 목록을 비워 같은 파일을 또 보내지 않게
@@ -396,6 +412,79 @@ const CFG = /*__CONFIG__*/null;
     del(k) { try { localStorage.removeItem(LSP + k); } catch (_) {} },
     names() { const out = []; try { for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (key.startsWith(LSP + 'f.')) out.push(key.slice(LSP.length + 2)); } } catch (_) {} return out; },
   };
+  // ── 보내는 길: 인터넷(GitHub) 또는 블루투스(TV 근처, 크롬·엣지 PC 의 직렬 포트) ──
+  const ghOk = !!(CFG.repo && CFG.api), btOk = CFG.bt !== false && !!navigator.serial;
+  let via = ls.get('via') || (ghOk ? 'gh' : 'bt');
+  if (via === 'bt' && !btOk) via = 'gh';
+  if (via === 'gh' && !ghOk) via = 'bt';
+  function renderVia() {
+    const box = $('#viaBox');
+    box.classList.toggle('hidden', !(ghOk && CFG.bt !== false));
+    $('#via').innerHTML = [['gh', '인터넷 (GitHub)', ghOk], ['bt', '블루투스 (TV 근처)', btOk]].map(([k, t, ok]) =>
+      `<button type="button" data-v="${k}" class="${via === k ? 'on' : ''}" ${ok ? '' : 'disabled'}>${t}</button>`).join('');
+    $('#viaHint').textContent = via === 'bt' ? '보낼 때 뜨는 창에서 TV 의 직렬 포트(COMn)를 고르세요 · 10~20초 기다림 없이 바로 반영'
+      : !btOk && CFG.bt !== false ? '블루투스는 PC 의 크롬·엣지에서만' : '';
+  }
+  $('#via').onclick = (e) => { const b = e.target.closest('[data-v]'); if (b && !b.disabled) { via = b.dataset.v; ls.set('via', via); renderVia(); } };
+  renderVia();
+  let btPort = null;
+  /** 사용자가 버튼을 누른 직후(권한 창을 띄울 수 있을 때) 포트를 골라 둔다 */
+  async function btReady() {
+    if (via !== 'bt') return;
+    if (!navigator.serial) throw new Error('이 브라우저는 블루투스(직렬) 연결을 지원하지 않습니다. PC 의 크롬 또는 엣지로 여세요.');
+    if (btPort) return;
+    try { btPort = (await navigator.serial.getPorts())[0] || null; } catch (_) {}
+    if (!btPort) {
+      try { btPort = await navigator.serial.requestPort(); }
+      catch (e) { throw new Error('TV 의 직렬 포트를 고르지 않았습니다. 창에서 "Bluetooth 링크를 통한 표준 직렬 (COMn)" 을 고르세요. (TV 와 짝짓기가 안 돼 있으면 Windows 설정 → 블루투스 → 기기 추가)'); }
+    }
+  }
+  const BT_MAGIC = enc.encode('TVBT1');
+  const rec = (name, payload) => { const nb = enc.encode(name), out = new Uint8Array(1 + nb.length + 4 + payload.length); out[0] = nb.length; out.set(nb, 1); new DataView(out.buffer).setUint32(1 + nb.length, payload.length); out.set(payload, 5 + nb.length); return out; };
+  /** 꾸러미(h · m · d0…)를 직렬 포트로 보내고 TV 의 결과 기록들({m, d0…} 또는 {e})을 받는다 — TV 앱 BtProtocol 과 같은 형식 */
+  async function btExchange(kind, id, sealed, prog) {
+    await btReady();
+    const total = sealed.reduce((s, [, d]) => s + d.length, 0) || 1;
+    try { await btPort.open({ baudRate: 115200, bufferSize: 1 << 16 }); }
+    catch (e) { btPort = null; throw new Error('TV 에 블루투스로 연결하지 못했습니다 — TV 가 켜져 있고 블루투스 받기가 "대기 중" 인지, 다른 프로그램이 포트를 쓰고 있지 않은지 확인하세요. (' + e.message + ')'); }
+    try {
+      const w = btPort.writable.getWriter();
+      try {
+        await w.write(BT_MAGIC);
+        await w.write(rec('h', enc.encode(JSON.stringify({ v: 1, tv: CFG.tv, kind, id }))));
+        let done = 0;
+        for (const [name, data] of sealed) { await w.write(rec(name, data)); done += data.length; prog(done / total * 0.8); }
+        await w.write(new Uint8Array([0]));
+      } finally { w.releaseLock(); }
+      // 결과 읽기 (TV 가 큰 파일을 쓰는 동안 기다린다: 기본 3분 + 1MB 당 10초)
+      const r = btPort.readable.getReader();
+      let buf = new Uint8Array(0), pos = 0;
+      const deadline = Date.now() + 180000 + total / 1048576 * 10000;
+      const need = async (n) => {
+        while (buf.length - pos < n) {
+          const left = deadline - Date.now();
+          if (left <= 0) { try { await r.cancel(); } catch (_) {} throw new Error('TV 응답이 없습니다 — TV 가 켜져 있고 블루투스 받기가 켜져 있는지 확인하세요.'); }
+          const { value, done } = await Promise.race([r.read(), new Promise(res => setTimeout(() => res({ done: true, timeout: true }), left))]);
+          if (done || !value) { try { await r.cancel(); } catch (_) {} throw new Error('TV 와의 블루투스 연결이 끊겼습니다.'); }
+          const nb = new Uint8Array(buf.length - pos + value.length); nb.set(buf.subarray(pos)); nb.set(value, buf.length - pos); buf = nb; pos = 0;
+        }
+        const out = buf.subarray(pos, pos + n); pos += n; return out;
+      };
+      try {
+        if (dec.decode(await need(5)) !== 'TVBT1') throw new Error('TV 응답 형식이 아닙니다 — 고른 포트가 TV 대시보드가 아닐 수 있습니다.');
+        const files = {};
+        for (let i = 0; i < 4000; i++) {
+          const n = (await need(1))[0];
+          if (n === 0) break;
+          const name = dec.decode(await need(n));
+          const len = new DataView((await need(4)).slice().buffer).getUint32(0);
+          files[name] = (await need(len)).slice();
+          prog(0.8 + 0.2 * Math.min(1, i / 2));
+        }
+        return files;
+      } finally { try { r.releaseLock(); } catch (_) {} }
+    } finally { try { await btPort.close(); } catch (_) {} }
+  }
   let listing = ls.get('list');      // [{n, s, h}] 마지막으로 TV 가 알려 준 폴더의 JSON 목록
   let folder = ls.get('folder');     // {files:[{n, s, t, h}], used, max, at} 폴더 전체 (탐색기)
   function rememberFiles(list, meta) {
@@ -483,6 +572,7 @@ const CFG = /*__CONFIG__*/null;
     }
     $('#xlLoad').disabled = $('#xlReload').disabled = true;
     try {
+      await btReady();
       const r = await fetchFromTv(name);
       useForm(name, r.exists ? r.text : '', 'tv');
       xmsg(r.exists ? '' : `'${name}' 은(는) 아직 없는 파일입니다. 붙여 넣은 표로 새로 만듭니다.`, r.exists ? '' : 'wait');
@@ -591,7 +681,7 @@ const CFG = /*__CONFIG__*/null;
   $('#exQ').oninput = renderExplorer;
   $('#exLoad').onclick = async () => {
     $('#exLoad').disabled = true;
-    try { await ensureSecret(exmsg); await fetchFromTv('', false); exmsg(''); }
+    try { await btReady(); await ensureSecret(exmsg); await fetchFromTv('', false); exmsg(''); }
     catch (e) { exmsg(/비밀번호|TV 응답/.test(e.message) ? e.message : '폴더 내용을 받지 못했습니다: ' + e.message, e.queued ? 'wait' : 'err'); }
     finally { $('#exLoad').disabled = false; }
   };
@@ -603,7 +693,7 @@ const CFG = /*__CONFIG__*/null;
     if (b.dataset.ex === 'view') {                            // 내용 보기: 받아 둔 것, 없으면 TV 에서 받아서
       if (exOpen === n) { exOpen = ''; $('#exView').classList.add('hidden'); renderExplorer(); return; }
       let c = ls.get('f.' + n);
-      if (!c || cacheFresh(n) === false) { try { await ensureSecret(exmsg); await fetchFromTv(n); c = ls.get('f.' + n); exmsg(''); } catch (err) { return exmsg(err.message, 'err'); } }
+      if (!c || cacheFresh(n) === false) { try { await btReady(); await ensureSecret(exmsg); await fetchFromTv(n); c = ls.get('f.' + n); exmsg(''); } catch (err) { return exmsg(err.message, 'err'); } }
       if (!c) return exmsg(`'${n}' 을(를) 읽지 못했습니다.`, 'err');
       const f = X.form(c.text);
       exOpen = n; renderExplorer();
@@ -639,6 +729,7 @@ const CFG = /*__CONFIG__*/null;
     if (xlOut.mode === 'delete' && !confirm(`'${xlFor}' 에서 ${xlOut.removed}개를 지웁니다. 계속할까요?`)) return;
     const btn = $('#xlSend'); btn.disabled = true;
     try {
+      await btReady();
       await ensureSecret(xmsg);
       xmsg('암호화해서 보내는 중…', 'wait');
       const sent = xlOut.json, name = xlFor;

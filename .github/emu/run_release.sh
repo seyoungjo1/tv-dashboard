@@ -14,6 +14,9 @@ adb shell settings put secure immersive_mode_confirmations confirmed
 adb shell settings put global hide_error_dialogs 1; adb shell settings put global anr_show_background 0   # 시스템 "응답 없음" 창이 화면을 덮지 않게
 adb install -r -g "$APK"
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
+# 블루투스 받기: 권한은 미리 주고 블루투스는 꺼 둔다 → 앱이 권한·'찾을 수 있게' 창을 띄우지 않는다 (에뮬레이터에는 짝지을 PC 가 없다)
+for perm in BLUETOOTH_CONNECT BLUETOOTH_ADVERTISE BLUETOOTH_SCAN; do adb shell pm grant $PKG android.permission.$perm >/dev/null 2>&1 || true; done
+adb shell svc bluetooth disable >/dev/null 2>&1 || true
 adb shell appops set $PKG SYSTEM_ALERT_WINDOW allow || true
 adb shell am start -W -n $PKG/com.seyoungjo.tvdashboard.ui.MainActivity >/dev/null; sleep 4
 adb shell am force-stop $PKG

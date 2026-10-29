@@ -26,6 +26,7 @@ import com.seyoungjo.tvdashboard.data.MenuScanner
 import com.seyoungjo.tvdashboard.server.Auth
 import com.seyoungjo.tvdashboard.server.NetInfo
 import com.seyoungjo.tvdashboard.server.ServerService
+import com.seyoungjo.tvdashboard.relay.BtServer
 import com.seyoungjo.tvdashboard.relay.RelaySettings
 import com.seyoungjo.tvdashboard.relay.RelayWorker
 import com.seyoungjo.tvdashboard.update.UpdateManager
@@ -59,6 +60,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
             toast("불러오기 실패: ${e.message}")
         }
         refresh()
+    }
+
+    private val askBt = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        if (r.values.all { it }) { BtServer.kick(); toast("블루투스 권한을 허용했습니다. 잠시 후 '대기 중' 으로 바뀝니다.") }
+        else toast("블루투스 권한이 없으면 블루투스로 받을 수 없습니다.")
+        view?.postDelayed({ refresh() }, 1200)
     }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
@@ -148,6 +155,24 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 .setPositiveButton("초기화") { _, _ -> RelaySettings.reset(); RelayWorker.kick(); refresh() }
                 .setNegativeButton("취소", null).show()
         }
+        click("bt_info") {
+            val ctx = requireContext()
+            if (!BtServer.supported(ctx)) toast("이 기기에는 블루투스가 없습니다.")
+            else if (!BtServer.hasPermission(ctx)) askBt.launch(BtServer.permissions())
+            else if (BtServer.adapter(ctx)?.isEnabled != true) open(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+            else { BtServer.kick(); view?.postDelayed({ refresh() }, 800) }
+        }
+        click("bt_pair") {
+            val ctx = requireContext()
+            when {
+                !BtServer.supported(ctx) -> toast("이 기기에는 블루투스가 없습니다.")
+                !BtServer.hasPermission(ctx) -> askBt.launch(BtServer.permissions())
+                else -> { BtServer.requestDiscoverable(requireActivity(), 0); view?.postDelayed({ refresh() }, 1500) }
+            }
+        }
+        listOf("bt_enabled", "bt_name", "bt_visible").forEach { key ->
+            findPreference<Preference>(key)?.setOnPreferenceChangeListener { _, _ -> view?.post { BtServer.kick(); view?.postDelayed({ refresh() }, 800) }; true }
+        }
         numeric("relay_interval")
         findPreference<Preference>("relay_enabled")?.setOnPreferenceChangeListener { _, _ ->
             view?.post { RelayWorker.kick(); refresh() }; true
@@ -198,6 +223,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("relay_info")?.summary =
             "${RelayWorker.status}\n레포: ${RelaySettings.repo} · TV 이름: ${RelaySettings.tv}" +
                 (if (RelayWorker.lastSync > 0) "\n마지막 확인: " + java.text.DateFormat.getTimeInstance().format(java.util.Date(RelayWorker.lastSync)) else "")
+        findPreference<Preference>("bt_info")?.summary = when {
+            !BtServer.supported(ctx) -> "이 기기에는 블루투스가 없습니다"
+            !BtServer.hasPermission(ctx) -> "권한 필요 — 눌러서 허용"
+            else -> BtServer.status + (BtServer.name(ctx).takeIf { it.isNotEmpty() }?.let { "\n이름: $it" } ?: "") +
+                (if (BtServer.discoverable(ctx)) "\n다른 기기에서 찾을 수 있음 (짝짓기 가능)" else "\n지금은 찾을 수 없음 — 새 PC 를 짝지으려면 아래 '지금 찾을 수 있게 하기'") +
+                (if (BtServer.lastAt > 0) "\n마지막 받음: " + java.text.DateFormat.getTimeInstance().format(java.util.Date(BtServer.lastAt)) + " (${BtServer.lastPeer}) · 모두 ${BtServer.count}건" else "")
+        }
         findPreference<Preference>("check_update")?.summary =
             "현재 버전 ${UpdateManager.currentVersionName(ctx)} (${UpdateManager.currentVersionCode(ctx)})"
         findPreference<Preference>("install_unknown")?.summary =

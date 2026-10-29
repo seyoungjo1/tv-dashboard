@@ -27,6 +27,20 @@
             app:title="확인 주기(초)" app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="블루투스 받기 (TV 근처에서 · 인터넷 없이)">
+        <SwitchPreferenceCompat app:key="bt_enabled" app:defaultValue="true"
+            app:title="블루투스 받기 사용"
+            app:summary="TV 가 켜져 있는 동안 항상 받습니다. 짝짓기(페어링)한 PC 의 관리자 프로그램·직원 HTML 이 GitHub 없이 바로 보냅니다." />
+        <Preference app:key="bt_info" app:title="블루투스 받기 상태" app:summary="-" />
+        <SwitchPreferenceCompat app:key="bt_visible" app:defaultValue="true"
+            app:title="항상 찾을 수 있게 (짝짓기 대기)"
+            app:summary="앱을 켤 때 '다른 기기에서 찾을 수 있게' 를 요청합니다 (허용 창에서 '허용'). 새 PC 를 짝지을 때 필요합니다." />
+        <Preference app:key="bt_pair" app:title="지금 찾을 수 있게 하기"
+            app:summary="PC 의 Windows 설정 → 블루투스 → 기기 추가에서 이 TV 를 고르면 짝짓기됩니다 (처음 한 번)." />
+        <EditTextPreference app:key="bt_name" app:defaultValue=""
+            app:title="블루투스 이름" app:summary="비우면 기기 이름 그대로. PC 에서 TV 를 찾을 때 보이는 이름입니다." />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="대기 화면 (동영상 + 멘트)">
         <SwitchPreferenceCompat app:key="idle_enabled" app:defaultValue="true"
             app:title="대기 화면 사용"

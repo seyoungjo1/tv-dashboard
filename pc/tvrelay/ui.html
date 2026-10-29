@@ -454,6 +454,14 @@
     <div id="directMsg" class="msg hidden" style="margin-top:8px"></div>
   </div>
   <div class="card">
+    <h3 style="margin-top:0">📶 블루투스 (TV 근처 · 인터넷 없이)</h3>
+    <p class="hint">이 PC 와 TV 를 블루투스로 <b>짝짓기</b>하면(Windows 설정 → 블루투스 → 기기 추가 → TV 이름, 처음 한 번) 'Bluetooth 링크를 통한 표준 직렬 (COMn)' 포트가 생깁니다.
+      그 포트를 고르고 [시험] → [저장] 하면 인터넷·GitHub 없이 바로 보냅니다 (1~2 Mbps — JSON·HTML·그림은 몇 초, 동영상은 분 단위).
+      직접 연결(Tailscale)이 닿으면 그쪽을 먼저 쓰고, 둘 다 안 되면 GitHub 로 보냅니다. TV 앱 1.11.0 이상 · TV 설정의 '블루투스 받기' 가 켜져 있어야 합니다.</p>
+    <table id="btList" style="width:100%"></table>
+    <div id="btMsg" class="msg hidden" style="margin-top:8px"></div>
+  </div>
+  <div class="card">
     <h3 style="margin-top:0">TV 백업</h3>
     <p class="hint">TV 이름별로 이 PC 에 백업됩니다 (<code>tv-backup</code> 폴더). PC 에서 올린 파일·설정은 자동으로 백업되고,
       직원 도구·TV 에서 고친 것까지 맞추려면 <b>[백업 파일 넣기]</b>를 누르세요.
@@ -554,7 +562,7 @@
     $('#dock').classList.toggle('hidden', t !== 'explorer');
     for (const [id, name] of [['#ssPage','ss'],['#settingsPage','settings'],['#updatePage','update'],['#connPage','conn'],['#setupPage','setup'],['#groupsPage','groups']]) $(id).classList.toggle('hidden', t !== name);
     if (t === 'groups') loadGroups();
-    if (t === 'conn') { loadBackup(); loadTvs(); loadDirect(); }
+    if (t === 'conn') { loadBackup(); loadTvs(); loadDirect(); loadBt(); }
     ssTab(t === 'ss');
   }
   // [화면보호기] 탭: 오른쪽 미리보기 칸(tvpane)을 통째로 옮겨 와 화면보호기 모드로 (돌아갈 때 제자리로)
@@ -682,6 +690,41 @@
       }
     } catch (er) { msg(m, er.message, 'err'); }
   });
+  // ── 블루투스: TV 마다 COM 포트 ──
+  async function loadBt() {
+    let r;
+    try { r = await api('GET', '/api/bt'); } catch (e) { $('#btList').innerHTML = `<tr><td class="hint">${esc(e.message)}</td></tr>`; return; }
+    const ports = r.ports || [];
+    const opts = (cur) => `<option value="">포트 고르기…</option>` + ports.map(p => `<option value="${esc(p.port)}"${p.port === cur ? ' selected' : ''}>${esc(p.port)}${p.bt ? ' (블루투스)' : ''}${p.desc && !p.bt ? ' — ' + esc(p.desc) : ''}</option>`).join('') +
+      (cur && !ports.some(p => p.port === cur) ? `<option value="${esc(cur)}" selected>${esc(cur)} (지금은 안 보임)</option>` : '');
+    $('#btList').innerHTML = r.items.map(t => `<tr data-btv="${esc(t.tv)}">
+      <td style="white-space:nowrap"><b>${esc(t.tv)}</b><br><span class="hint">${t.connected ? '<span class="pill on" style="font-size:11px">연결됨</span>' : t.port ? (t.enabled ? '설정됨 · 닿으면 씀' : '꺼 둠') : '안 씀'}</span></td>
+      <td><select class="bport">${opts(t.port)}</select> <input class="bcustom" placeholder="직접 입력 (예: COM7)" style="width:130px" value="${ports.length ? '' : esc(t.port || '')}">
+        <div class="hint" style="margin-top:3px">${ports.length ? `이 PC 의 포트 ${ports.length}개` : r.windows ? '직렬 포트가 없습니다 — 먼저 TV 와 짝지으세요' : 'Windows 가 아니면 /dev/rfcomm0 같은 장치 이름을 직접 입력'}</div></td>
+      <td style="white-space:nowrap"><label class="hint"><input type="checkbox" class="ben"${t.enabled ? ' checked' : ''}> 사용</label></td>
+      <td style="text-align:right;white-space:nowrap"><button class="secondary bbtest">시험</button> <button class="bbsave">저장</button>${t.port ? ' <button class="secondary bbrm">지우기</button>' : ''}</td></tr>`).join('');
+  }
+  $('#btList').addEventListener('click', async (e) => {
+    const tr = e.target.closest('tr[data-btv]'); if (!tr) return;
+    const body = { tv: tr.dataset.btv, port: tr.querySelector('.bcustom').value.trim() || tr.querySelector('.bport').value, enabled: tr.querySelector('.ben').checked };
+    const m = $('#btMsg');
+    try {
+      if (e.target.closest('.bbtest')) {
+        if (!body.port) return msg(m, '포트를 고르세요', 'err');
+        msg(m, `'${body.tv}' 에 블루투스(${body.port})로 연결 시험 중… (10초쯤)`, 'warn');
+        const r = await api('POST', '/api/bt/test', body);
+        if (r.ok) msg(m, `연결 성공: ${r.port} · 앱 v${r.app || '?'} · 남은 공간 ${size(r.free || 0)} · ${r.sec}초 — [저장] 을 누르면 이제부터 블루투스로 보냅니다`);
+        else msg(m, `연결 실패 (${r.port}): ${r.error}`, 'err');
+      } else if (e.target.closest('.bbsave')) {
+        await api('POST', '/api/bt', body);
+        msg(m, `'${body.tv}' 블루투스 저장 — 닿으면 블루투스로, 안 닿으면 GitHub 로 보냅니다`);
+        loadBt(); loadState();
+      } else if (e.target.closest('.bbrm') && confirm(`'${body.tv}' 의 블루투스 설정을 지울까요?`)) {
+        await api('POST', '/api/bt', { tv: body.tv, remove: true });
+        msg(m, `'${body.tv}' 블루투스 설정 지움`); loadBt(); loadState();
+      }
+    } catch (er) { msg(m, er.message, 'err'); }
+  });
   $('#tvSel').onchange = (e) => { const v = e.target.value; if (v === '__add') addTv(); else selectTv(v); };
   $('#tvAddBtn').onclick = addTv;
   $('#tvList').addEventListener('click', async (e) => {
@@ -794,8 +837,8 @@
         pill.className = 'pill ' + (state.online ? 'on' : 'off');
         const ago = state.age_sec < 60 ? '방금' : state.age_sec < 3600 ? Math.round(state.age_sec / 60) + '분 전' : Math.round(state.age_sec / 3600) + '시간 전';
         verWarn(state.status?.versionName);
-        pill.textContent = `📺 ${info?.tv || 'TV'} · ` + (state.via === 'direct' ? '⚡ 직접 연결' : state.online ? `응답 ${ago}` : `꺼진 것 같음 (마지막 응답 ${ago})`) + ` · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}` + (state.status?.videoError ? ` · ⚠ 화면보호기 동영상 재생 실패: ${state.status.videoError}` : '');
-        pill.title = state.cached ? '저장해 둔 마지막 상태 — TV 확인 중' : state.via === 'direct' ? `Tailscale/같은 망으로 바로 연결 중: ${state.directUrl || ''}` : '';
+        pill.textContent = `📺 ${info?.tv || 'TV'} · ` + (state.via === 'direct' ? '⚡ 직접 연결' : state.via === 'bt' ? '📶 블루투스' : state.online ? `응답 ${ago}` : `꺼진 것 같음 (마지막 응답 ${ago})`) + ` · 앱 v${state.status?.versionName || '?'} · 남은 공간 ${size(state.status?.freeBytes || 0)}` + (state.status?.videoError ? ` · ⚠ 화면보호기 동영상 재생 실패: ${state.status.videoError}` : '');
+        pill.title = state.cached ? '저장해 둔 마지막 상태 — TV 확인 중' : state.via === 'direct' ? `Tailscale/같은 망으로 바로 연결 중: ${state.directUrl || ''}` : state.via === 'bt' ? `블루투스로 바로 연결 중: ${state.directUrl || ''}` : '';
       }
       await loadGrants();
       renderTree(); fillSettings();
@@ -1745,8 +1788,8 @@
         renderJobs(); toast(desc + ' — ' + note); return null;
       }
       jobs.unshift({ id: r.id, at: Date.now(), desc: desc + (sk ? ` (${qd ? `이미 보낸 ${qd}개 · ` : ''}바뀌지 않은 ${sk - qd}개 건너뜀)` : ''), st: 'wait',
-                     note: r.direct ? '⚡ 직접 연결로 바로 보냄' : 'GitHub 에 맡김 — TV 가 가져가면 반영됩니다' });
-      renderJobs(); toast(r.direct ? '⚡ TV 에 바로 반영했습니다 — ' + desc : '보냈습니다 — ' + desc + '\nTV 가 가져가면 반영됩니다 (결과는 아래 [전송 결과])'); poll(r.id); return r.id;
+                     note: r.direct ? (r.via === 'bt' ? '📶 블루투스로 바로 보냄' : '⚡ 직접 연결로 바로 보냄') : 'GitHub 에 맡김 — TV 가 가져가면 반영됩니다' });
+      renderJobs(); toast(r.direct ? (r.via === 'bt' ? '📶' : '⚡') + ' TV 에 바로 반영했습니다 — ' + desc : '보냈습니다 — ' + desc + '\nTV 가 가져가면 반영됩니다 (결과는 아래 [전송 결과])'); poll(r.id); return r.id;
     } catch (e) { alert(e.message); }
     finally { setTimeout(() => inflight.delete(key), 1500); }
   }

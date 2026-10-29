@@ -18,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.seyoungjo.tvdashboard.R
 import com.seyoungjo.tvdashboard.data.AppSettings
+import com.seyoungjo.tvdashboard.relay.BtServer
 import com.seyoungjo.tvdashboard.relay.RelayWorker
 import com.seyoungjo.tvdashboard.ui.MainActivity
 
@@ -39,6 +40,7 @@ class ServerService : Service() {
         createChannel()
         acquireLocks()
         RelayWorker.start(this)     // GitHub 원격 중계 (설정돼 있을 때만 동작)
+        BtServer.start(this)        // 블루투스 받기 (TV 근처 PC · 직원 HTML, 인터넷 없이)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

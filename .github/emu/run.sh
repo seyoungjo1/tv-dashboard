@@ -15,6 +15,9 @@ adb shell settings put secure immersive_mode_confirmations confirmed   # "전체
 adb shell settings put global hide_error_dialogs 1; adb shell settings put global anr_show_background 0   # 시스템 "응답 없음" 창이 화면을 덮지 않게
 adb install -r -g "$APK"
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
+# 블루투스 받기: 권한은 미리 주고 블루투스는 꺼 둔다 → 앱이 권한·'찾을 수 있게' 창을 띄우지 않는다 (에뮬레이터에는 짝지을 PC 가 없다)
+for perm in BLUETOOTH_CONNECT BLUETOOTH_ADVERTISE BLUETOOTH_SCAN; do adb shell pm grant $PKG android.permission.$perm >/dev/null 2>&1 || true; done
+adb shell svc bluetooth disable >/dev/null 2>&1 || true
 adb shell appops set $PKG SYSTEM_ALERT_WINDOW allow || true
 
 # 한 번 띄워 앱 폴더를 만들게 한 뒤 자료를 넣는다
@@ -39,6 +42,8 @@ sleep 10
 adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null || true; sleep 1
 adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" || true
 r=0; python3 .github/emu/emu_test.py "$OUT" || r=1
+# 설정 화면의 '블루투스 받기' (에뮬레이터: 블루투스 꺼짐/없음 → 그 상태가 보이고 앱이 죽지 않아야 한다)
+python3 .github/emu/emu_bt_test.py "$OUT/bt" || r=1
 # 대시보드 웹 화면 배율 (다른 분이 만든 반응형 HTML 처럼 화면 폭에 따라 글자 크기가 바뀌는 페이지)
 adb shell mkdir -p "$ROOT/배율시험"
 adb push emu-content/scale.html "$ROOT/배율시험/index.html" >/dev/null

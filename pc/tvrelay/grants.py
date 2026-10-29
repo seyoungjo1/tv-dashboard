@@ -139,6 +139,7 @@ def bake(cfg: RelayConfig, g: dict[str, Any], password: str, tool_token: str = "
         "folder": g["folder"], "title": g["name"],
         "types": g["types"], "maxUpload": MAX_UPLOAD,
         "api": os.environ.get("TVRELAY_GITHUB_API") or API,
+        "bt": True,                              # 블루투스(TV 근처)로도 보낼 수 있음 — TV 앱 1.11.0 이상
     }
     if g.get("kind") == "notice":
         conf["file"] = NOTICE_FILE

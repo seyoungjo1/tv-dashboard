@@ -21,8 +21,8 @@ import java.security.MessageDigest
 class RelayClient(
     private val api: GitHubApi,
     private val crypto: RelayCrypto,
-    val tv: String,
-) {
+    override val tv: String,
+) : JobSource {
     /** kind = "job" (관리자) 또는 "up/<gid>" (직원 업로드 도구). key = 그 작업을 푸는 키 (null 이면 관리자 키) */
     data class Job(
         val id: String, val branch: String, val commit: String,
@@ -57,7 +57,7 @@ class RelayClient(
     }
 
     /** 작업 하나 열기: (작업 목록, 조각 이름 → blob SHA) */
-    fun open(job: Job): Pair<JSONObject, Map<String, String>> {
+    override fun open(job: Job): Pair<JSONObject, Map<String, String>> {
         val files = api.commitFiles(job.commit)
         val m = files["m"] ?: throw SecurityException("작업에 목록(m)이 없습니다.")
         val plain = cryptoOf(job).open(api.blob(m), RelayCrypto.aad(tv, job.kind, job.id, "m"))
@@ -65,7 +65,7 @@ class RelayClient(
     }
 
     /** 작업의 파일 조각들을 순서대로 풀어 out 에 쓴다. 돌려주는 값: (바이트 수, SHA-256) */
-    fun readChunks(job: Job, files: Map<String, String>, names: JSONArray, out: OutputStream): Pair<Long, String> {
+    override fun readChunks(job: Job, files: Map<String, String>, names: JSONArray, out: OutputStream): Pair<Long, String> {
         val md = MessageDigest.getInstance("SHA-256")
         var total = 0L
         for (i in 0 until names.length()) {
@@ -79,12 +79,10 @@ class RelayClient(
         return total to md.digest().joinToString("") { "%02x".format(it) }
     }
 
-    fun deleteJob(job: Job) = api.deleteBranch(job.branch)
+    override fun deleteJob(job: Job) { api.deleteBranch(job.branch) }
 
     /** 결과 올리기. attachments: 결과에 붙일 파일(내려받기 요청) — 조각 이름은 결과 JSON 의 chunks 에 들어간다 */
-    fun writeResult(
-        id: String, result: JSONObject, attachments: List<Pair<JSONObject, File>> = emptyList(), key: RelayCrypto? = null,
-    ) {
+    override fun writeResult(id: String, result: JSONObject, attachments: List<Pair<JSONObject, File>>, key: RelayCrypto?) {
         val crypto = key ?: this.crypto
         val files = LinkedHashMap<String, ByteArray>()
         var n = 0

@@ -23,6 +23,7 @@ import mimetypes
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 import traceback
@@ -33,7 +34,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, backup, config, direct, grants, groups, syncbat, update, versions, video
+from . import __version__, backup, bt, config, direct, grants, groups, syncbat, update, versions, video
 from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
@@ -105,6 +106,8 @@ class Api:
         # 직접 연결 (Tailscale · 같은 망): 닿는 TV 는 GitHub 를 거치지 않고 바로
         self.finder = direct.Finder(root, self._saved_state)
         self.direct_results: dict[str, dict[str, Any]] = {}   # 직접 보낸 작업 id(d-…) → 결과 (한 번 읽으면 지움)
+        self.bts: dict[str, tuple[float, bt.BtChannel]] = {}    # 블루투스로 닿은 TV (30초 기억)
+        self.bt_bad: dict[str, float] = {}
 
     # ── 직접 연결 ──
     def _saved_state(self, tv: str) -> dict[str, Any] | None:
@@ -116,12 +119,115 @@ class Api:
             return None
 
     def direct_for(self, tv: str | None = None) -> direct.Direct | None:
-        """이 TV 로 직접 연결이 닿으면 클라이언트, 아니면 None (GitHub 로)"""
+        """이 TV 로 직접 연결이 닿으면 클라이언트, 아니면 None"""
         try:
             return self.finder.get(tv or self._cur_tv())
         except Exception as e:
             echo("직접 연결 확인 실패: %s" % e)
             return None
+
+    def channel_for(self, tv: str | None = None) -> Any:
+        """GitHub 를 거치지 않는 빠른 통로: 직접 연결(Tailscale·같은 망) → 블루투스 → 없으면 None (GitHub 로)"""
+        tv = tv or self._cur_tv()
+        return self.direct_for(tv) or self.bt_for(tv)
+
+    def forget_channels(self, tv: str | None = None) -> None:
+        self.finder.forget(tv)
+        with self.lock:
+            if tv is None:
+                self.bts.clear(); self.bt_bad.clear()
+            else:
+                self.bts.pop(tv, None); self.bt_bad.pop(tv, None)
+
+    def _forget(self, ch: Any) -> None:
+        if getattr(ch, "kind", "") == "bt":
+            with self.lock:
+                self.bts.pop(ch.tv, None); self.bt_bad[ch.tv] = time.time()
+        else:
+            self.finder.forget(ch.tv)
+
+    # ── 블루투스 (TV 근처 · 인터넷 없이) ──
+    def bt_config(self, tv: str) -> dict[str, Any]:
+        e = (direct.load(self.root).get(tv) or {}).get("bt") or {}
+        return e if isinstance(e, dict) else {}
+
+    def bt_for(self, tv: str) -> bt.BtChannel | None:
+        e = self.bt_config(tv)
+        port = str(e.get("port") or "")
+        if not port or not e.get("enabled", True):
+            return None
+        now = time.time()
+        with self.lock:
+            hit = self.bts.get(tv)
+            if hit and now - hit[0] < bt.OK_CACHE and hit[1].port == port:
+                return hit[1]
+            if now - self.bt_bad.get(tv, 0) < bt.FAIL_CACHE:
+                return None
+        try:
+            cfg = config.load(self.root)
+            if cfg is None:
+                return None
+            from .crypto import Box
+            ch = bt.BtChannel(tv, port, Box(cfg.key))
+            ch.echo = echo
+            ch.ping()
+        except Exception as e:
+            echo("블루투스(%s) 연결 안 됨 — GitHub 로: %s" % (port, e))
+            with self.lock:
+                self.bt_bad[tv] = now; self.bts.pop(tv, None)
+            return None
+        with self.lock:
+            self.bts[tv] = (now, ch); self.bt_bad.pop(tv, None)
+        return ch
+
+    def bt_info(self) -> dict[str, Any]:
+        cfg = config.load(self.root)
+        items = []
+        for t in (cfg.all_tvs if cfg else ()):
+            e = self.bt_config(t)
+            hit = self.bts.get(t)
+            items.append({"tv": t, "port": e.get("port", ""), "enabled": e.get("enabled", True),
+                          "connected": bool(hit and time.time() - hit[0] < bt.OK_CACHE)})
+        return {"items": items, "ports": bt.list_ports(), "windows": sys.platform == "win32"}
+
+    def bt_save(self, body: dict[str, Any]) -> dict[str, Any]:
+        tv = str(body.get("tv", "")).strip()
+        cfg = config.load(self.root)
+        if not cfg or tv not in cfg.all_tvs:
+            raise ValueError("모르는 TV 입니다: %s" % tv)
+        data = direct.load(self.root)
+        e = dict(data.get(tv) or {})
+        if body.get("remove"):
+            e.pop("bt", None)
+        else:
+            port = str(body.get("port", "")).strip().upper()
+            if not port:
+                raise ValueError("포트를 고르세요 (예: COM5)")
+            e["bt"] = {"port": port, "enabled": bool(body.get("enabled", True))}
+        data[tv] = e
+        direct.save(self.root, data)
+        self.forget_channels(tv)
+        echo("블루투스 %s: %s%s" % ("지움" if body.get("remove") else "저장", tv, (" " + e["bt"]["port"]) if e.get("bt") else ""))
+        return self.bt_info()
+
+    def bt_test(self, body: dict[str, Any]) -> dict[str, Any]:
+        tv = str(body.get("tv", "")).strip()
+        port = str(body.get("port") or self.bt_config(tv).get("port") or "").strip().upper()
+        if not port:
+            raise ValueError("포트를 고르세요")
+        cfg = config.load(self.root)
+        if cfg is None:
+            raise ValueError("먼저 처음 설정을 하세요")
+        from .crypto import Box
+        ch = bt.BtChannel(tv, port, Box(cfg.key))
+        t0 = time.time()
+        try:
+            st = ch.ping()
+        except Exception as e:
+            echo("블루투스 시험 %s %s: %s" % (tv, port, e))
+            return {"ok": False, "port": port, "error": str(e)}
+        echo("블루투스 시험 %s %s: 성공 (%.1f초)" % (tv, port, time.time() - t0))
+        return {"ok": True, "port": port, "app": st.get("versionName"), "free": st.get("freeBytes"), "sec": round(time.time() - t0, 1)}
 
     def _save_state_cache(self, tv: str, st: dict[str, Any]) -> None:
         """직접 받은 상태를 TV 별 캐시에 (화면을 다시 켤 때·TV 목록에 바로 보이게). sha 가 없어 GitHub 상태와는 섞이지 않는다"""
@@ -236,7 +342,7 @@ class Api:
         for t in cfg.all_tvs:
             hit = self.finder.ok.get(t)
             it: dict[str, Any] = {"tv": t, "online": False, "age_sec": None, "files": None, "app": "",
-                                  "direct": bool(self.finder.configured(t)),
+                                  "direct": bool(self.finder.configured(t)), "bt": str(self.bt_config(t).get("port") or ""),
                                   "directOn": bool(hit and time.time() - hit[0] < direct.PROBE_CACHE)}
             try:
                 c = json.loads((config.tv_dir(self.root, t) / "state-cache.json").read_text(encoding="utf-8"))
@@ -364,14 +470,14 @@ class Api:
         if max_age and self._last_state and time.time() - self._state_at < max_age:
             return self._last_state                        # 방금 확인했으면 다시 묻지 않는다
         st = None
-        d = self.direct_for()
+        d = self.channel_for()
         if d is not None:
             try:
-                st = d.state()                                 # 직접 연결: TV 에서 바로 (GitHub 를 거치지 않음)
+                st = d.state()                                 # 직접 연결·블루투스: TV 에서 바로 (GitHub 를 거치지 않음)
                 self._save_state_cache(d.tv, st)
             except Exception as e:
                 echo("직접 연결로 상태를 받지 못해 GitHub 로 확인합니다: %s" % e)
-                self.finder.forget(d.tv)
+                self._forget(d)
         if st is None:
             st = self.relay().state(self.state_cache)
         self._state_at = time.time()
@@ -467,13 +573,13 @@ class Api:
             raise ValueError("미리보기로 받기에는 너무 큽니다 (%.0f MB). 필요한 파일만 '다운로드' 하세요." % (total / 1048576))
         if not need:
             return {"ready": True}
-        d = self.direct_for()
-        if d is not None:                                    # 직접 연결: 지금 바로 받아 둔다
+        d = self.channel_for()
+        if d is not None:                                    # 직접 연결·블루투스: 지금 바로 받아 둔다
             tv = d.tv
             for p in need:
                 try:
                     blob = d.get(p)
-                except direct.DirectError as e:
+                except (direct.DirectError, bt.BtError) as e:
                     raise ValueError("TV 에서 받지 못했습니다: %s (%s)" % (p, e))
                 self._cache_put(p, blob, t=(self.tree.get(p) or {}).get("t"))
                 backup.record_put(self.root, tv, p, blob)
@@ -626,7 +732,7 @@ class Api:
             echo("바뀌지 않은 %d개는 건너뜀" % len(skipped))
         versions.save(self.root, vers, self._cur_tv())
         mb = job.size / 1048576
-        d = self.direct_for()
+        d = self.channel_for()
         if d is not None:
             r = self._send_direct(d, job, blobs)
             if r is not None:                               # 직접 보냈음 — 결과도 바로
@@ -637,7 +743,7 @@ class Api:
                 self._record(rec)
                 mirrored = self._mirror(rec)
                 self._state_at = 0.0                        # 다음 상태 확인은 바로 TV 에서
-                return {"id": r["id"], "skipped": skipped, "queued": queued_skip, "mirrored": mirrored, "direct": True}
+                return {"id": r["id"], "skipped": skipped, "queued": queued_skip, "mirrored": mirrored, "direct": True, "via": r.get("via", "direct")}
         echo("TV 로 작업 보내는 중… (%d개, %.1f MB)" % (len(job.ops), mb))
         id_ = self.relay().submit(job)
         for f in used:
@@ -656,29 +762,46 @@ class Api:
         mirrored = self._mirror(rec)
         return {"id": id_, "skipped": skipped, "queued": queued_skip, "mirrored": mirrored}
 
-    def _send_direct(self, d: direct.Direct, job: Job, blobs: list[bytes | None]) -> dict[str, Any] | None:
-        """직접 연결로 작업을 바로 실행. 연결이 중간에 끊기면(첫 작업도 못 함) None → GitHub 로"""
+    def _send_direct(self, d: Any, job: Job, blobs: list[bytes | None]) -> dict[str, Any] | None:
+        """직접 연결·블루투스로 작업을 바로 실행. 연결이 중간에 끊기면(첫 작업도 못 함) None → GitHub 로"""
         id_ = "d-" + uuid.uuid4().hex[:12]
-        echo("TV 로 직접 보내는 중… (%d개, %.1f MB, %s)" % (len(job.ops), job.size / 1048576, d.url))
+        via = getattr(d, "kind", "direct")
+        echo("TV 로 %s 보내는 중… (%d개, %.1f MB, %s)" % ("블루투스로" if via == "bt" else "직접", len(job.ops), job.size / 1048576, d.url))
         results: list[dict[str, Any]] = []
-        for op, blob in zip(job.ops, blobs):
+        if hasattr(d, "run_job"):                             # 블루투스: 작업 하나 = 연결 하나
+            try:
+                results = list(d.run_job(job, blobs).get("results") or [])
+            except (OSError, ValueError, bt.BtError) as e:
+                echo("블루투스 연결이 안 돼 GitHub 로 보냅니다: %s" % e)
+                self._forget(d)
+                return None
+        for op, blob in (zip(job.ops, blobs) if not hasattr(d, "run_job") else ()):
             try:
                 r = d.run_op(op, blob)
             except (OSError, ValueError) as e:              # 연결이 끊김
                 if not results:
                     echo("직접 연결이 끊겨 GitHub 로 보냅니다: %s" % e)
-                    self.finder.forget(d.tv)
+                    self._forget(d)
                     return None
                 r = {"op": op.get("op"), "path": op.get("path"), "ok": False, "error": "연결이 끊겼습니다: %s" % e}
             results.append(r)
         ok = all(x.get("ok") for x in results)
-        res = {"v": 1, "id": id_, "ok": ok, "results": results, "time": int(time.time() * 1000), "via": "direct"}
+        res = {"v": 1, "id": id_, "ok": ok, "results": results, "time": int(time.time() * 1000), "via": via}
         self.direct_results[id_] = res
         if len(self.direct_results) > 50:
             del self.direct_results[next(iter(self.direct_results))]
         bad = [x for x in results if not x.get("ok")]
-        echo("직접 보냄 %s: %s" % (id_, "모두 성공" if ok else "실패 %d개 — %s" % (len(bad), ", ".join("%s(%s)" % (x.get("path"), x.get("error")) for x in bad[:3]))))
+        echo("%s %s: %s" % ("블루투스로 보냄" if via == "bt" else "직접 보냄", id_, "모두 성공" if ok else "실패 %d개 — %s" % (len(bad), ", ".join("%s(%s)" % (x.get("path"), x.get("error")) for x in bad[:3]))))
         return res
+
+    def _fast_gets(self, ch: Any, paths: list[str]) -> dict[str, Any]:
+        """빠른 통로로 여러 파일 받기 — 블루투스는 한 연결로 묶고, 직접 연결은 하나씩"""
+        if hasattr(ch, "run_job"):
+            job = Job()
+            for p in paths:
+                job.op("get", path=p)
+            return ch.run_job(job, [None] * len(paths))
+        return {"results": [ch.run_op({"op": "get", "path": p}) for p in paths]}
 
     def _record(self, rec: list[tuple[str, Any]]) -> None:
         """PC 에서 보낸 그대로 백업(tv-backup)에 반영 — 새 TV 를 연결하면 이걸 그대로 올린다"""
@@ -732,7 +855,7 @@ class Api:
                         frec.append((kind, a))
                     if not job.ops:
                         continue
-                    fd = self.direct_for(f)
+                    fd = self.channel_for(f)
                     r = self._send_direct(fd, job, blobs) if fd is not None else None
                     id_ = r["id"] if r is not None else Relay(cfg.with_tv(f)).submit(job)
                     versions.save(self.root, vers, f)
@@ -801,7 +924,7 @@ class Api:
             raise ValueError("설정이 없습니다")
         main = g["main"]
         mr = Relay(cfg.with_tv(main))
-        md = self.direct_for(main)
+        md = self.channel_for(main)
         st = None
         if md is not None:
             try:
@@ -809,7 +932,7 @@ class Api:
                 self._save_state_cache(main, st)
             except Exception as e:
                 echo("주 TV '%s' 직접 연결 실패 — GitHub 로: %s" % (main, e))
-                self.finder.forget(main); md = None
+                self._forget(md); md = None
         if st is None:
             st = mr.state(config.tv_dir(self.root, main) / "state-cache.json")
         if st is None:
@@ -834,7 +957,7 @@ class Api:
                 return
             self.gk["msg"] = "주 TV '%s' 에서 받는 중… %d/%d" % (main, got, len(need))
             if md is not None:
-                r = {"results": [md.run_op({"op": "get", "path": p}) for p in groupq]}
+                r = self._fast_gets(md, groupq)
             else:
                 job = Job()
                 for p in groupq:
@@ -862,7 +985,7 @@ class Api:
         report: list[str] = []
         for f in g["followers"]:
             fr = Relay(cfg.with_tv(f))
-            fd = self.direct_for(f)
+            fd = self.channel_for(f)
             fst = None
             if fd is not None:
                 try:
@@ -870,7 +993,7 @@ class Api:
                     self._save_state_cache(f, fst)
                 except Exception as e:
                     echo("'%s' 직접 연결 실패 — GitHub 로: %s" % (f, e))
-                    self.finder.forget(f); fd = None
+                    self._forget(fd); fd = None
             if fst is None:
                 fst = fr.state(config.tv_dir(self.root, f) / "state-cache.json")
             if fst is None:
@@ -983,7 +1106,7 @@ class Api:
             got_mb = 0.0
             fails: list[str] = []
 
-            d = self.direct_for(tv)
+            d = self.channel_for(tv)
 
             def flush() -> None:
                 nonlocal group, size, got_mb
@@ -992,7 +1115,7 @@ class Api:
                 names = ", ".join(p.rsplit("/", 1)[-1] for p in group[:3]) + (" 외 %d개" % (len(group) - 3) if len(group) > 3 else "")
                 self.bk["msg"] = "TV 에서 받는 중… %.1f/%.1f MB · 지금: %s" % (got_mb, total_mb, names)
                 if d is not None:
-                    r = {"results": [d.run_op({"op": "get", "path": p}) for p in group]}
+                    r = self._fast_gets(d, group)
                 else:
                     job = Job()
                     for p in group:
@@ -1043,7 +1166,7 @@ class Api:
             total_mb = sum(f.stat().st_size for _, f in items) / 1048576
             self.bk.update(total=len(items), msg="백업 파일 보내는 중… %d개(%.1f MB)" % (len(items), total_mb))
             relay = self.relay()
-            dc = self.direct_for(tv)
+            dc = self.channel_for(tv)
             vers = versions.load(self.root, self._cur_tv())
             sent_mb = 0.0
             fails: list[str] = []
@@ -1239,6 +1362,12 @@ class Api:
             return 200, {"done": bool(cfg) and pair_done(cfg, one("branch"))}
         if method == "POST" and path == "/api/preview":
             return 200, self.request_preview(body)
+        if method == "GET" and path == "/api/bt":
+            return 200, self.bt_info()
+        if method == "POST" and path == "/api/bt":
+            return 200, self.bt_save(body or {})
+        if method == "POST" and path == "/api/bt/test":
+            return 200, self.bt_test(body or {})
         if method == "GET" and path == "/api/direct":
             return 200, self.direct_info()
         if method == "POST" and path == "/api/direct":

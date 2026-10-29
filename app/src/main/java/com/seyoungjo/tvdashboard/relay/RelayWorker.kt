@@ -14,7 +14,7 @@ import java.io.FileOutputStream
 import java.util.UUID
 
 /**
- * 원격 중계 루프 (ServerService 안에서 상주).
+ * 원격 중계 루프 (ServerService 안에서 상주). 블루투스(BtServer)로 받은 작업도 process/processUpload 로 같이 처리한다.
  * interval 초마다 GitHub 중계 레포의 relay/<tv>/job/… 를 확인 → 암호를 풀어 TV 자료 폴더에 반영 → 결과 올림 → 작업 브랜치 삭제.
  * 자료 폴더가 바뀌면(또는 5분마다) 파일 목록·상태를 relay/<tv>/state 로 올린다.
  * 인터넷이 끊기거나 GitHub 이 안 되면 조용히 다음 주기에 다시 시도한다 (TV 화면에는 영향 없음).
@@ -107,7 +107,7 @@ object RelayWorker {
         for (job in c.pendingJobs()) process(ctx, c, ops, job)
         for (up in c.pendingUploads()) processUpload(ctx, c, ops, up)
         val now = System.currentTimeMillis()
-        if (stateDirty || now - lastStateAt > HEARTBEAT_MS) publishState(c, ops)
+        if (stateDirty || now - lastStateAt > HEARTBEAT_MS) publishState(ctx, c, ops)
         if (now - lastCleanup > CLEANUP_MS) {
             lastCleanup = now
             c.cleanup(RESULT_MAX_AGE_MS)
@@ -116,14 +116,18 @@ object RelayWorker {
         status = "연결됨 (${RelaySettings.repo} · ${RelaySettings.tv})"
     }
 
-    private fun publishState(c: RelayClient, ops: FileOps) {
+    /** PC 화면이 보는 TV 상태 (GitHub 상태 브랜치 · 블루투스 state 작업 공통) */
+    fun stateJson(ctx: Context, ops: FileOps): JSONObject = JSONObject()
+        .put("status", ops.status())
+        .put("menu", ops.menu())
+        .put("settings", AppSettings.remoteJson())
+        .put("tree", ops.tree())
+        .put("grants", grantsJson(ops))
+        .put("bt", BtServer.json(ctx))
+
+    private fun publishState(ctx: Context, c: RelayClient, ops: FileOps) {
         stateDirty = false
-        val body = JSONObject()
-            .put("status", ops.status())
-            .put("menu", ops.menu())
-            .put("settings", AppSettings.remoteJson())
-            .put("tree", ops.tree())
-            .put("grants", grantsJson(ops))
+        val body = stateJson(ctx, ops)
         val sig = body.toString()
         val now = System.currentTimeMillis()
         if (sig == lastState && now - lastStateAt < HEARTBEAT_MS) return
@@ -148,7 +152,7 @@ object RelayWorker {
      * 용량 제한은 도구(HTML)가 한 번에 30MB 로 막는다. 같은 이름 파일은 덮어쓴다.
      * 결과는 그 도구의 키로 암호화해서 돌려준다 (도구 화면이 읽는다).
      */
-    private fun processUpload(ctx: Context, c: RelayClient, ops: FileOps, up: RelayClient.Job) {
+    fun processUpload(ctx: Context, c: JobSource, ops: FileOps, up: RelayClient.Job) {
         val grant = GrantStore.get(up.gid ?: "")
         if (grant == null) {                               // 폐기됐거나 모르는 도구 — 풀 수도 없으므로 지운다
             Log.w(TAG, "drop upload ${up.id}: unknown gid ${up.gid}")
@@ -214,7 +218,7 @@ object RelayWorker {
         Log.i(TAG, "upload ${job.id} via ${grant.folder} ok=$allOk")
     }
 
-    private fun process(ctx: Context, c: RelayClient, ops: FileOps, job: RelayClient.Job) {
+    fun process(ctx: Context, c: JobSource, ops: FileOps, job: RelayClient.Job) {
         val (manifest, files) = try {
             c.open(job)
         } catch (e: SecurityException) {
@@ -261,7 +265,7 @@ object RelayWorker {
     }
 
     private fun runOp(
-        ctx: Context, c: RelayClient, ops: FileOps, job: RelayClient.Job, files: Map<String, String>,
+        ctx: Context, c: JobSource, ops: FileOps, job: RelayClient.Job, files: Map<String, String>,
         op: JSONObject, r: JSONObject, attachments: MutableList<Pair<JSONObject, File>>,
     ) {
         when (op.getString("op")) {
@@ -297,6 +301,7 @@ object RelayWorker {
             "revoke" -> GrantStore.remove(op.getString("gid"))
             "ping" -> r.put("status", ops.status())
             "list" -> r.put("tree", ops.tree())
+            "state" -> r.put("state", stateJson(ctx, ops).put("v", 1).put("time", System.currentTimeMillis()).put("interval", RelaySettings.intervalSec))
             "get" -> {
                 val src = ops.file(op.getString("path"))
                 // 보내는 동안 파일이 바뀌어도 섞이지 않도록 복사본에서 보낸다
