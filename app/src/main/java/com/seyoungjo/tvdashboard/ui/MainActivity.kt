@@ -204,6 +204,7 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_PREVIEW_IDLE, false)) previewIdleRequested = true
+        if (BuildConfig.DEBUG && intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false)) openSettings()   // 에뮬레이터 시험용 (디버그 빌드만)
     }
 
     override fun onResume() {
@@ -945,6 +946,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         const val EXTRA_PREVIEW_IDLE = "preview_idle"
+        const val EXTRA_OPEN_SETTINGS = "open_settings"
         private const val LOGO_FILE = "logo.png"
         private const val SCAN_MS = 15_000L
         private const val TAP_WINDOW_MS = 5_000L

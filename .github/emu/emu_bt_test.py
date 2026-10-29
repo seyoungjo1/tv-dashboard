@@ -27,8 +27,10 @@ def dump():
     return sh("adb shell cat /sdcard/u.xml")
 
 
-sh(f"adb shell am start -W -n {PKG}/com.seyoungjo.tvdashboard.ui.SettingsActivity")
-time.sleep(3)
+# 설정 화면은 밖에서 직접 열 수 없으므로(exported=false) 메인 화면에 '설정 열기' 를 부탁한다 (디버그 빌드만 받아들임)
+print(sh(f"adb shell am start -W -n {PKG}/com.seyoungjo.tvdashboard.ui.MainActivity --ez open_settings true")[-200:])
+time.sleep(4)
+print("  포커스:", sh("adb shell dumpsys window | grep -E 'mCurrentFocus'")[:200])
 # 블루투스 항목까지 스크롤 (설정 목록 위쪽: 서버 · 중계 다음)
 x = dump()
 for _ in range(6):
