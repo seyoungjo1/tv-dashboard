@@ -1,0 +1,80 @@
+# 직원용 앱(zip) 시험: 실행 묶음(tvtool.exe · 내장 Python)을 만들고, 관리자 프로그램으로 직원 앱을 구운 뒤 실제 Windows 에서
+#  · 내장 Python 이 tvtool · tvrelay 를 불러와 화면 서버가 뜨는지 (selftest)
+#  · exe 가 검은 창 없이 Python 을 띄우고 Python 이 끝나면 exe 도 끝나는지
+#  · Edge 앱 창이 뜨고, 그 창을 닫으면 Python · exe 가 모두 끝나는지
+name: Employee app (tvtool)
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**", "!relay/**"]
+    paths:
+      - "tools/tvtool/**"
+      - "pc/tvrelay/tvtool/**"
+      - "pc/tvrelay/toolapp.py"
+      - "pc/tvrelay/uploader.html"
+      - "pc/tvrelay/grants.py"
+      - "pc/tvrelay/bt.py"
+      - ".github/workflows/tvtool.yml"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with: { go-version-file: tools/tvtool/go.mod, cache-dependency-path: tools/tvtool/go.sum }
+      - run: cd tools/tvtool && go vet ./... && GOOS=windows go vet ./...
+      - run: bash tools/tvtool/build_runtime.sh dist/tvtool-runtime-win64.zip
+      - uses: actions/upload-artifact@v4
+        with: { name: tvtool-runtime, path: dist/tvtool-runtime-win64.zip, retention-days: 14 }
+  windows:
+    needs: build
+    runs-on: windows-latest
+    defaults: { run: { shell: pwsh } }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/download-artifact@v4
+        with: { name: tvtool-runtime, path: rt }
+      - name: 관리자 프로그램으로 직원 앱 굽기
+        run: |
+          $env:PYTHONIOENCODING = "utf-8"
+          python .github/emu/make_toolapp.py rt/tvtool-runtime-win64.zip out
+          Get-ChildItem -Recurse out | Select-Object -First 30 FullName
+      - name: 내장 Python selftest
+        run: |
+          $d = (Get-ChildItem out -Directory)[0].FullName
+          & "$d\app\python\python.exe" -m tvtool --app "$d\app" --selftest
+          if ($LASTEXITCODE -ne 0) { throw "selftest 실패" }
+      - name: exe → 검은 창 없는 Python → 끝나면 exe 도 끝
+        run: |
+          $d = (Get-ChildItem out -Directory)[0].FullName
+          $exe = (Get-ChildItem $d -Filter *.exe)[0].FullName
+          $env:TVTOOL_SELFTEST = "1"
+          $p = Start-Process -FilePath $exe -PassThru
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "exe 가 60초 안에 끝나지 않음" }
+          "exe exit: $($p.ExitCode)"
+          Get-Content "$env:LOCALAPPDATA\tvtool\app.log" -ErrorAction SilentlyContinue
+          Get-Content "$env:LOCALAPPDATA\tvtool\tvtool.log" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "exe 종료 코드 $($p.ExitCode)" }
+          $pe = [System.IO.File]::ReadAllBytes($exe); $off = [BitConverter]::ToInt32($pe, 0x3c); $sub = [BitConverter]::ToUInt16($pe, $off + 0x5c)
+          "PE subsystem: $sub (2 = 창 프로그램, 3 = 콘솔)"; if ($sub -ne 2) { throw "exe 가 콘솔 프로그램입니다" }
+      - name: Edge 앱 창을 닫으면 모두 끝
+        run: |
+          Remove-Item Env:TVTOOL_SELFTEST -ErrorAction SilentlyContinue
+          $d = (Get-ChildItem out -Directory)[0].FullName
+          $exe = (Get-ChildItem $d -Filter *.exe)[0].FullName
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 20
+          $edge = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -and $_.CommandLine -like '*--app=http://127.0.0.1*' }
+          "앱 창 프로세스: $($edge.Count)"
+          $py = Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' }
+          $py | ForEach-Object { "python: $($_.Name) $($_.CommandLine)" }
+          if (-not $edge) { Get-Content "$env:LOCALAPPDATA\tvtool\app.log" -ErrorAction SilentlyContinue; throw "Edge 앱 창이 뜨지 않음" }
+          if (($py | Where-Object { $_.Name -eq 'python.exe' })) { throw "콘솔 python.exe 가 떠 있음 (pythonw 여야 함)" }
+          $edge | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          if (-not $p.WaitForExit(30000)) { $p.Kill(); throw "창을 닫았는데 30초 안에 끝나지 않음" }
+          Get-Content "$env:LOCALAPPDATA\tvtool\app.log" -ErrorAction SilentlyContinue | Select-Object -Last 5
+          $left = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'pythonw.exe' }
+          if ($left) { throw "pythonw 가 남아 있음" }
+          "창을 닫으니 모두 끝났습니다"

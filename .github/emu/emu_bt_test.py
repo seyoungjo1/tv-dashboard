@@ -51,6 +51,31 @@ open(f"{OUT}/logcat.txt", "w", encoding="utf-8").write(log)
 crash = [l for l in log.splitlines() if ("FATAL EXCEPTION" in l or "AndroidRuntime" in l and "E/" in l) and PKG in log]
 ok(not any("BtServer" in l or "bt-server" in l for l in crash), "BtServer 가 죽지 않았다")
 ok(not crash, "앱 치명적 오류 없음")
+# TV 관리 서버의 POST /api/pkg (직원 앱이 Tailscale 로 보내는 입구): 꾸러미를 받아 블루투스와 같은 형식으로 답해야 한다
+import io, json as _json, sys as _sys, urllib.request
+_sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "pc"))
+from tvrelay import bt as _bt, crypto as _crypto
+from tvrelay.relay import Job as _Job
+sh("adb forward tcp:18080 tcp:8080")
+buf = io.BytesIO()
+key = _crypto.new_key()
+_bt.write_package(buf, "osan", "job", "1700000000000-abcdef012345", _bt.seal_job(_crypto.Box(key), "osan", "job", "1700000000000-abcdef012345", _Job().op("ping")))
+try:
+    resp = urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:18080/api/pkg", data=buf.getvalue(), method="POST"), timeout=30).read()
+except Exception as e:
+    resp = b""
+    print("  /api/pkg 오류:", e)
+print("  /api/pkg 응답:", resp[:120])
+ok(resp.startswith(b"TVBT1"), "관리 서버가 꾸러미를 받아 같은 형식으로 답한다 (/api/pkg)")
+files = _bt.read_package(io.BytesIO(resp)) if resp.startswith(b"TVBT1") else {}
+ok("e" in files and ("연결" in _json.loads(files["e"]).get("error", "") or "키" in _json.loads(files["e"]).get("error", "")),
+   "연결 안 된 TV 는 관리자 꾸러미를 거절한다 (암호키 없음)")
+garbage = b""
+try:
+    garbage = urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:18080/api/pkg", data=b"hello world", method="POST"), timeout=30).read()
+except Exception as e:
+    print("  쓰레기 꾸러미 오류:", e)
+ok(garbage.startswith(b"TVBT1") and b"e" in garbage[:8], "형식이 아닌 것은 오류 기록(e)으로 답한다")
 bt = [l for l in log.splitlines() if "BtServer" in l][-5:]
 for l in bt:
     print("  logcat:", l[:200])

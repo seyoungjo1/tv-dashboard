@@ -180,35 +180,7 @@ object BtServer {
         try {
             val input = DataInputStream(sock.inputStream.buffered(64 * 1024))
             val out = DataOutputStream(sock.outputStream.buffered(64 * 1024))
-            val tick = { lastIo.set(System.currentTimeMillis()) }
-            BtProtocol.readMagic(input); tick()
-            val head = BtProtocol.readHead(input) ?: throw BtProtocol.BadStream("머리 기록(h)이 없습니다")
-            if (head.first != "h") throw BtProtocol.BadStream("첫 기록은 h 여야 합니다")
-            val h = JSONObject(BtProtocol.readBody(input, head.second).toString(Charsets.UTF_8))
-            val tv = h.optString("tv"); val kind = h.optString("kind"); val id = h.optString("id")
-            var n = 0
-            while (true) {
-                val r = BtProtocol.readHead(input) ?: break
-                if (++n > BtProtocol.MAX_RECORDS) throw BtProtocol.BadStream("기록이 너무 많습니다")
-                BtProtocol.readBodyTo(input, r.second, File(dir, r.first), tick)
-                status = "받는 중 — $peer ($n)"
-            }
-            tick()
-            val result = try {
-                if (kind == "pair") pair(h, dir) else process(ctx, tv, kind, id, dir)
-            } catch (e: SecurityException) {
-                null to (e.message ?: "암호키가 다릅니다")
-            } catch (e: IllegalArgumentException) {
-                null to (e.message ?: "잘못된 꾸러미")
-            }
-            BtProtocol.writeMagic(out)
-            val src = result.first
-            if (src == null) BtProtocol.writeRecord(out, "e", JSONObject().put("error", result.second).toString().toByteArray(Charsets.UTF_8))
-            else for ((name, f) in src.resultFiles) { BtProtocol.writeRecord(out, name, f); tick() }
-            BtProtocol.writeEnd(out)
-            count++
-            lastAt = System.currentTimeMillis()
-            Log.i(TAG, "done $peer $kind $id (${n} records)")
+            exchange(ctx, input, out, dir, peer, allowPair = true) { lastIo.set(System.currentTimeMillis()) }
         } catch (e: Exception) {
             Log.w(TAG, "connection $peer failed: ${e.message}")
             status = "실패 — $peer: ${e.message}"
@@ -223,6 +195,48 @@ object BtServer {
             try { sock.close() } catch (_: IOException) {}
             dir.deleteRecursively()
         }
+    }
+
+    private val jobLock = Any()
+
+    /**
+     * 꾸러미 하나 받기 → 처리 → 결과 쓰기. 블루투스 연결과 TV 관리 서버의 POST /api/pkg(Tailscale·같은 망의 직원 앱)가 함께 쓴다.
+     * allowPair: 연결 코드 짝짓기는 블루투스(TV 가까이)에서만 받는다.
+     */
+    fun exchange(ctx: Context, input: DataInputStream, out: DataOutputStream, dir: File, peer: String, allowPair: Boolean, tick: () -> Unit = {}) {
+        BtProtocol.readMagic(input); tick()
+        val head = BtProtocol.readHead(input) ?: throw BtProtocol.BadStream("머리 기록(h)이 없습니다")
+        if (head.first != "h") throw BtProtocol.BadStream("첫 기록은 h 여야 합니다")
+        val h = JSONObject(BtProtocol.readBody(input, head.second).toString(Charsets.UTF_8))
+        val tv = h.optString("tv"); val kind = h.optString("kind"); val id = h.optString("id")
+        var n = 0
+        while (true) {
+            val r = BtProtocol.readHead(input) ?: break
+            if (++n > BtProtocol.MAX_RECORDS) throw BtProtocol.BadStream("기록이 너무 많습니다")
+            BtProtocol.readBodyTo(input, r.second, File(dir, r.first), tick)
+            status = "받는 중 — $peer ($n)"
+        }
+        tick()
+        val result = try {
+            synchronized(jobLock) {
+                if (kind == "pair") { require(allowPair) { "연결 코드 짝짓기는 블루투스로만 할 수 있습니다" }; pair(h, dir) }
+                else process(ctx, tv, kind, id, dir)
+            }
+        } catch (e: SecurityException) {
+            null to (e.message ?: "암호키가 다릅니다")
+        } catch (e: IllegalArgumentException) {
+            null to (e.message ?: "잘못된 꾸러미")
+        }
+        BtProtocol.writeMagic(out)
+        val src = result.first
+        if (src == null) BtProtocol.writeRecord(out, "e", JSONObject().put("error", result.second).toString().toByteArray(Charsets.UTF_8))
+        else for ((name, f) in src.resultFiles) { BtProtocol.writeRecord(out, name, f); tick() }
+        BtProtocol.writeEnd(out)
+        count++
+        lastAt = System.currentTimeMillis()
+        lastPeer = peer
+        status = "마지막 받음 — $peer"
+        Log.i(TAG, "done $peer $kind $id (${n} records)")
     }
 
     /** 연결 코드로 짝짓기 (GitHub 없이): h = {kind:"pair", pid}, m = 연결 정보(코드에서 만든 키로 암호화). 응답도 그 키로 */

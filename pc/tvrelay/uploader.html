@@ -281,6 +281,10 @@ const CFG = /*__CONFIG__*/null;
     say('비밀번호 확인 중…', 'wait');
     try { SECRET = await unlock(pw); } catch (e) { $('#pw').classList.add('bad'); $('#pw').select(); throw e; }
     $('#pw').classList.remove('bad'); $('#pw').value = ''; $('#pw').placeholder = '비밀번호 확인됨 ✓'; $('#pw').disabled = true;
+    if (APP && SECRET.ts && SECRET.ts.key) {          // 직원 앱: 잠금을 푼 뒤에야 Tailscale 인증 키를 내장 Python(→exe)에 넘긴다
+      try { await fetch('/app/ts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ authKey: SECRET.ts.key, addr: SECRET.ts.addr || '' }) }); } catch (_) {}
+      appRefresh();
+    }
   }
 
   // ── 작업 하나 보내고 결과 기다리기: items = [{op:'put', path, data(Uint8Array)} | {op:'get', path}] ──
@@ -313,16 +317,16 @@ const CFG = /*__CONFIG__*/null;
     }
     const man = enc.encode(JSON.stringify({ v: 1, id, created: Date.now(), ops }));
     sealed.push(['m', await seal(man, aad(kind, id, 'm'))]);
-    if (via === 'bt') {                                // ── 블루투스: TV 가 바로 처리하고 결과를 돌려준다 (기다릴 것 없음) ──
-      say(items.some(x => x.op === 'put') ? '블루투스로 TV 에 보내는 중…' : '블루투스로 TV 에 묻는 중…', 'wait');
-      const got = await btExchange(kind, id, sealed, (p) => prog(0.1 + p * 0.85));
+    if (via === 'bt' || via === 'app') {               // ── 블루투스 · 직원 앱(Tailscale→블루투스): TV 가 바로 처리하고 결과를 돌려준다 ──
+      say(via === 'app' ? (items.some(x => x.op === 'put') ? 'TV 로 보내는 중…' : 'TV 에 묻는 중…') : items.some(x => x.op === 'put') ? '블루투스로 TV 에 보내는 중…' : '블루투스로 TV 에 묻는 중…', 'wait');
+      const got = via === 'app' ? await appExchange(kind, id, sealed, (p) => prog(0.1 + p * 0.85)) : await btExchange(kind, id, sealed, (p) => prog(0.1 + p * 0.85));
       if (got.e && !got.m) throw new Error('TV 가 거절했습니다: ' + (JSON.parse(dec.decode(got.e)).error || ''));
       if (!got.m) throw new Error('TV 응답에 결과가 없습니다');
       const res = JSON.parse(dec.decode(await open(got.m, aad('res', id, 'm'))));
       prog(1);
       if (onQueued) await onQueued();
       if (res.files) rememberFiles(res.files, { used: res.used, max: res.maxBytes });
-      res.dups = dups; res.via = 'bt';
+      res.dups = dups; res.via = via === 'app' ? (got.__via || 'app') : 'bt';
       return res;
     }
     for (const [name, data] of sealed) { tree.push({ path: name, mode: '100644', type: 'blob', sha: await blob(data) }); }
@@ -378,7 +382,7 @@ const CFG = /*__CONFIG__*/null;
       const res = await job(items, prog, msg, keepJson);
       if (res.dupOnly) { files = []; render(); prog(0); return msg(`같은 내용을 이미 보냈습니다 (${res.dups.length}개) — TV 가 받으면 반영됩니다. 다시 보내지 않았습니다.`, 'wait'); }
       const bad = (res.results || []).filter(x => !x.ok);
-      if (res.ok) { const n = files.length; files = []; render(); msg(`완료! ${n}개를 TV 에 ${res.via === 'bt' ? '블루투스로 바로 ' : ''}반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${listText(res)}`, 'ok'); }
+      if (res.ok) { const n = files.length; files = []; render(); msg(`완료! ${n}개를 TV 에 ${res.via === 'bt' ? '블루투스로 바로 ' : res.via === 'tailscale' ? 'Tailscale 로 바로 ' : ''}반영했습니다.\n\n지금 '${CFG.folder}' 폴더의 파일:\n${listText(res)}`, 'ok'); }
       else msg('일부 올리지 못했습니다:\n' + bad.map(x => `  ${x.path || ''} — ${x.error}`).join('\n'), 'err');
     } catch (e) {
       if (e.queued) { files = []; render(); }    // GitHub 에 맡겨짐 → 목록을 비워 같은 파일을 또 보내지 않게
@@ -413,20 +417,71 @@ const CFG = /*__CONFIG__*/null;
     names() { const out = []; try { for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (key.startsWith(LSP + 'f.')) out.push(key.slice(LSP.length + 2)); } } catch (_) {} return out; },
   };
   // ── 보내는 길: 인터넷(GitHub) 또는 블루투스(TV 근처, 크롬·엣지 PC 의 직렬 포트) ──
-  const ghOk = !!(CFG.repo && CFG.api), btOk = CFG.bt !== false && !!navigator.serial;
-  let via = ls.get('via') || (ghOk ? 'gh' : 'bt');
+  // 직원 앱(zip 의 exe 로 연 창): 내장 Python 이 Tailscale → 블루투스 순서로 TV 에 바로 전달한다
+  const APP = !!CFG.app && location.hostname === '127.0.0.1' && location.protocol === 'http:';
+  const ghOk = !!(CFG.repo && CFG.api), btOk = !APP && CFG.bt !== false && !!navigator.serial;
+  let via = APP ? (ls.get('via') === 'gh' && ghOk ? 'gh' : 'app') : (ls.get('via') || (ghOk ? 'gh' : 'bt'));
   if (via === 'bt' && !btOk) via = 'gh';
-  if (via === 'gh' && !ghOk) via = 'bt';
+  if (via === 'gh' && !ghOk) via = APP ? 'app' : 'bt';
+  let appInfo = null;
   function renderVia() {
     const box = $('#viaBox');
-    box.classList.toggle('hidden', !(ghOk && CFG.bt !== false));
-    $('#via').innerHTML = [['gh', '인터넷 (GitHub)', ghOk], ['bt', '블루투스 (TV 근처)', btOk]].map(([k, t, ok]) =>
+    const opts = APP ? [['app', 'TV 로 바로 (Tailscale · 블루투스)', true], ['gh', '인터넷 (GitHub)', ghOk]] : [['gh', '인터넷 (GitHub)', ghOk], ['bt', '블루투스 (TV 근처)', btOk]];
+    box.classList.toggle('hidden', APP ? false : !(ghOk && CFG.bt !== false));
+    $('#via').innerHTML = opts.filter(([k, , ok]) => ok || k !== 'gh' || !APP).map(([k, t, ok]) =>
       `<button type="button" data-v="${k}" class="${via === k ? 'on' : ''}" ${ok ? '' : 'disabled'}>${t}</button>`).join('');
+    if (APP) {
+      const i = appInfo || {}, ts = (i.ts || {}).state;
+      const tsText = ts === 'up' ? 'Tailscale 연결됨' : ts === 'starting' ? 'Tailscale 켜는 중…' : ts === 'error' ? 'Tailscale 오류' : SECRET ? 'Tailscale 안 씀' : 'Tailscale — 비밀번호를 넣으면 켜짐';
+      const ports = (i.ports || []).filter(p => p.bt);
+      $('#viaHint').innerHTML = `${esc(tsText)} · 블루투스 <select id="btPortSel" class="in" style="padding:3px 6px;font-size:13px"><option value="">자동 (${ports.length ? esc(ports.map(p => p.port).join(', ')) : '짝지은 TV 없음'})</option>${(i.ports || []).map(p => `<option value="${esc(p.port)}"${p.port === i.btPort ? ' selected' : ''}>${esc(p.port)}${p.bt ? ' 블루투스' : ''}</option>`).join('')}</select>` +
+        (i.lastVia ? ` · 마지막: ${i.lastVia === 'bt' ? '블루투스' : 'Tailscale'}` : '');
+      return;
+    }
     $('#viaHint').textContent = via === 'bt' ? '보낼 때 뜨는 창에서 TV 의 직렬 포트(COMn)를 고르세요 · 10~20초 기다림 없이 바로 반영'
       : !btOk && CFG.bt !== false ? '블루투스는 PC 의 크롬·엣지에서만' : '';
   }
+  async function appRefresh() {
+    if (!APP) return;
+    try { appInfo = await (await fetch('/app/info', { cache: 'no-store' })).json(); } catch (_) {}
+    renderVia();
+  }
+  if (APP) {
+    setInterval(() => fetch('/app/alive', { cache: 'no-store' }).catch(() => {}), 10000);   // 창이 살아 있다고 알림 (기본 브라우저로 열렸을 때 끝내기용)
+    setInterval(appRefresh, 15000);
+    $('#viaHint').addEventListener('change', async (e) => {
+      if (e.target.id !== 'btPortSel') return;
+      await fetch('/app/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ btPort: e.target.value }) }).catch(() => {});
+      appRefresh();
+    });
+  }
+  /** 직원 앱: 꾸러미(블루투스와 같은 형식)를 내장 Python 에 넘기면 Tailscale → 블루투스 순서로 TV 에 전달하고 TV 응답을 그대로 돌려준다 */
+  async function appExchange(kind, id, sealed, prog) {
+    const parts = [BT_MAGIC, rec('h', enc.encode(JSON.stringify({ v: 1, tv: CFG.tv, kind, id })))];
+    for (const [name, data] of sealed) parts.push(rec(name, data));
+    parts.push(new Uint8Array([0]));
+    prog(0.3);
+    let r;
+    try { r = await fetch('/app/pkg', { method: 'POST', body: new Blob(parts), headers: { 'Content-Type': 'application/octet-stream' } }); }
+    catch (e) { throw new Error('직원 앱이 꺼졌습니다 — 창을 닫고 exe 를 다시 실행하세요.'); }
+    if (!r.ok) { let m = ''; try { m = (await r.json()).error; } catch (_) {} throw new Error(m || ('TV 에 보내지 못했습니다 (' + r.status + ')')); }
+    const u = new Uint8Array(await r.arrayBuffer());
+    prog(0.95);
+    if (dec.decode(u.subarray(0, 5)) !== 'TVBT1') throw new Error('TV 응답 형식이 아닙니다');
+    const files = {}; let pos = 5;
+    while (pos < u.length) {
+      const n = u[pos++]; if (n === 0) break;
+      const name = dec.decode(u.subarray(pos, pos + n)); pos += n;
+      const len = new DataView(u.buffer, u.byteOffset + pos, 4).getUint32(0); pos += 4;
+      files[name] = u.slice(pos, pos + len); pos += len;
+    }
+    files.__via = r.headers.get('X-Via') === 'bt' ? 'bt' : 'tailscale';
+    appRefresh();
+    return files;
+  }
   $('#via').onclick = (e) => { const b = e.target.closest('[data-v]'); if (b && !b.disabled) { via = b.dataset.v; ls.set('via', via); renderVia(); } };
   renderVia();
+  appRefresh();
   let btPort = null;
   /** 사용자가 버튼을 누른 직후(권한 창을 띄울 수 있을 때) 포트를 골라 둔다 */
   async function btReady() {

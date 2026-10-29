@@ -300,6 +300,14 @@ jobs:
           status: completed
           whatsNewDirectory: dist/whatsnew
 
+      - name: 직원 앱 실행 묶음 (tvtool.exe · 내장 Python)
+        if: steps.mode.outputs.release == 'true'
+        uses: actions/setup-go@v5
+        with: { go-version-file: tools/tvtool/go.mod, cache-dependency-path: tools/tvtool/go.sum }
+      - name: 직원 앱 실행 묶음 만들기
+        if: steps.mode.outputs.release == 'true'
+        run: bash tools/tvtool/build_runtime.sh dist/tvtool-runtime-win64.zip
+
       - name: Release APK 보관
         if: steps.mode.outputs.release == 'true'
         uses: actions/upload-artifact@v4
@@ -317,6 +325,6 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete unsigned-build --cleanup-tag -y >/dev/null 2>&1 || true
-          gh release create "v$VERSION" "${{ steps.out.outputs.apk }}" dist/update.json dist/tvrelay-pc-v*.zip dist/*-play.aab \
+          gh release create "v$VERSION" "${{ steps.out.outputs.apk }}" dist/update.json dist/tvrelay-pc-v*.zip dist/*-play.aab dist/tvtool-runtime-win64.zip \
             --target "$GITHUB_SHA" --title "v$VERSION" --notes-file dist/notes.md
           echo "게시 완료: https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"

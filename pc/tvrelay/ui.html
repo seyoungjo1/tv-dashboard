@@ -162,7 +162,7 @@
   .st.wait { color:#5d7a99; } .st.ok { color:var(--ok); } .st.bad { color:var(--danger); }
   #pwModal { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:50; }
   #pwModal.hidden { display:none; }
-  #pwModal .box { background:#fff; border-radius:12px; padding:22px 24px; width:min(380px, calc(100vw - 32px)); box-shadow:0 10px 40px rgba(0,0,0,.3); }
+  #pwModal .box { background:#fff; border-radius:12px; padding:22px 24px; width:min(480px, calc(100vw - 32px)); box-shadow:0 10px 40px rgba(0,0,0,.3); }
   #pwModal h3 { margin:0 0 6px; font-size:17px; }
   #pwModal p { margin:0 0 14px; font-size:13px; color:#666; line-height:1.5; }
   #pwModal input { width:100%; box-sizing:border-box; margin-bottom:8px; }
@@ -475,6 +475,19 @@
     <div id="btMsg" class="msg hidden" style="margin-top:8px"></div>
   </div>
   <div class="card">
+    <h3 style="margin-top:0">🧳 직원용 앱 (zip · 설치 없음 · Tailscale 내장)</h3>
+    <p class="hint">[업로드 도구 받기] 에서 <b>직원용 앱 (zip)</b> 을 고르면, 직원 PC 에 Python·Tailscale 을 설치하지 않고 exe 하나로 도는 앱을 만들어 줍니다
+      (검은 창 없음 · 창을 닫으면 모두 꺼짐). 앱은 Tailscale(어디서나) → 블루투스(TV 가까이) 순서로 TV 에 바로 보냅니다.<br>
+      Tailscale 을 쓰려면 Tailscale 관리 화면 → Settings → Keys → <b>Generate auth key</b> 에서 <b>Reusable · Ephemeral</b>(+ 태그 권장, 예: tag:tvtool) 키를 만들어 아래에 넣으세요.
+      키는 업로드 비밀번호로 잠겨 앱에 들어가고, 이 PC 의 <code>tv-direct.json</code> 에만 저장됩니다. 비우면 블루투스만 씁니다.</p>
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input type="password" id="taKey" placeholder="tskey-auth-… (Reusable · Ephemeral)" style="flex:2;min-width:240px">
+      <input type="text" id="taAddr" placeholder="TV 의 Tailscale 주소 (비우면 자동)" style="flex:1;min-width:180px">
+      <button id="taSave">저장</button> <button class="secondary" id="taRuntime" title="exe · 내장 Python 묶음을 GitHub 릴리스에서 다시 받습니다">실행 묶음 다시 받기</button>
+    </div>
+    <div class="hint" id="taSt" style="margin-top:6px"></div>
+  </div>
+  <div class="card">
     <h3 style="margin-top:0">TV 백업</h3>
     <p class="hint">TV 이름별로 이 PC 에 백업됩니다 (<code>tv-backup</code> 폴더). PC 에서 올린 파일·설정은 자동으로 백업되고,
       직원 도구·TV 에서 고친 것까지 맞추려면 <b>[백업 파일 넣기]</b>를 누르세요.
@@ -503,8 +516,12 @@
   <p>직원이 이 HTML 로 올릴 때 입력할 비밀번호입니다. 비밀번호가 없으면 HTML 을 가져가도 올릴 수 없습니다.<br>HTML 과 비밀번호는 따로 전달하세요.</p>
   <input type="password" id="pw1" placeholder="비밀번호 (4자 이상)" autocomplete="new-password">
   <input type="password" id="pw2" placeholder="비밀번호 확인 (한 번 더)" autocomplete="new-password">
+  <div id="pwFmt" style="margin-top:8px;display:flex;flex-direction:column;gap:4px;font-size:13px">
+    <label><input type="radio" name="pwFmt" value="html" checked> <b>HTML 한 파일</b> — 브라우저로 열기 (GitHub · 블루투스)</label>
+    <label><input type="radio" name="pwFmt" value="app"> <b>직원용 앱 (zip)</b> — 설치 없이 exe 실행, 검은 창 없음, Tailscale 내장 + 블루투스</label>
+  </div>
   <div class="err" id="pwErr"></div>
-  <div style="text-align:right;margin-top:8px"><button type="button" class="secondary" id="pwCancel">취소</button> <button type="submit">HTML 내려받기</button></div>
+  <div style="text-align:right;margin-top:8px"><button type="button" class="secondary" id="pwCancel">취소</button> <button type="submit" id="pwOk">내려받기</button></div>
 </form></div>
 <div id="toast" class="hidden"></div>
 
@@ -575,7 +592,7 @@
     $('#dock').classList.toggle('hidden', t !== 'explorer');
     for (const [id, name] of [['#ssPage','ss'],['#settingsPage','settings'],['#updatePage','update'],['#connPage','conn'],['#setupPage','setup'],['#groupsPage','groups']]) $(id).classList.toggle('hidden', t !== name);
     if (t === 'groups') loadGroups();
-    if (t === 'conn') { loadBackup(); loadTvs(); loadDirect(); loadBt(); loadMode(); }
+    if (t === 'conn') { loadBackup(); loadTvs(); loadDirect(); loadBt(); loadMode(); loadToolApp(); }
     ssTab(t === 'ss');
   }
   // [화면보호기] 탭: 오른쪽 미리보기 칸(tvpane)을 통째로 옮겨 와 화면보호기 모드로 (돌아갈 때 제자리로)
@@ -736,6 +753,24 @@
       }
     } catch (er) { msg(m, er.message, 'err'); }
   });
+  // ── 직원용 앱 설정 ──
+  async function loadToolApp(r) {
+    try { r = r || await api('GET', '/api/toolapp'); } catch (_) { return; }
+    $('#taKey').placeholder = r.hasTsKey ? '저장됨 (바꿀 때만 · 지우려면 - 입력)' : 'tskey-auth-… (Reusable · Ephemeral)';
+    $('#taSt').innerHTML = `Tailscale 인증 키: <b>${r.hasTsKey ? '있음' : '없음 (블루투스만)'}</b> · TV Tailscale 주소: <b>${esc(r.tsAddr || '모름 — TV 에 Tailscale 이 켜져 있으면 상태를 받은 뒤 자동으로')}</b>` +
+      ` · 블루투스 포트: <b>${esc(r.btPort || '자동')}</b> · 실행 묶음: <b>${r.runtime ? '받아 둠' : '처음 만들 때 받음 (40MB)'}</b>`;
+  }
+  $('#taSave').onclick = async () => {
+    const body = {};
+    const k = $('#taKey').value.trim(); if (k) body.tsKey = k === '-' ? '' : k;
+    body.tsAddr = $('#taAddr').value.trim();
+    try { loadToolApp(await api('POST', '/api/toolapp', body)); $('#taKey').value = ''; toast('직원용 앱 설정을 저장했습니다 — 이제부터 만드는 앱에 들어갑니다'); }
+    catch (e) { alert(e.message); }
+  };
+  $('#taRuntime').onclick = async () => {
+    $('#taRuntime').disabled = true; $('#taSt').textContent = '실행 묶음 받는 중… (40MB)';
+    try { loadToolApp(await api('POST', '/api/toolapp/runtime', {})); } catch (e) { alert(e.message); loadToolApp(); } finally { $('#taRuntime').disabled = false; }
+  };
   // ── 중계 방식 (자동 / 블루투스만) ──
   async function loadMode() {
     let r; try { r = await api('GET', '/api/mode'); } catch (_) { return; }
@@ -1418,6 +1453,7 @@
     return new Promise((resolve) => {
       const m = $('#pwModal'); $('#pwTitle').textContent = `'${toolLabel(folder)}' 비밀번호 정하기`;
       $('#pw1').value = ''; $('#pw2').value = ''; $('#pwErr').textContent = '';
+      $('#pwFmt').classList.toggle('hidden', folder.includes('#'));            // 공지사항 도구는 HTML 만
       m.classList.remove('hidden'); setTimeout(() => $('#pw1').focus(), 0);
       const done = (v) => { m.classList.add('hidden'); $('#pwForm').onsubmit = null; $('#pwCancel').onclick = null; resolve(v); };
       $('#pwCancel').onclick = () => done(null);
@@ -1426,13 +1462,14 @@
         const a = $('#pw1').value, b = $('#pw2').value;
         if (a.length < 4) { $('#pwErr').textContent = '4자 이상으로 정하세요.'; return; }
         if (a !== b) { $('#pwErr').textContent = '두 비밀번호가 서로 다릅니다. 다시 입력하세요.'; $('#pw2').value = ''; $('#pw2').focus(); return; }
-        done(a);
+        done({ pw: a, app: !folder.includes('#') && (document.querySelector('input[name=pwFmt]:checked') || {}).value === 'app' });
       };
     });
   }
-  async function downloadTool(folder, pw) {
+  async function downloadTool(folder, pw, asApp) {
     try {
-      const r = await fetch('/api/tool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, password: pw, password2: pw }) });
+      if (asApp) toast('직원용 앱(zip)을 만드는 중… (처음 한 번은 실행 묶음 40MB 를 받느라 1~2분)');
+      const r = await fetch(asApp ? '/api/toolapp/zip' : '/api/tool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, password: pw, password2: pw }) });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
       const cd = r.headers.get('Content-Disposition') || '';
       const name = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || folder + '_업로드.html');
@@ -1444,10 +1481,11 @@
   async function getTool(folder, renew) {
     try {
       if (renew && !confirm(`'${toolLabel(folder)}' 를 새로 발급할까요?\n지금 나눠 준 HTML 은 더 이상 동작하지 않습니다.`)) return;
-      const pw = await askPassword(folder);
-      if (pw === null) return;
+      const pick = await askPassword(folder);
+      if (pick === null) return;
+      const pw = pick.pw, asApp = pick.app;
       const r = await api('POST', '/api/grant', { folder, renew: !!renew });
-      if (r.ready) { downloadTool(folder, pw); return; }
+      if (r.ready) { downloadTool(folder, pw, asApp); return; }
       jobs.unshift({ id: r.id, at: Date.now(), desc: `${toolLabel(folder)} ${renew ? "새로 발급" : "등록"}`, st: 'wait', note: 'TV 가 등록하기를 기다리는 중… (보통 10~20초)' });
       renderJobs();
       for (let i = 0; i < 100; i++) {
@@ -1457,7 +1495,7 @@
         const j = jobs.find(q => q.id === r.id);
         j.st = x.grantOk ? 'ok' : 'bad'; j.note = x.grantOk ? '등록 완료 — HTML 을 내려받았습니다' : '등록 실패: ' + ((x.results || []).find(q => !q.ok)?.error || '');
         renderJobs(); await loadGrants(); renderTree();
-        if (x.grantOk) downloadTool(folder, pw);
+        if (x.grantOk) downloadTool(folder, pw, asApp);
         return;
       }
     } catch (e) { alert(e.message); }

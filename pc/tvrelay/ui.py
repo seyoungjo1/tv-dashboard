@@ -558,6 +558,65 @@ class Api:
         st.update(online=False, via="bt", btOff=True, outbox=len(outbox.ids(self.root, self._cur_tv())))
         return st
 
+    # ── 직원용 앱 (zip: Python 내장 · Tailscale 내장 · 블루투스) ──
+    def toolapp_settings(self) -> dict[str, Any]:
+        """직원 앱에 넣을 Tailscale 인증 키 (이 PC 의 tv-direct.json 에만) · TV 의 Tailscale 주소 · 실행 묶음"""
+        d = direct.load(self.root).get("_toolapp") or {}
+        tv = self._cur_tv()
+        from . import toolapp
+        return {"hasTsKey": bool(d.get("tsKey")), "tsAddr": self._ts_addr(tv), "runtime": toolapp.runtime_path(self.root).is_file(),
+                "btPort": self.bt_config(tv).get("port", "")}
+
+    def toolapp_save(self, body: dict[str, Any]) -> dict[str, Any]:
+        data = direct.load(self.root)
+        e = dict(data.get("_toolapp") or {})
+        if "tsKey" in body:
+            k = str(body.get("tsKey") or "").strip()
+            if k and not k.startswith("tskey-"):
+                raise ValueError("Tailscale 인증 키는 tskey- 로 시작합니다 (Tailscale 관리 화면 → Settings → Keys → Generate auth key)")
+            e["tsKey"] = k
+        if "tsAddr" in body:
+            e["tsAddr_" + self._cur_tv()] = str(body.get("tsAddr") or "").strip()
+        data["_toolapp"] = e
+        direct.save(self.root, data)
+        echo("직원 앱 설정 저장 (Tailscale 인증 키 %s)" % ("있음" if e.get("tsKey") else "없음"))
+        return self.toolapp_settings()
+
+    def _ts_addr(self, tv: str) -> str:
+        """TV 의 Tailscale 주소: 직접 적은 것 → 직접 연결 주소(100.x) → TV 가 알려 준 주소"""
+        e = direct.load(self.root).get("_toolapp") or {}
+        if e.get("tsAddr_" + tv):
+            return str(e["tsAddr_" + tv])
+        u = str((direct.load(self.root).get(tv) or {}).get("url") or "")
+        if "//100." in u:
+            return u.split("//", 1)[1].rstrip("/")
+        st = self._saved_state(tv) or {}
+        port = int((st.get("status") or {}).get("port") or 8080)
+        for a in (st.get("status") or {}).get("addresses") or []:
+            if a.get("tailscale") and ":" not in str(a.get("ip")):
+                return "%s:%d" % (a["ip"], port)
+        return ""
+
+    def tool_app(self, folder: str, password: str, password2: str) -> tuple[str, bytes]:
+        from . import toolapp
+        g = grants.load(self.root).get(folder.strip().strip("/"))
+        if not g or g.get("status") != "active":
+            raise ValueError("아직 TV 에 등록되지 않은 도구입니다. [업로드 도구 받기]를 먼저 누르세요.")
+        if g.get("kind") == "notice":
+            raise ValueError("공지사항 도구는 HTML 로만 받을 수 있습니다")
+        if password != password2:
+            raise ValueError("두 비밀번호가 서로 다릅니다")
+        if len(password or "") < grants.MIN_PASSWORD:
+            raise ValueError("업로드 비밀번호는 %d자 이상으로 정하세요" % grants.MIN_PASSWORD)
+        cfg = self._ensure_tv()
+        st = self.toolapp_settings()
+        ts_key = str((direct.load(self.root).get("_toolapp") or {}).get("tsKey") or "")
+        toolapp.ensure_runtime(self.root, echo)
+        name, data = toolapp.build(self.root, cfg, g, password, ts_key, st["tsAddr"] if ts_key else "", st["btPort"])
+        echo("직원 앱 내려받음: '%s' (%.1f MB · Tailscale %s · 블루투스 %s)" % (g["folder"], len(data) / 1048576,
+             ("켜짐 " + st["tsAddr"]) if ts_key and st["tsAddr"] else "없음", st["btPort"] or "자동"))
+        return name, data
+
     def cached_state(self) -> dict[str, Any]:
         """화면을 켤 때 바로 보여 줄 마지막 상태 (네트워크 없이)"""
         try:
@@ -1507,6 +1566,14 @@ class Api:
             return 200, {"done": bool(cfg) and pair_done(cfg, one("branch"))}
         if method == "POST" and path == "/api/preview":
             return 200, self.request_preview(body)
+        if method == "GET" and path == "/api/toolapp":
+            return 200, self.toolapp_settings()
+        if method == "POST" and path == "/api/toolapp":
+            return 200, self.toolapp_save(body or {})
+        if method == "POST" and path == "/api/toolapp/runtime":
+            from . import toolapp
+            toolapp.ensure_runtime(self.root, echo, force=True)
+            return 200, self.toolapp_settings()
         if method == "GET" and path == "/api/mode":
             return 200, self.mode_info()
         if method == "POST" and path == "/api/mode":
@@ -1666,6 +1733,12 @@ def make_handler(api: Api):
                     return self._send(400, {"error": str(e)})
                 return self._send(200, data, "application/octet-stream",
                                   {"Content-Disposition": "attachment; filename*=UTF-8''" + quote(name)})
+            if method == "POST" and u.path == "/api/toolapp/zip":   # 직원용 앱(zip) 내려받기 (비밀번호 2번)
+                try:
+                    name, data = api.tool_app(str(body.get("folder", "")), str(body.get("password", "")), str(body.get("password2", "")))
+                except (ValueError, config.ConfigError) as e:
+                    return self._send(400, {"error": str(e)})
+                return self._send(200, data, "application/zip", {"Content-Disposition": "attachment; filename*=UTF-8''" + quote(name)})
             if method == "POST" and u.path == "/api/tool":    # 폴더 전용 업로드 HTML 내려받기 (비밀번호 2번)
                 try:
                     name, data = api.tool_html(str(body.get("folder", "")), str(body.get("password", "")),

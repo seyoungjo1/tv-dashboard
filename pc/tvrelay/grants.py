@@ -129,18 +129,21 @@ def unlock(lk: dict[str, Any], password: str, gid: str) -> dict[str, Any]:
     return json.loads(box.open(base64.b64decode(lk["data"]), lock_aad(gid)))
 
 
-def bake(cfg: RelayConfig, g: dict[str, Any], password: str, tool_token: str = "") -> str:
+def bake(cfg: RelayConfig, g: dict[str, Any], password: str, tool_token: str = "", app: dict[str, Any] | None = None) -> str:
     """그 폴더 전용 업로드 HTML 한 파일을 만든다. 열쇠·토큰은 업로드 비밀번호로 잠가서 넣는다."""
     if len(password or "") < MIN_PASSWORD:
         raise ValueError("업로드 비밀번호는 %d자 이상으로 정하세요" % MIN_PASSWORD)
     bt_only = getattr(cfg, "bt_only", False)              # 블루투스 전용: GitHub 토큰·레포를 넣지 않는다 (블루투스로만 보냄)
-    secret = {"key": g["key"], "token": "" if bt_only else (tool_token or cfg.token)}
+    secret: dict[str, Any] = {"key": g["key"], "token": "" if bt_only else (tool_token or cfg.token)}
+    if app is not None and app.get("tsKey"):            # 직원 앱: Tailscale 인증 키 · TV 주소도 같은 비밀번호로 잠근다
+        secret["ts"] = {"key": app["tsKey"], "addr": app.get("tsAddr") or ""}
     conf = {
         "v": 2, "repo": "" if bt_only else cfg.repo, "tv": cfg.tv, "gid": g["gid"], "lock": lock(secret, password, g["gid"]),
         "folder": g["folder"], "title": g["name"],
         "types": g["types"], "maxUpload": MAX_UPLOAD,
         "api": "" if bt_only else (os.environ.get("TVRELAY_GITHUB_API") or API),
         "bt": True,                              # 블루투스(TV 근처)로도 보낼 수 있음 — TV 앱 1.11.0 이상
+        "app": app is not None,                  # 직원 앱(zip) 안의 화면 — 내장 Python 이 Tailscale → 블루투스로 전달 (TV 앱 1.11.2 이상)
     }
     if g.get("kind") == "notice":
         conf["file"] = NOTICE_FILE

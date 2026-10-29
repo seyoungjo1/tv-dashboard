@@ -83,6 +83,8 @@ class AdminServer(private val ctx: Context, port: Int) : NanoHTTPD(port) {
         }
         if (uri == "/api/login" && m == Method.POST) return login(s, ip)
         if (uri == "/api/ping") return json(JSONObject().put("ok", true).put("app", "tv-dashboard"))
+        // 암호화된 작업 꾸러미 (직원 앱 · PC 프로그램이 Tailscale/같은 망으로) — 꾸러미의 열쇠(관리자 키 · 폴더 도구 키)가 곧 인증이라 로그인 없이 받는다
+        if (uri == "/api/pkg" && m == Method.POST) return pkg(s, ip)
 
         val role = authenticate(s)
         if (role == Role.NONE) throw HttpError(401, "로그인이 필요합니다.")
@@ -116,6 +118,39 @@ class AdminServer(private val ctx: Context, port: Int) : NanoHTTPD(port) {
                 json(JSONObject().put("token", Auth.regenerateApiToken()))
             }
             else -> throw HttpError(404, "알 수 없는 API: ${m.name} $uri")
+        }
+    }
+
+    private fun pkg(s: IHTTPSession, ip: String): Response {
+        val len = s.headers["content-length"]?.toLongOrNull() ?: throw HttpError(411, "길이가 필요합니다")
+        if (len <= 0 || len > PKG_MAX) throw HttpError(413, "꾸러미가 너무 큽니다")
+        bodyRead.set(true)
+        val dir = java.io.File(ctx.cacheDir, "pkg-" + java.util.UUID.randomUUID().toString().take(8)).apply { mkdirs() }
+        try {
+            val limited = object : java.io.FilterInputStream(s.inputStream) {
+                var left = len
+                override fun read(): Int = if (left <= 0) -1 else super.read().also { if (it >= 0) left-- }
+                override fun read(b: ByteArray, off: Int, n: Int): Int {
+                    if (left <= 0) return -1
+                    val r = super.read(b, off, minOf(n.toLong(), left).toInt())
+                    if (r > 0) left -= r
+                    return r
+                }
+            }
+            val bo = java.io.ByteArrayOutputStream()
+            val out = java.io.DataOutputStream(bo)
+            try {
+                com.seyoungjo.tvdashboard.relay.BtServer.exchange(ctx, java.io.DataInputStream(limited.buffered(64 * 1024)), out, dir, "직원 앱 $ip", allowPair = false)
+            } catch (e: java.io.IOException) {
+                bo.reset()
+                com.seyoungjo.tvdashboard.relay.BtProtocol.writeMagic(out)
+                com.seyoungjo.tvdashboard.relay.BtProtocol.writeRecord(out, "e", JSONObject().put("error", e.message ?: "잘못된 꾸러미").toString().toByteArray(Charsets.UTF_8))
+                com.seyoungjo.tvdashboard.relay.BtProtocol.writeEnd(out)
+            }
+            val bytes = bo.toByteArray()
+            return newFixedLengthResponse(St(200, "OK"), "application/octet-stream", java.io.ByteArrayInputStream(bytes), bytes.size.toLong())
+        } finally {
+            dir.deleteRecursively()
         }
     }
 
@@ -286,5 +321,6 @@ class AdminServer(private val ctx: Context, port: Int) : NanoHTTPD(port) {
 
     companion object {
         private const val TAG = "AdminServer"
+        private const val PKG_MAX = 64L * 1024 * 1024        // 직원 앱 꾸러미 한 번 (도구가 30MB 로 막는다)
     }
 }
