@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .crypto import decode_key, new_key
@@ -37,14 +37,21 @@ class RelayConfig:
     token: str
     tool_token: str = ""        # (선택) 직원 업로드 도구에 넣을 별도 토큰 — 비우면 token 을 쓴다
     tvs: tuple[str, ...] = ()   # 이 PC 가 관리하는 TV 이름들 (첫 번째 = 처음 연결한 TV)
+    mode: str = "auto"          # auto = 직접 연결 → 블루투스 → GitHub,  bt = 블루투스 전용 (GitHub 를 쓰지 않음)
 
     def to_json(self, for_tv: bool = False) -> dict:
-        d = {"v": 1, "repo": self.repo, "tv": self.tv, "key": self.key, "token": self.token}
+        d = {"v": 1, "repo": self.repo, "tv": self.tv, "key": self.key, "token": "" if (for_tv and self.bt_only) else self.token}
         if not for_tv:
             d["tvs"] = list(self.all_tvs)
             if self.tool_token:
                 d["toolToken"] = self.tool_token
+            if self.mode != "auto":
+                d["mode"] = self.mode
         return d
+
+    @property
+    def bt_only(self) -> bool:
+        return self.mode == "bt"
 
     @property
     def all_tvs(self) -> tuple[str, ...]:
@@ -59,7 +66,7 @@ class RelayConfig:
         """같은 토큰·레포·키로 다른 TV(우편함)"""
         if tv not in self.all_tvs:
             raise ConfigError("이 PC 에 등록되지 않은 TV 입니다: %s" % tv)
-        return RelayConfig(self.repo, tv, self.key, self.token, self.tool_token, self.all_tvs)
+        return replace(self, tv=tv, tvs=self.all_tvs)
 
 
 def path(root: Path | None = None) -> Path:
@@ -75,7 +82,7 @@ def load(root: Path | None = None) -> RelayConfig | None:
         tv = d.get("tv") or DEFAULT_TV
         tvs = tuple(str(t) for t in (d.get("tvs") or []) if str(t).strip())
         cfg = RelayConfig(d.get("repo") or DEFAULT_REPO, tv, d.get("key", ""), d.get("token", ""),
-                          d.get("toolToken", ""), tvs if tv in tvs else tvs + (tv,))
+                          d.get("toolToken", ""), tvs if tv in tvs else tvs + (tv,), d.get("mode") or "auto")
     except (OSError, ValueError) as e:
         raise ConfigError("%s 를 읽을 수 없습니다: %s" % (FILE_NAME, e)) from None
     validate(cfg)
@@ -89,11 +96,14 @@ def validate(cfg: RelayConfig) -> None:
         if not TV_RE.match(t):
             raise ConfigError("tv 이름은 영문·숫자·-·_ 만 쓸 수 있습니다: %s" % t)
     decode_key(cfg.key)
-    if not cfg.token.strip():
-        raise ConfigError("GitHub 토큰이 비어 있습니다")
+    if cfg.mode not in ("auto", "bt"):
+        raise ConfigError("mode 는 auto 또는 bt 입니다: %s" % cfg.mode)
+    if not cfg.token.strip() and not cfg.bt_only:
+        raise ConfigError("GitHub 토큰이 비어 있습니다 (GitHub 없이 쓰려면 블루투스 전용으로 설정하세요)")
 
 
-def setup(token: str, repo: str = "", tv: str = "", root: Path | None = None, tool_token: str | None = None) -> RelayConfig:
+def setup(token: str, repo: str = "", tv: str = "", root: Path | None = None, tool_token: str | None = None,
+          mode: str | None = None) -> RelayConfig:
     """처음 설정 — 키는 자동 생성. 이미 있으면 키는 그대로 두고 토큰·레포·이름만 바꾼다 (TV 와 키가 어긋나지 않게).
     tool_token: None = 그대로, "" = 지우기, 값 = 직원 업로드 도구용 별도 토큰"""
     old = None
@@ -110,7 +120,19 @@ def setup(token: str, repo: str = "", tv: str = "", root: Path | None = None, to
         token=token.strip() or (old.token if old else ""),
         tool_token=(old.tool_token if old else "") if tool_token is None else tool_token.strip(),
         tvs=tvs if name in tvs else tvs + (name,),       # 이름을 바꾸면 TV 를 하나 더 관리 (기존 TV 는 목록에 남음)
+        mode=mode or (old.mode if old else "auto"),
     )
+    validate(cfg)
+    save(cfg, root)
+    return cfg
+
+
+def set_mode(mode: str, root: Path | None = None) -> RelayConfig:
+    """중계 방식 바꾸기 (auto ↔ bt). 키·TV 는 그대로 — GitHub 로 연결해 둔 TV 도 블루투스로 바로 쓸 수 있다"""
+    cfg = load(root)
+    if cfg is None:
+        raise ConfigError("먼저 처음 설정을 하세요")
+    cfg = replace(cfg, mode=mode)
     validate(cfg)
     save(cfg, root)
     return cfg
@@ -124,12 +146,12 @@ def add_tv(name: str, root: Path | None = None) -> RelayConfig:
     """TV 를 하나 더 관리 (토큰·키 그대로) — 그 TV 를 고른 상태가 된다. 다음은 그 TV 화면의 연결 코드로 연결"""
     cfg = load(root)
     if cfg is None:
-        raise ConfigError("먼저 GitHub 토큰을 저장하세요")
+        raise ConfigError("먼저 처음 설정을 하세요")
     name = name.strip()
     if not TV_RE.match(name):
         raise ConfigError("TV 이름은 영문·숫자·-·_ 만 쓸 수 있습니다 (예: osan2, 1factory-a): %s" % name)
     tvs = cfg.all_tvs if name in cfg.all_tvs else cfg.all_tvs + (name,)
-    cfg = RelayConfig(cfg.repo, name, cfg.key, cfg.token, cfg.tool_token, tvs)
+    cfg = replace(cfg, tv=name, tvs=tvs)
     save(cfg, root)
     return cfg
 
@@ -150,7 +172,7 @@ def remove_tv(name: str, root: Path | None = None) -> RelayConfig:
         raise ConfigError("먼저 GitHub 토큰을 저장하세요")
     if name == cfg.tv:
         raise ConfigError("지금 고른 TV 는 뺄 수 없습니다 — 다른 TV 를 고른 뒤 빼세요")
-    cfg = RelayConfig(cfg.repo, cfg.tv, cfg.key, cfg.token, cfg.tool_token, tuple(t for t in cfg.all_tvs if t != name))
+    cfg = replace(cfg, tvs=tuple(t for t in cfg.all_tvs if t != name))
     save(cfg, root)
     return cfg
 

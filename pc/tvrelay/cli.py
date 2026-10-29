@@ -57,6 +57,9 @@ def _relay(tv: str = "", default_first: bool = False) -> Relay:
     config.migrate(ROOT, cfg)
     name = tv.strip() or (cfg.first_tv if default_first else cfg.tv)
     try:
+        if cfg.bt_only:                                # 블루투스 전용: GitHub 대신 블루투스로 (닿지 않으면 쌓아 둠)
+            from .outbox import BtRelay
+            return BtRelay(ROOT, cfg.with_tv(name))    # type: ignore[return-value]
         return Relay(cfg.with_tv(name))
     except config.ConfigError as e:
         raise SystemExit(str(e))

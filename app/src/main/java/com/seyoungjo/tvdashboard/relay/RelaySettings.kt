@@ -19,6 +19,10 @@ object RelaySettings {
     val token: String get() = p.getString("relay_token", "") ?: ""
     val intervalSec: Int get() = (p.getString("relay_interval", null)?.trim()?.toIntOrNull() ?: 10).coerceIn(5, 3600)
     val configured get() = key.isNotBlank() && token.isNotBlank()
+    /** PC 와 암호키를 나눴는가 (GitHub 토큰 없이 블루투스로만 연결한 경우 포함) */
+    val paired get() = key.isNotBlank()
+    /** 블루투스로만 연결됨 — GitHub 중계는 쓰지 않는다 */
+    val btOnly get() = key.isNotBlank() && token.isBlank()
 
     private val NAME = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,38}$")
     private val REPO = Regex("^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
@@ -59,5 +63,5 @@ object RelaySettings {
         .put("enabled", enabled).put("repo", repo).put("tv", tv).put("interval", intervalSec)
         .put("hasKey", key.isNotBlank()).put("hasToken", token.isNotBlank())
         .put("status", RelayWorker.status).put("lastSync", RelayWorker.lastSync)
-        .put("pairCode", if (configured) JSONObject.NULL else Pairing.code)
+        .put("pairCode", if (paired) JSONObject.NULL else Pairing.code).put("btOnly", btOnly)
 }

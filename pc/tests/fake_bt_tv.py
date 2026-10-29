@@ -57,6 +57,11 @@ class FakeBtTv:
         self.connections = 0
         self.last_kind = ""
         self.on = True                          # False 면 포트가 안 열린다 (TV 꺼짐)
+        self.index_support = True               # False = 1.11.0 처럼 목록 전체만 준다
+        self.index: dict[str, Any] | None = None  # TreeIndex.kt 흉내 (id · gen · files · log)
+        self.pair_code = "K7QM4PXD"
+        self.paired = True                      # False = 아직 PC 와 키를 나누지 않은 TV (짝짓기 받음)
+        self.pair_json: dict[str, Any] | None = None
 
     # PC 쪽 bt.open_port 에 끼우는 것
     def open_port(self, port: str, timeout: float) -> Any:
@@ -80,6 +85,8 @@ class FakeBtTv:
                 files[name] = s.read(ln)
             h = json.loads(files.pop("h"))
             kind, id_ = h["kind"], h["id"]
+            if kind == "pair":
+                return self._pair(s, h, files)
             self.last_kind = kind
             if h["tv"] != self.tv:
                 s.write(MAGIC + _rec("e", json.dumps({"error": "다른 TV 로 보낸 꾸러미입니다"}).encode()) + b"\x00"); return
@@ -148,8 +155,17 @@ class FakeBtTv:
                     elif op["op"] == "list":
                         r["tree"] = self._tree()
                     elif op["op"] == "state":
-                        r["state"] = {"status": self._status(), "menu": {"items": []}, "settings": dict(self.settings), "tree": self._tree(),
+                        r["state"] = {"status": self._status(), "menu": {"items": []}, "settings": dict(self.settings),
                                       "grants": [], "bt": {"supported": True, "status": "대기 중"}, "v": 1, "time": int(time.time() * 1000), "interval": 10}
+                        if "gen" in op and self.index_support:
+                            r["state"]["index"] = self._since(op.get("id") or None, int(op["gen"]))
+                        else:
+                            r["state"]["tree"] = self._tree()
+                    elif op["op"] == "grant":
+                        self.grants[op["gid"]] = {"key": op["key"], "folder": op["folder"], "types": op.get("types") or ["json"]}
+                        r.update(gid=op["gid"], folder=op["folder"])
+                    elif op["op"] == "revoke":
+                        self.grants.pop(op["gid"], None)
                     elif op["op"] in ("reload", "sample"):
                         pass
                     else:
@@ -172,6 +188,65 @@ class FakeBtTv:
         return {"versionName": self.version, "freeBytes": 10 ** 9, "port": 8080, "addresses": []}
 
     def _tree(self) -> list[dict[str, Any]]:
-        out = [{"p": d, "d": True, "s": 0, "t": 0} for d in sorted(self.dirs)]
+        dirs = set(self.dirs) | {"/".join(k.split("/")[:i]) for k in self.files for i in range(1, k.count("/") + 1)}   # TV 처럼 상위 폴더도
+        out = [{"p": d, "d": True, "s": 0, "t": 0} for d in sorted(dirs)]
         out += [{"p": k, "d": False, "s": len(v), "t": 1700000000000, "h": hashlib.sha256(v).hexdigest()} for k, v in sorted(self.files.items())]
         return out
+
+    # ── TreeIndex 흉내 ──
+    def _entries(self) -> dict[str, list]:
+        return {e["p"]: [1 if e["d"] else 0, e["s"], e["t"], e.get("h", "")] for e in self._tree()}
+
+    def _since(self, id_: str | None, gen: int) -> dict[str, Any]:
+        files = self._entries()
+        if self.index is None:
+            self.index = {"id": "fakeidx", "gen": 1, "files": files, "log": []}
+        elif files != self.index["files"]:
+            old = self.index["files"]
+            st = {p: e for p, e in files.items() if old.get(p) != e}
+            dl = [p for p in old if p not in files]
+            g = self.index["gen"] + 1
+            self.index = {"id": self.index["id"], "gen": g, "files": files, "log": (self.index["log"] + [{"g": g, "set": st, "del": dl}])[-40:]}
+        idx = self.index
+        out: dict[str, Any] = {"id": idx["id"], "gen": idx["gen"], "at": 1}
+        if id_ == idx["id"] and gen == idx["gen"]:
+            out["same"] = True
+            return out
+        oldest = idx["log"][0]["g"] if idx["log"] else 10 ** 9
+        if id_ == idx["id"] and oldest - 1 <= gen < idx["gen"]:
+            st, dl = {}, []
+            for l in idx["log"]:
+                if l["g"] <= gen:
+                    continue
+                for p, e in l["set"].items():
+                    st[p] = e
+                    if p in dl:
+                        dl.remove(p)
+                for p in l["del"]:
+                    st.pop(p, None)
+                    if p not in dl:
+                        dl.append(p)
+            out.update(set=st, **{"del": dl})
+            return out
+        import base64, gzip
+        text = json.dumps(idx["files"], ensure_ascii=False)
+        if len(text) > 8192:
+            out["fullz"] = base64.b64encode(gzip.compress(text.encode())).decode()
+        else:
+            out["full"] = idx["files"]
+        return out
+
+    def _pair(self, s: "_Sock", h: dict[str, Any], files: dict[str, bytes]) -> None:
+        from tvrelay.relay import pair_secrets
+        pid, key = pair_secrets(self.pair_code)
+        import base64
+        box = Box(base64.urlsafe_b64encode(key).decode().rstrip("="))
+        if self.paired:
+            s.write(MAGIC + _rec("e", json.dumps({"error": "이미 PC 와 연결된 TV 입니다"}).encode()) + b"\x00"); return
+        if h.get("pid") != pid:
+            s.write(MAGIC + _rec("e", json.dumps({"error": "연결 코드가 다릅니다"}).encode()) + b"\x00"); return
+        cfg = json.loads(box.open(files["m"], ("pair/%s/m" % pid).encode()))
+        self.pair_json = cfg
+        self.tv, self.box, self.paired = cfg["tv"], Box(cfg["key"]), True
+        res = {"ok": True, "tv": self.tv, "versionName": self.version}
+        s.write(MAGIC + _rec("m", box.seal(json.dumps(res).encode(), ("pair/%s/res" % pid).encode())) + b"\x00")

@@ -59,6 +59,11 @@ object RelayWorker {
             var wait = 30_000L
             try {
                 if (!RelaySettings.enabled) status = "꺼짐"
+                else if (RelaySettings.btOnly) {
+                    // 블루투스로만 연결된 TV: GitHub 는 찾지 않는다 (GitHub 를 쓰려면 '원격 연결 초기화' 후 연결 코드로)
+                    status = "블루투스 전용 — GitHub 중계는 쓰지 않음 (TV 이름 ${RelaySettings.tv})"
+                    wait = 300_000L
+                }
                 else if (!RelaySettings.configured) {
                     // 아직 연결 전: PC 프로그램에 연결 코드를 넣으면 레포에서 연결 정보를 스스로 받아 온다
                     status = "연결 대기 — PC 프로그램에 연결 코드 ${Pairing.code} 입력"
@@ -117,13 +122,31 @@ object RelayWorker {
     }
 
     /** PC 화면이 보는 TV 상태 (GitHub 상태 브랜치 · 블루투스 state 작업 공통) */
-    fun stateJson(ctx: Context, ops: FileOps): JSONObject = JSONObject()
+    fun stateJson(ctx: Context, ops: FileOps, withTree: Boolean = true): JSONObject = JSONObject()
         .put("status", ops.status())
         .put("menu", ops.menu())
         .put("settings", AppSettings.remoteJson())
-        .put("tree", ops.tree())
+        .apply { if (withTree) put("tree", ops.tree()) }
         .put("grants", grantsJson(ops))
         .put("bt", BtServer.json(ctx))
+
+    private val indexLock = Any()
+
+    /**
+     * 파일 목록 갱신시간 장부(앱 전용 폴더 bt-index.json)를 지금 목록으로 맞추고, PC 가 가진 (id, gen) 이후로 바뀐 것만 돌려준다.
+     * 블루투스처럼 느린 길에서 목록 전체를 매번 보내지 않으려고 쓴다 (TreeIndex 참고).
+     */
+    fun indexSince(ctx: Context, ops: FileOps, id: String?, gen: Long): JSONObject = synchronized(indexLock) {
+        val f = File(ctx.filesDir, "bt-index.json")
+        val old = try { if (f.isFile) JSONObject(f.readText(Charsets.UTF_8)) else null } catch (e: Exception) { null }
+        val idx = TreeIndex.update(old, ops.tree(), System.currentTimeMillis())
+        if (idx !== old) {
+            val tmp = File(ctx.filesDir, "bt-index.json.tmp")
+            tmp.writeText(idx.toString(), Charsets.UTF_8)
+            if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+        }
+        TreeIndex.since(idx, id, gen)
+    }
 
     private fun publishState(ctx: Context, c: RelayClient, ops: FileOps) {
         stateDirty = false
@@ -301,7 +324,14 @@ object RelayWorker {
             "revoke" -> GrantStore.remove(op.getString("gid"))
             "ping" -> r.put("status", ops.status())
             "list" -> r.put("tree", ops.tree())
-            "state" -> r.put("state", stateJson(ctx, ops).put("v", 1).put("time", System.currentTimeMillis()).put("interval", RelaySettings.intervalSec))
+            "state" -> {
+                // gen 을 주면(블루투스 PC) 목록은 장부에서 바뀐 것만, 아니면 목록 전체
+                val st = if (op.has("gen")) stateJson(ctx, ops, withTree = false)
+                    .put("index", indexSince(ctx, ops, op.optString("id", "").ifEmpty { null }, op.optLong("gen", 0)))
+                else stateJson(ctx, ops)
+                r.put("state", st.put("v", 1).put("time", System.currentTimeMillis()).put("interval", RelaySettings.intervalSec))
+            }
+            "index" -> r.put("index", indexSince(ctx, ops, op.optString("id", "").ifEmpty { null }, op.optLong("gen", 0)))
             "get" -> {
                 val src = ops.file(op.getString("path"))
                 // 보내는 동안 파일이 바뀌어도 섞이지 않도록 복사본에서 보낸다

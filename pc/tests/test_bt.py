@@ -24,7 +24,7 @@ class BtProtocolTest(unittest.TestCase):
         self.assertEqual(tv.files["a팀/index.html"], b"<h1>A</h1>"); self.assertEqual(res["results"][2]["status"]["versionName"], "1.11.0")
         self.assertEqual(ch.get("a팀/index.html"), b"<h1>A</h1>")                     # 내려받기 조각(res/d0) 풀기
         st = ch.state()
-        self.assertEqual(st["via"], "bt"); self.assertTrue(st["online"]); self.assertEqual([e["p"] for e in st["tree"]], ["빈폴더", "a팀/index.html"])
+        self.assertEqual(st["via"], "bt"); self.assertTrue(st["online"]); self.assertEqual(sorted(e["p"] for e in st["tree"]), ["a팀", "a팀/index.html", "빈폴더"])
         r = ch.run_op({"op": "delete", "path": "없는것"})
         self.assertFalse(r["ok"])
         # 다른 키 → TV 가 거절 (e 기록)

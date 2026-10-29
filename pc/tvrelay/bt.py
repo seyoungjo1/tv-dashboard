@@ -17,8 +17,9 @@ import threading
 import time
 from typing import Any, Callable
 
+from . import tvindex
 from .crypto import Box, aad
-from .relay import Job, new_id
+from .relay import Job, new_id, pair_secrets
 
 MAGIC = b"TVBT1"
 OPEN_TIMEOUT = 15.0
@@ -220,13 +221,28 @@ class BtChannel:
     """TV 한 대로 가는 블루투스 통로. 작업마다 포트를 열고(연결) 보내고 닫는다 — 한 번에 하나씩"""
     kind = "bt"
 
-    def __init__(self, tv: str, port: str, box: Box):
+    def __init__(self, tv: str, port: str, box: Box, root: Any = None):
         self.tv = tv
         self.port = port
         self.box = box
+        self.root = root                  # 있으면 파일 목록을 갱신시간 장부(out/tv/<TV>/index.json)로 바뀐 것만 받는다
         self.url = "bt:" + port
         self.lock = threading.Lock()
         self.echo: Callable[[str], None] | None = None
+        self.last_index: dict[str, int] = {}
+
+    def run_package(self, id_: str, files: list[tuple[str, bytes]], kind: str = "job") -> dict[str, Any]:
+        """이미 암호화해 둔 꾸러미(보낼 것 쌓아 두기)를 그대로 보내고 결과를 받는다"""
+        with self.lock:
+            s = open_port(self.port, max(READ_TIMEOUT, 30 + sum(len(b) for _, b in files) / (100 * 1024)))
+            try:
+                write_package(s, self.tv, kind, id_, files)
+                res = open_result(self.box, self.tv, id_, read_package(s))
+            finally:
+                s.close()
+        res["id"] = id_
+        res["via"] = "bt"
+        return res
 
     def run_job(self, job: Job, blobs: list[bytes | None] | None = None, timeout: float = READ_TIMEOUT) -> dict[str, Any]:
         with self.lock:
@@ -263,11 +279,23 @@ class BtChannel:
         return r["data"]
 
     def state(self) -> dict[str, Any]:
-        res = self.run_job(Job().op("state"))
+        """TV 상태. root 가 있으면 PC 의 장부(id, gen)를 보내 파일 목록은 바뀐 것만 받아 합친다"""
+        idx = tvindex.load(self.root, self.tv) if self.root is not None else None
+        res = self.run_job(Job().op("state", **({"id": idx["id"], "gen": idx["gen"]} if idx is not None else {})))
         r = (res.get("results") or [{}])[0]
         if not r.get("ok") or not isinstance(r.get("state"), dict):
             raise BtError(str(r.get("error") or "TV 앱이 state 작업을 모릅니다 — 앱을 1.11.0 이상으로 업데이트하세요"))
         st = dict(r["state"])
+        if idx is not None:
+            if isinstance(st.get("index"), dict):            # TV 1.11.1 이상: 장부의 바뀐 것만
+                idx, n = tvindex.merge(idx, st.pop("index"))
+                self.last_index = n
+            else:                                            # 예전 TV: 목록 전체
+                idx = tvindex.from_tree(self.tv, st.get("tree") or [])
+                self.last_index = {"full": 1, "set": 0, "del": 0}
+            tvindex.save(self.root, self.tv, idx)
+            st["tree"] = tvindex.tree(idx)
+            st["index"] = {"gen": idx["gen"], **self.last_index}
         st.update(age_sec=0, online=True, via="bt", directUrl=self.url)
         return st
 
@@ -277,3 +305,23 @@ class BtChannel:
         if not r.get("ok"):
             raise BtError(str(r.get("error") or "ping 실패"))
         return r.get("status") or {}
+
+
+def pair(port: str, cfg_json: dict[str, Any], code: str, timeout: float = 60.0) -> dict[str, Any]:
+    """연결 코드로 TV 와 짝짓기 (GitHub 없이): 연결 정보(TV 이름·암호키)를 코드에서 만든 키로 암호화해 블루투스로 보낸다.
+    TV 앱 Pairing.acceptLocal 과 짝. 돌려주는 값: {"ok", "tv", "versionName"}"""
+    import base64
+    pid, key = pair_secrets(code)
+    box = Box(base64.urlsafe_b64encode(key).decode().rstrip("="))
+    sealed = box.seal(json.dumps(cfg_json, ensure_ascii=False).encode("utf-8"), ("pair/%s/m" % pid).encode())
+    s = open_port(port, timeout)
+    try:
+        s.write(MAGIC + _rec("h", json.dumps({"v": 1, "kind": "pair", "pid": pid, "tv": cfg_json.get("tv", ""), "id": new_id()}).encode("utf-8")))
+        s.write(_rec("m", sealed) + b"\x00")
+        files = read_package(s)
+    finally:
+        s.close()
+    if "m" not in files:
+        err = json.loads(files["e"].decode("utf-8")).get("error") if "e" in files else ""
+        raise BtError(err or "TV 가 연결을 받지 않았습니다")
+    return json.loads(box.open(files["m"], ("pair/%s/res" % pid).encode()).decode("utf-8"))

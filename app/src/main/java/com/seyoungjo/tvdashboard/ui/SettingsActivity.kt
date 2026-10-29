@@ -219,6 +219,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             (if (mode == "app") "\n⚠ 앱을 삭제하면 이 폴더의 자료도 삭제됩니다." else "\n앱을 삭제해도 자료는 남습니다.")
         findPreference<Preference>("relay_code")?.summary =
             if (RelaySettings.configured) "연결됨 (${RelaySettings.repo} · ${RelaySettings.tv})"
+            else if (RelaySettings.btOnly) "블루투스로 연결됨 (TV 이름 ${RelaySettings.tv}) — GitHub 중계는 쓰지 않음"
             else "${com.seyoungjo.tvdashboard.relay.Pairing.code}  ← PC 프로그램의 [TV 연결]에 입력하세요"
         findPreference<Preference>("relay_info")?.summary =
             "${RelayWorker.status}\n레포: ${RelaySettings.repo} · TV 이름: ${RelaySettings.tv}" +

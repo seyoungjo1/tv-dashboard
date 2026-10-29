@@ -195,7 +195,7 @@ object BtServer {
             }
             tick()
             val result = try {
-                process(ctx, tv, kind, id, dir)
+                if (kind == "pair") pair(h, dir) else process(ctx, tv, kind, id, dir)
             } catch (e: SecurityException) {
                 null to (e.message ?: "암호키가 다릅니다")
             } catch (e: IllegalArgumentException) {
@@ -223,6 +223,22 @@ object BtServer {
             try { sock.close() } catch (_: IOException) {}
             dir.deleteRecursively()
         }
+    }
+
+    /** 연결 코드로 짝짓기 (GitHub 없이): h = {kind:"pair", pid}, m = 연결 정보(코드에서 만든 키로 암호화). 응답도 그 키로 */
+    private fun pair(h: JSONObject, dir: File): Pair<LocalJobSource?, String> {
+        val pid = h.optString("pid")
+        require(Regex("^[0-9a-f]{16}$").matches(pid)) { "잘못된 연결 요청" }
+        val m = File(dir, "m")
+        require(m.isFile) { "연결 정보가 없습니다" }
+        val key = Pairing.acceptLocal(pid, m.readBytes())
+        val c = RelayCrypto(java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(key))
+        val res = JSONObject().put("ok", true).put("tv", RelaySettings.tv).put("versionName", com.seyoungjo.tvdashboard.BuildConfig.VERSION_NAME)
+        val out = File(dir, "res-m")
+        out.writeBytes(c.seal(res.toString().toByteArray(Charsets.UTF_8), "pair/$pid/res"))
+        val src = LocalJobSource(RelaySettings.tv, c, dir)
+        src.resultFiles.add("m" to out)
+        return src to ""
     }
 
     /** 받아 둔 꾸러미를 GitHub 우편함과 같은 코드로 처리. 돌려주는 값: (결과 파일을 가진 source, 오류) */

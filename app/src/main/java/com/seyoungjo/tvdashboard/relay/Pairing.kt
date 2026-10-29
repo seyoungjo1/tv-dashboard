@@ -68,6 +68,23 @@ object Pairing {
         return true
     }
 
+    /**
+     * 블루투스로 온 연결 정보 (GitHub 없이). pid 가 이 TV 코드의 것이면 풀어서 저장하고 응답용 키를 돌려준다.
+     * 이미 PC 와 암호키를 나눈 TV 는 받지 않는다 (다시 연결하려면 TV 설정의 '원격 연결 초기화').
+     */
+    fun acceptLocal(pid: String, sealed: ByteArray): ByteArray {
+        if (RelaySettings.paired) throw IllegalArgumentException("이미 PC 와 연결된 TV 입니다 — 다시 연결하려면 TV 설정에서 '원격 연결 초기화' 후 새 코드로")
+        derive()
+        if (pid != cachedId) throw IllegalArgumentException("연결 코드가 다릅니다 — TV 설정의 '연결 코드' 를 다시 확인하세요")
+        val cfg = try { PairCrypto.open(cachedId, cachedKey, sealed) } catch (e: SecurityException) {
+            throw IllegalArgumentException("연결 코드가 다릅니다")
+        }
+        RelaySettings.apply(cfg.put("enabled", true))
+        Log.i(TAG, "paired over bluetooth: tv=${RelaySettings.tv} token=${RelaySettings.token.isNotBlank()}")
+        RelayWorker.kick()
+        return cachedKey
+    }
+
     private fun httpGet(url: String, ua: String): ByteArray {
         val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = 20_000

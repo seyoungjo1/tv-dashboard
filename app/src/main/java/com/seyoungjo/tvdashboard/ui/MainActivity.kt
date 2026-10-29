@@ -364,7 +364,7 @@ class MainActivity : AppCompatActivity() {
                 "관리자 PC 브라우저에서 아래 주소로 접속해 폴더를 만들고\n" +
                 "index.html · 이미지 · JSON 을 업로드하세요.\n\n$urls\n\n" +
                 "관리자 비밀번호: 이 화면 왼쪽 아래 ⚙ 설정 → '관리자 비밀번호'\n\n" +
-                (if (!RelaySettings.configured) "다른 망의 PC 에서 관리: PC 프로그램(tvrun.bat)에 연결 코드  ${Pairing.code}  입력\n\n" else "") +
+                (if (!RelaySettings.paired) "다른 망의 PC 에서 관리: PC 프로그램(tvrun.bat)에 연결 코드  ${Pairing.code}  입력\n\n" else "") +
                 "자료 폴더: ${ContentStore.root(this).path}$err"
         )
     }

@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, backup, bt, config, direct, grants, groups, syncbat, update, versions, video
+from . import __version__, backup, bt, config, direct, grants, groups, outbox, syncbat, tvindex, update, versions, video
 from .relay import Job, Relay, pair, pair_done
 
 HERE = Path(__file__).resolve().parent
@@ -44,6 +44,8 @@ SERVER: list[Any] = [None]
 RESTART = threading.Event()
 STARTED_WITH = [""]
 RESTART_MSG = "프로그램이 v%s 로 업데이트됐습니다. 화면을 다시 시작해야 새 버전이 돕니다."
+BT_ONLY_MSG = "블루투스 전용 모드입니다 — GitHub 우편함을 쓰지 않습니다. TV 가까이(10m)에서 TV 가 켜져 있을 때 다시 하세요."
+BT_STATE_AGE = 8.0                 # 블루투스 상태는 이만큼 기억 (연결 한 번에 몇 초 걸리므로)
 # Windows 레지스트리에 따라 .js 가 text/plain 이 되는 일이 있어 자주 쓰는 형식은 고정
 MIME = {"html": "text/html", "htm": "text/html", "js": "text/javascript", "mjs": "text/javascript", "css": "text/css",
         "json": "application/json", "svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
@@ -107,6 +109,8 @@ class Api:
         self.finder = direct.Finder(root, self._saved_state)
         self.direct_results: dict[str, dict[str, Any]] = {}   # 직접 보낸 작업 id(d-…) → 결과 (한 번 읽으면 지움)
         self.bts: dict[str, tuple[float, bt.BtChannel]] = {}    # 블루투스로 닿은 TV (30초 기억)
+        self.outbox_lock = threading.Lock()
+        self.bt_lock = threading.Lock()                    # 블루투스 통로 기억 (self.lock 을 쥔 채로 불려도 되게 따로)
         self.bt_bad: dict[str, float] = {}
 
     # ── 직접 연결 ──
@@ -133,7 +137,7 @@ class Api:
 
     def forget_channels(self, tv: str | None = None) -> None:
         self.finder.forget(tv)
-        with self.lock:
+        with self.bt_lock:
             if tv is None:
                 self.bts.clear(); self.bt_bad.clear()
             else:
@@ -141,7 +145,7 @@ class Api:
 
     def _forget(self, ch: Any) -> None:
         if getattr(ch, "kind", "") == "bt":
-            with self.lock:
+            with self.bt_lock:
                 self.bts.pop(ch.tv, None); self.bt_bad[ch.tv] = time.time()
         else:
             self.finder.forget(ch.tv)
@@ -157,7 +161,7 @@ class Api:
         if not port or not e.get("enabled", True):
             return None
         now = time.time()
-        with self.lock:
+        with self.bt_lock:
             hit = self.bts.get(tv)
             if hit and now - hit[0] < bt.OK_CACHE and hit[1].port == port:
                 return hit[1]
@@ -168,15 +172,15 @@ class Api:
             if cfg is None:
                 return None
             from .crypto import Box
-            ch = bt.BtChannel(tv, port, Box(cfg.key))
+            ch = bt.BtChannel(tv, port, Box(cfg.key), root=self.root)
             ch.echo = echo
             ch.ping()
         except Exception as e:
             echo("블루투스(%s) 연결 안 됨 — GitHub 로: %s" % (port, e))
-            with self.lock:
+            with self.bt_lock:
                 self.bt_bad[tv] = now; self.bts.pop(tv, None)
             return None
-        with self.lock:
+        with self.bt_lock:
             self.bts[tv] = (now, ch); self.bt_bad.pop(tv, None)
         return ch
 
@@ -286,15 +290,96 @@ class Api:
         echo("직접 연결 시험 %s: %s" % (tv, ("성공 " + r["url"]) if r.get("ok") else r.get("error")))
         return r
 
-    def relay(self) -> Relay:
+    def _ensure_tv(self) -> config.RelayConfig:
+        """설정을 읽고 지금 TV 의 기록으로 맞춘다 (GitHub 와 상관없이)"""
         cfg = config.load(self.root)
         if cfg is None:
-            raise ValueError("아직 설정되지 않았습니다. [처음 설정]에서 GitHub 토큰을 입력하세요.")
-        if self._relay is None or self._relay.cfg != cfg:
-            self._relay = Relay(cfg)
+            raise ValueError("아직 설정되지 않았습니다. [처음 설정]에서 GitHub 토큰을 넣거나 '블루투스 전용' 으로 설정하세요.")
         if cfg.tv != self._tv:
             self._switch(cfg.tv)
+        return cfg
+
+    def bt_only(self) -> bool:
+        try:
+            cfg = config.load(self.root)
+        except config.ConfigError:
+            return False
+        return bool(cfg and cfg.bt_only)
+
+    def relay(self) -> Relay:
+        cfg = self._ensure_tv()
+        if cfg.bt_only:
+            raise ValueError(BT_ONLY_MSG)
+        if self._relay is None or self._relay.cfg != cfg:
+            self._relay = Relay(cfg)
         return self._relay
+
+    def _submit(self, job: Job, tv: str | None = None, allow_direct: bool = False) -> str:
+        """작업 하나 보내기: (직접 연결) → 블루투스 → GitHub 우편함, 블루투스 전용이면 GitHub 대신 쌓아 두기. 돌려주는 값: 작업 id"""
+        cfg = self._ensure_tv()
+        tv = tv or cfg.tv
+        ch = (self.direct_for(tv) if allow_direct else None) or self.bt_for(tv)
+        if ch is not None:
+            r = self._send_direct(ch, job, [None] * len(job.ops))
+            if r is not None:
+                return r["id"]
+        if cfg.bt_only:
+            id_ = outbox.put(self.root, cfg.key, tv, job)
+            echo("TV '%s' 에 블루투스로 닿지 않아 쌓아 두었습니다 (%s) — TV 에 닿으면 저절로 보냅니다" % (tv, id_))
+            return id_
+        return (self.relay() if tv == cfg.tv else Relay(cfg.with_tv(tv))).submit(job)
+
+    def outbox_tick(self, tv: str | None = None) -> int:
+        """쌓아 둔 작업을 블루투스로 보낸다 (30초마다 · 블루투스로 상태를 받은 직후)"""
+        cfg = config.load(self.root)
+        if cfg is None:
+            return 0
+        n = 0
+        for t in ([tv] if tv else list(cfg.all_tvs)):
+            if not outbox.ids(self.root, t):
+                continue
+            ch = self.bt_for(t)
+            if ch is None:
+                continue
+            try:
+                with self.outbox_lock:
+                    n += outbox.flush(self.root, t, ch, echo)
+            except (OSError, ValueError, bt.BtError) as e:
+                echo("쌓아 둔 작업 보내기 중 끊김 (%s): %s — 다음에 이어서" % (t, e))
+                self._forget(ch)
+        if n and (tv or self._cur_tv()) == self._cur_tv():
+            self._state_at = 0.0
+        return n
+
+    def mode_info(self) -> dict[str, Any]:
+        cfg = config.load(self.root)
+        return {"mode": cfg.mode if cfg else "auto", "hasToken": bool(cfg and cfg.token),
+                "outbox": {t: len(outbox.ids(self.root, t)) for t in (cfg.all_tvs if cfg else ())}}
+
+    def mode_save(self, body: dict[str, Any]) -> dict[str, Any]:
+        mode = str(body.get("mode", "auto"))
+        cfg = config.set_mode(mode, self.root)
+        self._relay = None
+        self.forget_channels()
+        echo("중계 방식: %s" % ("블루투스 전용 (GitHub 를 쓰지 않음)" if cfg.bt_only else "자동 (직접 연결 → 블루투스 → GitHub)"))
+        return self.mode_info()
+
+    def bt_pair(self, body: dict[str, Any]) -> dict[str, Any]:
+        """연결 코드로 TV 와 블루투스 짝짓기 (GitHub 없이) — 그 TV 의 블루투스 포트도 저장"""
+        cfg = self._ensure_tv()
+        tv = str(body.get("tv") or cfg.tv)
+        port = str(body.get("port") or self.bt_config(tv).get("port") or "").strip().upper()
+        if not port:
+            raise ValueError("블루투스 포트(COMn)를 고르세요 — 먼저 Windows 설정에서 TV 와 짝지어야 포트가 생깁니다")
+        echo("블루투스로 TV '%s' 연결 중… (%s)" % (tv, port))
+        try:
+            r = bt.pair(port, cfg.with_tv(tv).to_json(for_tv=True), str(body.get("code", "")))
+        except (OSError, bt.BtError) as e:
+            raise ValueError("블루투스 연결 실패: %s" % e)
+        self.bt_save({"tv": tv, "port": port, "enabled": True})
+        echo("블루투스 연결 완료: TV '%s' (앱 v%s)" % (r.get("tv"), r.get("versionName")))
+        self._state_at = 0.0
+        return {"done": True, "tv": r.get("tv"), "app": r.get("versionName"), "port": port}
 
     # ── TV 별 기록 (TV 를 바꾸면 그 TV 의 것으로) ──
     def _cur_tv(self) -> str:
@@ -343,6 +428,7 @@ class Api:
             hit = self.finder.ok.get(t)
             it: dict[str, Any] = {"tv": t, "online": False, "age_sec": None, "files": None, "app": "",
                                   "direct": bool(self.finder.configured(t)), "bt": str(self.bt_config(t).get("port") or ""),
+                                  "outbox": len(outbox.ids(self.root, t)),
                                   "directOn": bool(hit and time.time() - hit[0] < direct.PROBE_CACHE)}
             try:
                 c = json.loads((config.tv_dir(self.root, t) / "state-cache.json").read_text(encoding="utf-8"))
@@ -359,7 +445,7 @@ class Api:
             raise ValueError("백업/복원이 진행 중입니다 — 끝난 뒤 TV 를 바꾸세요")
         config.select_tv(str(body.get("tv", "")), self.root)
         self._relay = None
-        self.relay()
+        self._ensure_tv()
         return self.tvs()
 
     def tv_add(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -367,7 +453,7 @@ class Api:
             raise ValueError("백업/복원이 진행 중입니다 — 끝난 뒤 TV 를 추가하세요")
         config.add_tv(str(body.get("tv", "")), self.root)
         self._relay = None
-        self.relay()
+        self._ensure_tv()
         return self.tvs()
 
     def tv_remove(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -384,16 +470,17 @@ class Api:
         return {"version": __version__, "disk_version": update.local_version(self.root) or __version__,
                 "supervised": supervised(), "configured": cfg is not None, "error": err,
                 "repo": cfg.repo if cfg else config.DEFAULT_REPO, "tv": cfg.tv if cfg else config.DEFAULT_TV,
-                "tvs": list(cfg.all_tvs) if cfg else [],
+                "tvs": list(cfg.all_tvs) if cfg else [], "mode": cfg.mode if cfg else "auto",
                 "cfgPath": str(config.path(self.root)), "root": str(self.root)}
 
     def setup(self, body: dict[str, Any]) -> dict[str, Any]:
         tool = body.get("toolToken")
         cfg = config.setup(str(body.get("token", "")), str(body.get("repo", "")), str(body.get("tv", "")), self.root,
-                           tool_token=None if tool is None else str(tool))
-        Relay(cfg).gh.repo_info()        # 레포·토큰 확인
+                           tool_token=None if tool is None else str(tool), mode=str(body["mode"]) if body.get("mode") else None)
+        if not cfg.bt_only:
+            Relay(cfg).gh.repo_info()        # 레포·토큰 확인
         self._relay = None
-        self.relay()
+        self._ensure_tv()
         return self.info()
 
     # ── 직원 업로드 도구 (폴더 전용 HTML) ──
@@ -423,7 +510,7 @@ class Api:
             if old:
                 job.op("revoke", gid=old["gid"])
             job.ops.append(grants.grant_op(g))
-            id_ = self.relay().submit(job)
+            id_ = self._submit(job)
             g["job"] = id_
             data[folder] = g
             grants.save(self.root, data)
@@ -438,7 +525,7 @@ class Api:
             g = data.pop(folder, None)
             if not g:
                 raise ValueError("발급된 도구가 없습니다: %s" % folder)
-            id_ = self.relay().submit(Job().op("revoke", gid=g["gid"]))
+            id_ = self._submit(Job().op("revoke", gid=g["gid"]))
             grants.save(self.root, data)
         echo("업로드 도구 폐기: '%s' (%s)" % (folder, id_))
         return {"id": id_}
@@ -453,6 +540,23 @@ class Api:
         html = grants.bake(cfg, g, password, cfg.tool_token)
         echo("%s 내려받음: '%s' (비밀번호 잠금)" % ("공지사항 편집 도구" if g.get("kind") == "notice" else "업로드 도구", g["folder"]))
         return grants.file_name(g), html.encode("utf-8")
+
+    def _offline_state(self) -> dict[str, Any] | None:
+        """블루투스 전용 모드에서 TV 에 닿지 않을 때: 마지막 상태 + 갱신시간 장부(index.json)의 목록"""
+        try:
+            c = json.loads(self.state_cache.read_text(encoding="utf-8"))
+            st = dict(c["state"])
+        except (OSError, ValueError, KeyError, TypeError):
+            st = None
+        idx = tvindex.load(self.root, self._cur_tv())
+        if st is None and not idx["files"]:
+            return None
+        st = st or {"status": {}, "menu": {"items": []}, "settings": {}}
+        if idx["files"]:
+            st["tree"] = tvindex.tree(idx)
+        st["age_sec"] = max(0, int(time.time() - (st.get("time") or 0) / 1000))
+        st.update(online=False, via="bt", btOff=True, outbox=len(outbox.ids(self.root, self._cur_tv())))
+        return st
 
     def cached_state(self) -> dict[str, Any]:
         """화면을 켤 때 바로 보여 줄 마지막 상태 (네트워크 없이)"""
@@ -469,15 +573,23 @@ class Api:
     def state(self, max_age: float = 0) -> dict[str, Any]:
         if max_age and self._last_state and time.time() - self._state_at < max_age:
             return self._last_state                        # 방금 확인했으면 다시 묻지 않는다
+        if self._last_state and self._last_state.get("via") == "bt" and time.time() - self._state_at < BT_STATE_AGE:
+            return self._last_state                        # 블루투스는 연결에 몇 초 — 방금 받은 것을 그대로
         st = None
         d = self.channel_for()
         if d is not None:
             try:
                 st = d.state()                                 # 직접 연결·블루투스: TV 에서 바로 (GitHub 를 거치지 않음)
                 self._save_state_cache(d.tv, st)
+                if getattr(d, "kind", "") == "bt" and outbox.ids(self.root, d.tv):
+                    threading.Thread(target=self.outbox_tick, args=(d.tv,), daemon=True).start()   # 쌓아 둔 것 보내기
             except Exception as e:
-                echo("직접 연결로 상태를 받지 못해 GitHub 로 확인합니다: %s" % e)
+                echo("직접 연결로 상태를 받지 못해 %s: %s" % ("마지막 상태를 보여 줍니다" if self.bt_only() else "GitHub 로 확인합니다", e))
                 self._forget(d)
+        if st is None and self.bt_only():
+            st = self._offline_state()                     # 블루투스 전용: 닿지 않으면 마지막으로 받아 둔 목록(캐시)으로
+            if st is None:
+                return {"none": True, "online": False, "btOnly": True}
         if st is None:
             st = self.relay().state(self.state_cache)
         self._state_at = time.time()
@@ -576,15 +688,20 @@ class Api:
         d = self.channel_for()
         if d is not None:                                    # 직접 연결·블루투스: 지금 바로 받아 둔다
             tv = d.tv
-            for p in need:
-                try:
-                    blob = d.get(p)
-                except (direct.DirectError, bt.BtError) as e:
-                    raise ValueError("TV 에서 받지 못했습니다: %s (%s)" % (p, e))
+            try:
+                got = self._fast_gets(d, need)               # 블루투스는 한 연결로 묶어서
+            except (OSError, ValueError, direct.DirectError, bt.BtError) as e:
+                raise ValueError("TV 에서 받지 못했습니다 (%s)" % e)
+            for p, item in zip(need, got.get("results") or []):
+                if not item.get("ok") or "data" not in item:
+                    raise ValueError("TV 에서 받지 못했습니다: %s (%s)" % (p, item.get("error")))
+                blob = item.pop("data")
                 self._cache_put(p, blob, t=(self.tree.get(p) or {}).get("t"))
                 backup.record_put(self.root, tv, p, blob)
-            echo("미리보기용으로 TV 에서 %d개 받음 (직접 연결)" % len(need))
+            echo("미리보기용으로 TV 에서 %d개 받음 (%s)" % (len(need), "블루투스" if getattr(d, "kind", "") == "bt" else "직접 연결"))
             return {"ready": True}
+        if self.bt_only():
+            raise ValueError("TV 에 블루투스로 닿지 않아 미리보기를 받을 수 없습니다 (받아 둔 것만 보입니다). TV 가까이에서 다시 하세요.")
         with self.lock:
             ids = {self.pending_paths[p] for p in need if p in self.pending_paths}
             new = [p for p in need if p not in self.pending_paths]
@@ -744,8 +861,15 @@ class Api:
                 mirrored = self._mirror(rec)
                 self._state_at = 0.0                        # 다음 상태 확인은 바로 TV 에서
                 return {"id": r["id"], "skipped": skipped, "queued": queued_skip, "mirrored": mirrored, "direct": True, "via": r.get("via", "direct")}
-        echo("TV 로 작업 보내는 중… (%d개, %.1f MB)" % (len(job.ops), mb))
-        id_ = self.relay().submit(job)
+        if self.bt_only():
+            if any(op.get("op") in ("get", "ping", "list") for op in job.ops):
+                raise ValueError("TV 에 블루투스로 닿지 않아 받을 수 없습니다 — TV 가까이에서 다시 하세요.")
+            cfg = self._ensure_tv()
+            id_ = outbox.put(self.root, cfg.key, cfg.tv, job)
+            echo("TV 에 블루투스로 닿지 않아 쌓아 두었습니다 (%s, %d개, %.1f MB) — TV 에 닿으면 저절로 보냅니다" % (id_, len(job.ops), mb))
+        else:
+            echo("TV 로 작업 보내는 중… (%d개, %.1f MB)" % (len(job.ops), mb))
+            id_ = self.relay().submit(job)
         for f in used:
             try:
                 f.unlink()
@@ -760,7 +884,7 @@ class Api:
             self.recent[sig] = (time.time(), id_)
         self._record(rec)
         mirrored = self._mirror(rec)
-        return {"id": id_, "skipped": skipped, "queued": queued_skip, "mirrored": mirrored}
+        return {"id": id_, "skipped": skipped, "queued": queued_skip, "mirrored": mirrored, "outbox": id_.startswith(outbox.PREFIX)}
 
     def _send_direct(self, d: Any, job: Job, blobs: list[bytes | None]) -> dict[str, Any] | None:
         """직접 연결·블루투스로 작업을 바로 실행. 연결이 중간에 끊기면(첫 작업도 못 함) None → GitHub 로"""
@@ -806,7 +930,10 @@ class Api:
     def _record(self, rec: list[tuple[str, Any]]) -> None:
         """PC 에서 보낸 그대로 백업(tv-backup)에 반영 — 새 TV 를 연결하면 이걸 그대로 올린다"""
         try:
-            tv = self.relay().tv
+            tv = self._cur_tv()
+            idx = tvindex.load(self.root, tv)
+            if idx["files"] or idx["gen"]:                   # 블루투스로 쓰는 TV: 갱신시간 장부에도 바로 (닿지 않아도 화면이 맞게)
+                tvindex.save(self.root, tv, tvindex.apply_local(idx, rec))
             for kind, a in rec:
                 if kind == "put":
                     backup.record_put(self.root, tv, a[0], a[1])
@@ -857,7 +984,7 @@ class Api:
                         continue
                     fd = self.channel_for(f)
                     r = self._send_direct(fd, job, blobs) if fd is not None else None
-                    id_ = r["id"] if r is not None else Relay(cfg.with_tv(f)).submit(job)
+                    id_ = r["id"] if r is not None else (outbox.put(self.root, cfg.key, f, job) if cfg.bt_only else Relay(cfg.with_tv(f)).submit(job))
                     versions.save(self.root, vers, f)
                     for kind, a in frec:
                         if kind == "put":
@@ -923,7 +1050,7 @@ class Api:
         if cfg is None:
             raise ValueError("설정이 없습니다")
         main = g["main"]
-        mr = Relay(cfg.with_tv(main))
+        mr = None if cfg.bt_only else Relay(cfg.with_tv(main))
         md = self.channel_for(main)
         st = None
         if md is not None:
@@ -933,6 +1060,8 @@ class Api:
             except Exception as e:
                 echo("주 TV '%s' 직접 연결 실패 — GitHub 로: %s" % (main, e))
                 self._forget(md); md = None
+        if st is None and mr is None:
+            raise ValueError("주 TV '%s' 에 블루투스로 닿지 않습니다 — TV 가까이에서 다시 하세요" % main)
         if st is None:
             st = mr.state(config.tv_dir(self.root, main) / "state-cache.json")
         if st is None:
@@ -958,6 +1087,8 @@ class Api:
             self.gk["msg"] = "주 TV '%s' 에서 받는 중… %d/%d" % (main, got, len(need))
             if md is not None:
                 r = self._fast_gets(md, groupq)
+            elif mr is None:
+                raise ValueError("주 TV '%s' 에 블루투스로 닿지 않습니다" % main)
             else:
                 job = Job()
                 for p in groupq:
@@ -984,7 +1115,7 @@ class Api:
         main_files = dict(backup.files(self.root, main))
         report: list[str] = []
         for f in g["followers"]:
-            fr = Relay(cfg.with_tv(f))
+            fr = None if cfg.bt_only else Relay(cfg.with_tv(f))
             fd = self.channel_for(f)
             fst = None
             if fd is not None:
@@ -994,10 +1125,10 @@ class Api:
                 except Exception as e:
                     echo("'%s' 직접 연결 실패 — GitHub 로: %s" % (f, e))
                     self._forget(fd); fd = None
-            if fst is None:
+            if fst is None and fr is not None:
                 fst = fr.state(config.tv_dir(self.root, f) / "state-cache.json")
             if fst is None:
-                report.append("%s: 아직 연결되지 않음 — 건너뜀" % f)
+                report.append("%s: %s — 건너뜀" % (f, "블루투스로 닿지 않음" if fr is None else "아직 연결되지 않음"))
                 continue
             ftree = {e["p"]: e for e in fst.get("tree") or []}
             puts, dels = groups.plan(main_files, ftree, g["exclude"], g["deleteExtra"], backup.same_on_tv)
@@ -1017,7 +1148,7 @@ class Api:
                 self.gk["msg"] = "'%s' 로 보내는 중… %d/%d개" % (f, sent, len(items))
                 r = self._send_direct(fd, job, blobs) if fd is not None else None
                 if r is None:
-                    fr.submit(job)
+                    self._submit(job, f)
                 else:
                     fails.extend("%s(%s)" % (x.get("path"), x.get("error")) for x in r["results"] if not x.get("ok"))
                 sent += len(part)
@@ -1027,7 +1158,7 @@ class Api:
                     job.op("delete", path=p)
                     backup.record_delete(self.root, f, p)
                 if fd is None or self._send_direct(fd, job, [None] * len(dels)) is None:
-                    fr.submit(job)
+                    self._submit(job, f)
             versions.save(self.root, vers, f)
             report.append("%s: %d개 보냄%s%s%s" % (f, len(items), (" · %d개 지움" % len(dels)) if dels else "", "" if items or dels else " (이미 같음)",
                                                  (" · 실패 %d개: %s" % (len(fails), ", ".join(fails[:3]))) if fails else ""))
@@ -1089,7 +1220,7 @@ class Api:
             if st.get("none"):
                 raise ValueError("TV 가 연결되지 않았습니다")
             tree = {e["p"]: e for e in st.get("tree") or []}
-            tv = self.relay().tv
+            tv = self._cur_tv()
             backup.record_settings(self.root, tv, st.get("settings") or {})
             for p, e in tree.items():
                 if e.get("d"):
@@ -1100,7 +1231,7 @@ class Api:
                 backup.record_delete(self.root, tv, p)
             total_mb = sum(int(tree[p].get("s") or 0) for p in need) / 1048576
             self.bk.update(total=len(need), msg="백업 파일 넣는 중… TV 에서 %d개(%.1f MB) 받기" % (len(need), total_mb))
-            relay = self.relay()
+            relay = None if self.bt_only() else self.relay()
             group: list[str] = []
             size = 0
             got_mb = 0.0
@@ -1116,6 +1247,8 @@ class Api:
                 self.bk["msg"] = "TV 에서 받는 중… %.1f/%.1f MB · 지금: %s" % (got_mb, total_mb, names)
                 if d is not None:
                     r = self._fast_gets(d, group)
+                elif relay is None:
+                    raise ValueError("TV 에 블루투스로 닿지 않습니다 — TV 가까이에서 다시 누르세요 (받은 것은 남아 있어 이어서 받습니다)")
                 else:
                     job = Job()
                     for p in group:
@@ -1148,7 +1281,7 @@ class Api:
 
     def backup_restore(self, body: dict[str, Any] | None = None) -> dict[str, Any]:
         """고른 TV 의 백업(기본: 지금 TV)을 지금 연결된 TV 로 그대로 올린다 — 파일(같은 것은 건너뜀) · TV 설정 · 직원용 도구(같은 열쇠)"""
-        src = str((body or {}).get("from") or "") or self.relay().tv
+        src = str((body or {}).get("from") or "") or self._cur_tv()
         if not backup.info(self.root, src).get("count") and not backup.meta(self.root, src).get("settings"):
             raise ValueError("'%s' 백업이 비어 있습니다 — 위쪽에서 '%s' 를 고르고 [백업 파일 넣기] 를 먼저 하세요" % (src, src))
 
@@ -1157,7 +1290,7 @@ class Api:
             if st.get("none"):
                 raise ValueError("TV 가 아직 연결되지 않았습니다")
             tree = {e["p"]: e for e in st.get("tree") or []}
-            tv = self.relay().tv
+            tv = self._cur_tv()
             items = [(p, f) for p, f in backup.files(self.root, src) if not backup.same_on_tv(tree, p, f)]
             m = backup.meta(self.root, src)
             data = grants.load(self.root)
@@ -1165,7 +1298,7 @@ class Api:
             parts = list(backup.batches(items))
             total_mb = sum(f.stat().st_size for _, f in items) / 1048576
             self.bk.update(total=len(items), msg="백업 파일 보내는 중… %d개(%.1f MB)" % (len(items), total_mb))
-            relay = self.relay()
+            relay = None if self.bt_only() else self.relay()
             dc = self.channel_for(tv)
             vers = versions.load(self.root, self._cur_tv())
             sent_mb = 0.0
@@ -1182,6 +1315,9 @@ class Api:
                     blobs.append(blob)
                     versions.remember(vers, p, blob)
                 r = self._send_direct(dc, job, blobs) if dc is not None else None
+                if r is None and relay is None:
+                    versions.save(self.root, vers, self._cur_tv())
+                    raise ValueError("TV 에 블루투스로 닿지 않습니다 — TV 가까이에서 다시 누르면 올라간 것은 건너뛰고 이어서 올립니다")
                 if r is None:
                     id_ = relay.submit(job)
                     r = relay.wait(id_, timeout=300 + part_mb * 10)
@@ -1212,8 +1348,10 @@ class Api:
             job.ops.extend(g_ops)
             if job.ops:
                 self.bk["msg"] = "TV 설정 · 직원용 도구 적용 중…"
-                if dc is not None and not g_ops:               # 직원용 도구 등록(grant)은 GitHub 우편함으로만
+                if dc is not None and (not g_ops or getattr(dc, "kind", "") == "bt"):   # 직원용 도구 등록은 블루투스·GitHub 만 (관리 웹은 못 함)
                     self._send_direct(dc, job, [None] * len(job.ops))
+                elif relay is None:
+                    raise ValueError("TV 에 블루투스로 닿지 않습니다 (파일은 모두 올라감) — 다시 누르면 설정만 적용합니다")
                 else:
                     r = relay.wait(relay.submit(job), timeout=600)
                     if r is None:
@@ -1234,6 +1372,8 @@ class Api:
             r = self.direct_results.pop(id_, None)
             if r is None:
                 return {"ok": True, "results": [], "cached": True}
+        elif id_.startswith(outbox.PREFIX):                # 블루투스 전용: 쌓아 둔 작업 (TV 에 닿아 보내면 결과가 생긴다)
+            r = outbox.result(self.root, self._cur_tv(), id_)
         else:
             r = self.relay().result(id_)
         if r is None:
@@ -1246,7 +1386,7 @@ class Api:
                     p = str(item.get("path"))
                     blob = item.pop("data")
                     self._cache_put(p, blob, t=(self.tree.get(p) or {}).get("t"))
-                    backup.record_put(self.root, self.relay().tv, p, blob)   # TV 에서 받은 것도 백업에
+                    backup.record_put(self.root, self._cur_tv(), p, blob)   # TV 에서 받은 것도 백업에
             with self.lock:
                 for p in self.preview_jobs.pop(id_, []):
                     if self.pending_paths.get(p) == id_:
@@ -1331,11 +1471,14 @@ class Api:
         if method == "GET" and path == "/api/result":
             return 200, self.result(one("id"))
         if method == "GET" and path == "/api/pending":
-            return 200, {"ids": self.relay().pending()}
+            return 200, {"ids": outbox.ids(self.root, self._cur_tv()) if self.bt_only() else self.relay().pending()}
         if method == "POST" and path == "/api/cancel":
             if str(body.get("id", "")).startswith("d-"):
                 return 200, {"ok": True}                    # 직접 보낸 작업은 이미 끝났다
-            self.relay().cancel(str(body.get("id", "")))
+            if str(body.get("id", "")).startswith(outbox.PREFIX):
+                outbox.cancel(self.root, self._cur_tv(), str(body.get("id", "")))
+            else:
+                self.relay().cancel(str(body.get("id", "")))
             self._settle_queued(str(body.get("id", "")))
             return 200, {"ok": True}
         if method == "POST" and path == "/api/update":
@@ -1353,7 +1496,9 @@ class Api:
         if method == "POST" and path == "/api/pair":
             cfg = config.load(self.root)
             if cfg is None:
-                raise ValueError("먼저 GitHub 토큰을 저장하세요")
+                raise ValueError("먼저 처음 설정을 하세요")
+            if cfg.bt_only or (body or {}).get("port"):      # GitHub 없이: 블루투스로 연결 코드 짝짓기
+                return 200, self.bt_pair(body or {})
             branch = pair(cfg, str(body.get("code", "")))
             echo("TV 연결 정보를 보냈습니다 — TV 가 가져가기를 기다립니다")
             return 200, {"branch": branch}
@@ -1362,6 +1507,14 @@ class Api:
             return 200, {"done": bool(cfg) and pair_done(cfg, one("branch"))}
         if method == "POST" and path == "/api/preview":
             return 200, self.request_preview(body)
+        if method == "GET" and path == "/api/mode":
+            return 200, self.mode_info()
+        if method == "POST" and path == "/api/mode":
+            return 200, self.mode_save(body or {})
+        if method == "POST" and path == "/api/bt/pair":
+            return 200, self.bt_pair(body or {})
+        if method == "POST" and path == "/api/outbox/flush":
+            return 200, {"sent": self.outbox_tick(), **self.mode_info()}
         if method == "GET" and path == "/api/bt":
             return 200, self.bt_info()
         if method == "POST" and path == "/api/bt":
@@ -1577,9 +1730,17 @@ def serve(root: Path, port: int = 8790, open_browser: bool = True) -> int:
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
 
-    def ticker() -> None:                                   # TV 그룹 주기 맞추기
+    def ticker() -> None:                                   # TV 그룹 주기 맞추기(1분) · 쌓아 둔 블루투스 작업 보내기(30초)
+        n = 0
         while SERVER[0] is srv:
-            time.sleep(60)
+            time.sleep(30)
+            n += 1
+            try:
+                api.outbox_tick()
+            except Exception as e:
+                echo("쌓아 둔 작업 보내기 실패: %s" % e)
+            if n % 2:
+                continue
             try:
                 api.groups_tick()
             except Exception as e:
